@@ -1,0 +1,109 @@
+export type ChainId = "engineers" | "gpu" | "data" | "energy";
+
+export type ProducerId = string;
+
+export interface ProducerDef {
+  id: ProducerId;
+  chain: ChainId;
+  name: string;
+  tierIdx: number;
+  baseCostCapital: number;
+  costMult: number;
+  baseOutputPerSec: number;
+}
+
+export type FundingRoundId =
+  | "seed"
+  | "series_a"
+  | "series_b"
+  | "series_c"
+  | "series_d"
+  | "ipo"
+  | "secondary"
+  | "acquisition"
+  | "sovereign_wealth"
+  | "government_bailout"
+  | "civilizational"
+  | "agi_singularity";
+
+export interface FundingRoundDef {
+  id: FundingRoundId;
+  idx: number;
+  name: string;
+  tokenThresholdLog10: number;
+  equityMult: number;
+  offlineCapHours: number;
+}
+
+// GDD §4 Beat 2: incoming tokens are split across four departments.
+// Fractions must sum to 1.0; we normalize on set.
+export interface Allocation {
+  rd: number;
+  product: number;
+  marketing: number;
+  safety: number;
+}
+
+// ActiveEffect lives here (not in effects.ts) so types.ts stays the schema's
+// single source of truth without circular imports.
+export interface ActiveEffectSerialized {
+  id: string;
+  source: "training_run" | "slack_dm" | "board_memo" | "alignment_debt";
+  label: string;
+  appliedAt: number;
+  expiresAt: number;
+  effect:
+    | { type: "tokens_mult"; value: number }
+    | { type: "chain_supply_mult"; chain: "engineers" | "gpu" | "data" | "energy"; value: number }
+    | { type: "debt_accrual_mult"; value: number }
+    | { type: "capital_mult"; value: number }
+    | { type: "hype_mult"; value: number }
+    | { type: "rp_mult"; value: number };
+}
+
+// Decimal-valued fields are serialized as strings; in-memory we hold Decimal.
+// `Decimal` is imported where needed to avoid circular boundaries.
+export interface RunState {
+  fundingRoundIdx: number;
+  tokens: string;
+  capital: string;
+  hype: string;
+  researchPoints: string;
+  allocation: Allocation;
+  producersOwned: Record<ProducerId, number>;
+  /** Temporary multipliers active for this run. Pruned on tick. */
+  activeEffects: ActiveEffectSerialized[];
+  /** Training-run pity counter — resets to 0 on Breakthrough. */
+  trainingPity: number;
+}
+
+export interface PersistentState {
+  equity: string;
+  totalPrestiges: number;
+  // GDD §5: Alignment Debt persists across prestige. Players can't IPO away
+  // their accumulated safety neglect — the key thematic choice.
+  alignmentDebt: string;
+  // GDD §5: Research-tree nodes unlocked with Equity. Persists across prestige.
+  // Order doesn't matter; the aggregator treats it as a set.
+  unlockedResearch: string[];
+  // GDD §9: Each debt-threshold event fires once per save, ever. Even if the
+  // player pays debt back down below the threshold, the event doesn't re-fire.
+  // The bell can't be unrung.
+  firedDebtThresholds: number[];
+}
+
+export interface AccountState {
+  anonUid: string;
+  createdAt: number;
+  lastPlayAt: number;
+  onboardingStep: number;
+}
+
+export const SCHEMA_VERSION = 5 as const;
+
+export interface SaveBlob {
+  schemaVersion: typeof SCHEMA_VERSION;
+  run: RunState;
+  persistent: PersistentState;
+  account: AccountState;
+}

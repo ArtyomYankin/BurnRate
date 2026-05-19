@@ -1,0 +1,131 @@
+import { describe, expect, it } from "vitest";
+import { D } from "../decimal";
+import {
+  allChainSupplies,
+  debtRatePerSec,
+  freshRunState,
+  tickRun,
+  tokensPerSec,
+} from "../math";
+import {
+  aggregateResearchEffects,
+  nodeCost,
+  RESEARCH_BY_ID,
+} from "../research";
+import { PersistentState, RunState } from "../types";
+
+const balanced1 = (): RunState => ({
+  ...freshRunState(),
+  producersOwned: { intern: 1, single_h100: 1, common_crawl: 1, office_grid: 1 },
+});
+
+const freshPersistent = (overrides: Partial<PersistentState> = {}): PersistentState => ({
+  equity: D(0).toString(),
+  totalPrestiges: 0,
+  alignmentDebt: D(0).toString(),
+  unlockedResearch: [],
+  firedDebtThresholds: [],
+  ...overrides,
+});
+
+describe("node cost formula (GDD §8)", () => {
+  it("5 × 3^tier", () => {
+    expect(nodeCost(1)).toBe(15);
+    expect(nodeCost(2)).toBe(45);
+    expect(nodeCost(3)).toBe(135);
+    expect(nodeCost(4)).toBe(405);
+    expect(nodeCost(5)).toBe(1215);
+  });
+});
+
+describe("aggregateResearchEffects", () => {
+  it("empty list ⇒ identity (×1 everywhere)", () => {
+    const e = aggregateResearchEffects([]);
+    expect(e.tokensMult).toBe(1);
+    expect(e.chainSupplyMult.gpu).toBe(1);
+    expect(e.chainSupplyMult.data).toBe(1);
+    expect(e.chainSupplyMult.engineers).toBe(1);
+    expect(e.chainSupplyMult.energy).toBe(1);
+    expect(e.debtAccrualMult).toBe(1);
+    expect(e.capitalMult).toBe(1);
+  });
+
+  it("Better LLM kernel applies +25% tokens", () => {
+    const e = aggregateResearchEffects(["rd_kernel"]);
+    expect(e.tokensMult).toBeCloseTo(1.25, 9);
+  });
+
+  it("two R&D nodes stack multiplicatively (1.25 × 1.20 = 1.50)", () => {
+    const e = aggregateResearchEffects(["rd_kernel", "rd_specdecode"]);
+    expect(e.tokensMult).toBeCloseTo(1.5, 9);
+  });
+
+  it("FP8 + NVLink stack on GPU chain (1.25 × 1.50 = 1.875)", () => {
+    const e = aggregateResearchEffects(["compute_fp8", "compute_nvlink"]);
+    expect(e.chainSupplyMult.gpu).toBeCloseTo(1.875, 9);
+    expect(e.chainSupplyMult.data).toBe(1);
+  });
+
+  it("two safety nodes stack downward for debt accrual (0.75 × 0.50)", () => {
+    const e = aggregateResearchEffects(["safety_const", "safety_redteam"]);
+    expect(e.debtAccrualMult).toBeCloseTo(0.375, 9);
+  });
+
+  it("unknown node IDs are ignored", () => {
+    const e = aggregateResearchEffects(["bogus_id", "rd_kernel"]);
+    expect(e.tokensMult).toBeCloseTo(1.25, 9);
+  });
+});
+
+describe("research effects applied at the math layer", () => {
+  it("tokensPerSec scales by the aggregated tokensMult", () => {
+    const s = balanced1();
+    const base = tokensPerSec(s).toNumber();
+    const boosted = tokensPerSec(s, aggregateResearchEffects(["rd_kernel"])).toNumber();
+    expect(boosted).toBeCloseTo(base * 1.25, 9);
+  });
+
+  it("chainSupply for GPU includes the chain_supply_mult", () => {
+    const s = { ...balanced1(), producersOwned: { single_h100: 1 } };
+    const effects = aggregateResearchEffects(["compute_fp8"]);
+    const supplies = allChainSupplies(s, effects);
+    // Base GPU = 0.30, ×1.25 = 0.375
+    expect(supplies.gpu.toNumber()).toBeCloseTo(0.375, 9);
+  });
+
+  it("debtRatePerSec reduces accrual by safety research multiplier", () => {
+    const baseRate = debtRatePerSec(0); // max accrual
+    const effects = aggregateResearchEffects(["safety_const"]);
+    const reducedRate = debtRatePerSec(0, effects);
+    expect(reducedRate).toBeCloseTo(baseRate * 0.75, 9);
+  });
+
+  it("debtRatePerSec leaves pay-down unaffected by safety research", () => {
+    const baseRate = debtRatePerSec(1.0); // surplus, pay-down
+    const effects = aggregateResearchEffects(["safety_const", "safety_redteam"]);
+    const withResearch = debtRatePerSec(1.0, effects);
+    expect(withResearch).toBeCloseTo(baseRate, 9);
+  });
+
+  it("tickRun multiplies Capital by capitalMult", () => {
+    const s = balanced1();
+    const r1 = tickRun(s, freshPersistent(), 60);
+    const r2 = tickRun(s, freshPersistent(), 60, aggregateResearchEffects(["cap_booking"]));
+    // Capital should be 1.20× higher with cap_booking owned.
+    expect(D(r2.run.capital).toNumber()).toBeCloseTo(D(r1.run.capital).toNumber() * 1.20, 6);
+  });
+});
+
+describe("node data sanity", () => {
+  it("every node has at least one effect", () => {
+    for (const node of Object.values(RESEARCH_BY_ID)) {
+      expect(node.effects.length).toBeGreaterThan(0);
+    }
+  });
+  it("every node's tier is 1-5", () => {
+    for (const node of Object.values(RESEARCH_BY_ID)) {
+      expect(node.tier).toBeGreaterThanOrEqual(1);
+      expect(node.tier).toBeLessThanOrEqual(5);
+    }
+  });
+});
