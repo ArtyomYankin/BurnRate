@@ -25,6 +25,9 @@ const freshPersistent = (overrides: Partial<PersistentState> = {}): PersistentSt
   alignmentDebt: D(0).toString(),
   unlockedResearch: [],
   firedDebtThresholds: [],
+  unlockedVignettes: [],
+  unreadVignettes: [],
+  resolvedVignettes: {},
   ...overrides,
 });
 
@@ -108,7 +111,10 @@ describe("research effects applied at the math layer", () => {
   });
 
   it("tickRun multiplies Capital by capitalMult", () => {
-    const s = balanced1();
+    // Zero out the starter capital so we compare *earned* capital cleanly —
+    // freshRunState now seeds STARTER_CAPITAL, which would otherwise offset
+    // both runs equally and break the 1.20× ratio.
+    const s = { ...balanced1(), capital: "0" };
     const r1 = tickRun(s, freshPersistent(), 60);
     const r2 = tickRun(s, freshPersistent(), 60, aggregateResearchEffects(["cap_booking"]));
     // Capital should be 1.20× higher with cap_booking owned.

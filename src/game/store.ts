@@ -27,7 +27,8 @@ import {
   trainingRunCost,
 } from "../core/trainingRun";
 import { freshSave } from "../core/save";
-import { M0_LAST_ROUND_IDX } from "../core/rounds";
+import { getRound, LAST_ROUND_IDX } from "../core/rounds";
+import { getVignette, pendingUnlocks, UnlockContext } from "../core/vignettes";
 import {
   AccountState,
   Allocation,
@@ -63,7 +64,53 @@ interface GameState {
   prestige(): { awarded: string } | null;
   setAllocation(a: Allocation): void;
   setOnboardingStep(step: number): void;
+  /** GDD §5 narrative spine: unlock a vignette by id. Idempotent — duplicate
+   *  calls are silently dropped. Newly unlocked vignettes also land in the
+   *  unread queue (drains via markVignetteRead). */
+  unlockVignette(id: string): void;
+  /** Drop an id from unreadVignettes. unlockedVignettes is untouched. */
+  markVignetteRead(id: string): void;
+  /** GDD §4 Beat 3: pick a reply on a Slack DM. Applies the corresponding
+   *  replyEffects[replyIdx] to run.activeEffects for ~1h (or the vignette's
+   *  custom duration) and locks the choice so re-opening can't farm it.
+   *  Returns true if the resolution was newly applied, false if no-op
+   *  (already resolved, missing vignette, no effects, or bad index). */
+  resolveVignette(id: string, replyIdx: number): boolean;
   toSaveBlob(): SaveBlob;
+}
+
+// GDD §5: trigger loop. Evaluate every vignette's unlock condition against
+// current state and push any newly-qualifying vignettes into the unlocked
+// queue. Walks ~15 entries × cheap predicates → safe to call every tick.
+// Extracted so tick() and applyOfflineCatchup() can both call it without
+// duplicating the context construction.
+function processVignetteUnlocks(
+  run: RunState,
+  persistent: PersistentState,
+): PersistentState {
+  const totalProducersOwned = Object.values(run.producersOwned).reduce(
+    (acc, n) => acc + n,
+    0,
+  );
+  const nextRound = getRound(run.fundingRoundIdx + 1);
+  const ctx: UnlockContext = {
+    fundingRoundIdx: run.fundingRoundIdx,
+    totalPrestiges: persistent.totalPrestiges,
+    tokens: D(run.tokens),
+    nextRoundThreshold: D(10).pow(nextRound.tokenThresholdLog10),
+    totalProducersOwned,
+    alignmentDebt: D(persistent.alignmentDebt),
+    firedDebtThresholds: persistent.firedDebtThresholds,
+  };
+  const pending = pendingUnlocks(ctx, persistent.unlockedVignettes);
+  if (pending.length === 0) return persistent;
+  // Preserve insertion order — first unlocked stays first. Unread queue is
+  // append-only here; UI drains it as the player reads.
+  return {
+    ...persistent,
+    unlockedVignettes: [...persistent.unlockedVignettes, ...pending],
+    unreadVignettes: [...persistent.unreadVignettes, ...pending],
+  };
 }
 
 export const useGame = create<GameState>((set, get) => ({
@@ -95,9 +142,14 @@ export const useGame = create<GameState>((set, get) => ({
     }
     const run = didBoost ? { ...save.run, producersOwned: boosted } : save.run;
 
+    // Run the vignette trigger once on hydrate so a fresh save with
+    // boosted starters can immediately surface "first_hire" if appropriate,
+    // and so a migrated v5 save (which has empty vignette arrays) backfills
+    // anything the player already qualified for.
+    const persistent = processVignetteUnlocks(run, save.persistent);
     set({
       run,
-      persistent: save.persistent,
+      persistent,
       account: save.account,
       lastTickAt: save.account.lastPlayAt || now,
       hydrated: true,
@@ -114,9 +166,12 @@ export const useGame = create<GameState>((set, get) => ({
     }
     const effects = aggregateResearchEffects(s.persistent.unlockedResearch);
     const r = tickRun(s.run, s.persistent, dt, effects, now);
+    // Vignettes re-checked AFTER the tick so token gains + new debt thresholds
+    // from this catch-up window can trigger their conditions in one pass.
+    const persistent = processVignetteUnlocks(r.run, r.persistent);
     set({
       run: r.run,
-      persistent: r.persistent,
+      persistent,
       lastTickAt: now,
       pendingDebtEvents:
         r.firedThresholds.length === 0
@@ -132,9 +187,10 @@ export const useGame = create<GameState>((set, get) => ({
     if (dt <= 0) return;
     const effects = aggregateResearchEffects(s.persistent.unlockedResearch);
     const r = tickRun(s.run, s.persistent, dt, effects, now);
+    const persistent = processVignetteUnlocks(r.run, r.persistent);
     set({
       run: r.run,
-      persistent: r.persistent,
+      persistent,
       lastTickAt: now,
       pendingDebtEvents:
         r.firedThresholds.length === 0
@@ -146,7 +202,12 @@ export const useGame = create<GameState>((set, get) => ({
   buyProducer(producerId, count = 1) {
     const s = get();
     const r = buyProducerCore(s.run, producerId, count);
-    if (r.bought > 0) set({ run: r.run });
+    if (r.bought > 0) {
+      // Immediate vignette check — "first_hire" should fire on the SAME tap
+      // that crosses the starter floor, not on the next 1s tick.
+      const persistent = processVignetteUnlocks(r.run, s.persistent);
+      set({ run: r.run, persistent });
+    }
     return { bought: r.bought };
   },
 
@@ -201,7 +262,7 @@ export const useGame = create<GameState>((set, get) => ({
     if (!canPrestige(s.run)) return null;
     const awarded = equityFromPrestige(s.run);
     const nextEquity = D(s.persistent.equity).add(awarded);
-    const nextRoundIdx = Math.min(s.run.fundingRoundIdx + 1, M0_LAST_ROUND_IDX + 1);
+    const nextRoundIdx = Math.min(s.run.fundingRoundIdx + 1, LAST_ROUND_IDX);
     const fresh = freshRunState();
     set({
       // Carry allocation through prestige — re-picking it every round would
@@ -229,6 +290,73 @@ export const useGame = create<GameState>((set, get) => ({
     set((s) => ({ account: { ...s.account, onboardingStep: step } }));
   },
 
+  unlockVignette(id) {
+    const s = get();
+    // Idempotent: a vignette can only enter the unlocked queue once. The
+    // unread flag re-fires if and only if the player has actually read it
+    // (markVignetteRead removed it) — re-unlocking won't ring the badge
+    // again, by design.
+    if (s.persistent.unlockedVignettes.includes(id)) return;
+    set({
+      persistent: {
+        ...s.persistent,
+        unlockedVignettes: [...s.persistent.unlockedVignettes, id],
+        unreadVignettes: [...s.persistent.unreadVignettes, id],
+      },
+    });
+  },
+
+  markVignetteRead(id) {
+    const s = get();
+    if (!s.persistent.unreadVignettes.includes(id)) return;
+    set({
+      persistent: {
+        ...s.persistent,
+        unreadVignettes: s.persistent.unreadVignettes.filter((x) => x !== id),
+      },
+    });
+  },
+
+  resolveVignette(id, replyIdx) {
+    const s = get();
+    // Guard rails — every "false" branch is a real user path the UI shouldn't
+    // crash on, plus a save-corruption guard (vignette removed in a later build).
+    if (id in s.persistent.resolvedVignettes) return false;
+    const v = getVignette(id);
+    if (!v) return false;
+    const tmpl = v.replyEffects?.[replyIdx];
+    if (!tmpl) return false;
+
+    const now = Date.now();
+    const durationSec = tmpl.durationSec ?? 3600; // GDD §4 Beat 3: ~1h default
+    const newEffect = {
+      // Reasonably-unique id: vignette + reply + timestamp. We never need
+      // two effects from the same reply pick (one-shot resolution), so the
+      // timestamp is enough collision-avoidance.
+      id: `vig:${id}:${replyIdx}:${now}`,
+      source: "slack_dm" as const,
+      label: tmpl.label,
+      appliedAt: now,
+      expiresAt: durationSec > 0 ? now + durationSec * 1000 : now, // 0 = instant expire (no-op buff)
+      effect: tmpl.effect,
+    };
+
+    set({
+      run: {
+        ...s.run,
+        activeEffects:
+          durationSec > 0
+            ? [...s.run.activeEffects, newEffect]
+            : s.run.activeEffects,
+      },
+      persistent: {
+        ...s.persistent,
+        resolvedVignettes: { ...s.persistent.resolvedVignettes, [id]: replyIdx },
+      },
+    });
+    return true;
+  },
+
   toSaveBlob() {
     const s = get();
     return {
@@ -253,6 +381,10 @@ export const selectAllocation = (s: GameState) => s.run.allocation;
 export const selectFundingRoundIdx = (s: GameState) => s.run.fundingRoundIdx;
 export const selectProducersOwned = (s: GameState) => s.run.producersOwned;
 export const selectUnlockedResearch = (s: GameState) => s.persistent.unlockedResearch;
+export const selectUnlockedVignettes = (s: GameState) => s.persistent.unlockedVignettes;
+export const selectUnreadVignettes = (s: GameState) => s.persistent.unreadVignettes;
+export const selectUnreadVignetteCount = (s: GameState) => s.persistent.unreadVignettes.length;
+export const selectResolvedVignettes = (s: GameState) => s.persistent.resolvedVignettes;
 export const selectActiveEffects = (s: GameState) => s.run.activeEffects;
 export const selectTrainingPity = (s: GameState) => s.run.trainingPity;
 export const selectPendingDebtEvents = (s: GameState) => s.pendingDebtEvents;

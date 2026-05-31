@@ -1,36 +1,92 @@
-import { LinearGradient } from "expo-linear-gradient";
-import React, { useEffect, useRef, useState } from "react";
-import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
-import { D } from "../core/decimal";
+import React, { useState } from "react";
 import {
+  Animated,
+  Easing,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { D, Decimal } from "../core/decimal";
+import {
+  autonomousAgentMult,
   bottleneckChain,
   nextProducerCost,
   upgradeMultiplier,
   upgradeTier,
 } from "../core/math";
-import { CHAINS, producersForChain } from "../core/producers";
+import {
+  AUTONOMOUS_AGENT,
+  CHAINS,
+  producersForChain,
+  unlockRoundForTier,
+} from "../core/producers";
+import { getRound } from "../core/rounds";
 import { ChainId, ProducerDef } from "../core/types";
-import { selectCapitalStr, selectProducersOwned, useGame } from "../game/store";
-import { FloatUp } from "./FloatUp";
+import {
+  selectCapitalStr,
+  selectFundingRoundIdx,
+  selectProducersOwned,
+  tokensPerSec,
+  useGame,
+} from "../game/store";
 import { formatNumber, formatRate } from "./formatNumber";
-import { CHAIN_COLOR, CHAIN_ICON } from "./icons";
-import { ParticleBurst } from "./ParticleBurst";
-import { Pressy } from "./Pressy";
-import { colors, gradient, radii, shadow, spacing, type } from "./theme";
+import { colors, fonts, PIXEL, spacing } from "./theme";
 
 interface Props {
   onBack(): void;
   defaultChain?: ChainId;
 }
 
+// Each chain's display label + accent color + tab abbrev. Color choices mirror
+// the Claude Design mock (sage / terracotta / gold / tension-red).
+const CHAIN_META: Record<ChainId, { label: string; sub: string; color: string; tab: string }> = {
+  engineers: {
+    label: "ENGINEERS",
+    sub: "Headcount · √-scaled supply",
+    color: colors.sage,
+    tab: "ENGI",
+  },
+  gpu: {
+    label: "GPU COMPUTE",
+    sub: "Runs the models · min(supply)",
+    color: colors.terracotta,
+    tab: "GPU",
+  },
+  data: {
+    label: "DATA",
+    sub: "Training corpus · min(supply)",
+    color: colors.gold,
+    tab: "DATA",
+  },
+  energy: {
+    label: "ENERGY",
+    sub: "Powers the GPUs · min(supply)",
+    color: colors.tensionRed,
+    tab: "ENER",
+  },
+};
+
 export function ProducersScreen({ onBack, defaultChain }: Props) {
   const capitalStr = useGame(selectCapitalStr);
   const owned = useGame(selectProducersOwned);
+  const fundingRoundIdx = useGame(selectFundingRoundIdx);
   const buy = useGame((s) => s.buyProducer);
   const capital = D(capitalStr);
-  const [activeChain, setActiveChain] = useState<ChainId>(defaultChain ?? "engineers");
-  const bottleneck = bottleneckChain({
-    fundingRoundIdx: 0,
+
+  const [activeChain, setActiveChain] = useState<ChainId | "agent">(
+    defaultChain ?? "engineers"
+  );
+  const agentUnlocked = fundingRoundIdx >= AUTONOMOUS_AGENT.unlockRoundIdx;
+  const isAgent = activeChain === "agent";
+  // Falls back to engineers' meta when the agent tab is active — only ever read
+  // inside the chain-mode branch, but keeps `meta` non-null for the header.
+  const meta = isAgent ? CHAIN_META.engineers : CHAIN_META[activeChain];
+
+  // Live chain supply for the footer (+X/s).
+  const runForCalc = {
+    fundingRoundIdx,
     tokens: "0",
     capital: capitalStr,
     hype: "0",
@@ -39,235 +95,665 @@ export function ProducersScreen({ onBack, defaultChain }: Props) {
     producersOwned: owned,
     activeEffects: [],
     trainingPity: 0,
-  });
+  };
+  const totalTps = tokensPerSec(runForCalc);
+  const bottleneck = bottleneckChain(runForCalc);
 
-  const tiers = producersForChain(activeChain);
+  // Autonomous Agent (AGI arc) — a global tokens/sec flywheel, not a chain.
+  const agentOwned = owned[AUTONOMOUS_AGENT.id] ?? 0;
+  const agentMult = autonomousAgentMult(runForCalc);
+  const agentCost = nextProducerCost(AUTONOMOUS_AGENT, agentOwned);
+  const agentAffordable = capital.gte(agentCost);
+
+  const tiers = activeChain === "agent" ? [] : producersForChain(activeChain);
+  // Identify the lowest tier whose unlock round equals the current round.
+  // That tier gets the "NEW" pulse — matches design intent ("next unlocked").
+  const newTierIdx = tiers.find((t) => unlockRoundForTier(t.tierIdx) === fundingRoundIdx)?.tierIdx;
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Pressable onPress={onBack} hitSlop={12}>
-          <Text style={styles.back}>← back</Text>
-        </Pressable>
-        <Text style={type.caption}>Capital: ${formatNumber(capital)}</Text>
-      </View>
+    <View style={styles.shell}>
+      <ScreenHeader
+        title="PRODUCERS"
+        sub="Buy supply for each production chain"
+        onBack={onBack}
+        right={<CapitalChip capital={capital} />}
+      />
 
-      <View style={styles.tabs}>
+      {/* Chain tabs — 4 buttons side-by-side, active gets full color fill */}
+      <View style={styles.tabsRow}>
         {CHAINS.map((c) => {
-          const isActive = c.id === activeChain;
-          const isLimiting = c.id === bottleneck;
-          const Icon = CHAIN_ICON[c.id];
-          const tabColor = isActive ? colors.ink : colors.muted;
+          const m = CHAIN_META[c.id];
+          const active = c.id === activeChain;
+          const isBottleneck = c.id === bottleneck;
           return (
-            <Pressy
+            // Plain Pressable here — Pressy's Animated.View wrapper swallows
+            // flex:1 on iOS, leaving each tab at min-content width. With
+            // Pressable we get reliable flex distribution across the row.
+            <Pressable
               key={c.id}
               onPress={() => setActiveChain(c.id)}
-              style={[styles.tab, isActive && styles.tabActive]}
+              style={[
+                styles.tab,
+                {
+                  flex: 1,
+                  minWidth: 0,
+                  backgroundColor: active ? m.color : colors.cream_2,
+                },
+              ]}
             >
-              <Icon size={14} color={tabColor} strokeWidth={2.25} />
-              <Text style={[styles.tabText, isActive && styles.tabTextActive]}>
-                {c.name}
-              </Text>
-              {isLimiting && <View style={styles.bottleneckDot} />}
-            </Pressy>
+              <View style={styles.tabInner}>
+                <Text
+                  style={[
+                    styles.tabLabel,
+                    { color: active ? colors.cream_hi : colors.ink },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {m.tab}
+                </Text>
+                {isBottleneck && (
+                  <View style={[styles.bottleneckDot, { backgroundColor: active ? colors.cream_hi : colors.tensionRed }]} />
+                )}
+              </View>
+            </Pressable>
           );
         })}
+        {agentUnlocked && (
+          <Pressable
+            onPress={() => setActiveChain("agent")}
+            style={[
+              styles.tab,
+              {
+                flex: 1,
+                minWidth: 0,
+                backgroundColor: isAgent ? colors.tension_2 : colors.cream_2,
+              },
+            ]}
+          >
+            <View style={styles.tabInner}>
+              <Text
+                style={[
+                  styles.tabLabel,
+                  { color: isAgent ? colors.cream_hi : colors.ink },
+                ]}
+                numberOfLines={1}
+              >
+                AGI
+              </Text>
+            </View>
+          </Pressable>
+        )}
       </View>
 
-      <FlatList
-        data={tiers}
-        keyExtractor={(p) => p.id}
-        contentContainerStyle={{ gap: spacing.s, paddingBottom: spacing.xxl }}
-        renderItem={({ item }) => (
-          <ProducerCard
-            def={item}
-            ownedCount={owned[item.id] ?? 0}
-            capital={capital}
-            onBuy={() => buy(item.id, 1)}
-          />
-        )}
-      />
+      {isAgent ? (
+        <>
+          {/* Agent header */}
+          <View style={styles.chainHeader}>
+            <View style={[styles.chainSwatch, { backgroundColor: colors.tension_2 }]} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.chainLabel, { color: colors.tension_2 }]}>
+                AUTONOMOUS AGENT
+              </Text>
+              <Text style={styles.chainSub}>
+                Self-improving AI · ×{AUTONOMOUS_AGENT.multPerUnit.toFixed(2)} tokens/s each
+              </Text>
+            </View>
+          </View>
+
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={styles.list}
+            showsVerticalScrollIndicator={false}
+          >
+            <AgentCard
+              owned={agentOwned}
+              mult={agentMult}
+              cost={agentCost}
+              affordable={agentAffordable}
+              onBuy={() => buy(AUTONOMOUS_AGENT.id, 1)}
+            />
+          </ScrollView>
+
+          {/* Global multiplier footer */}
+          <View style={styles.footer}>
+            <Text style={styles.footerLabel}>GLOBAL MULTIPLIER</Text>
+            <Text style={[styles.footerValue, { color: colors.tension_2 }]}>
+              ×{formatNumber(agentMult)}
+            </Text>
+          </View>
+        </>
+      ) : (
+        <>
+          {/* Chain header — name + sub */}
+          <View style={styles.chainHeader}>
+            <View style={[styles.chainSwatch, { backgroundColor: meta.color }]} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.chainLabel, { color: meta.color }]}>{meta.label}</Text>
+              <Text style={styles.chainSub}>{meta.sub}</Text>
+            </View>
+          </View>
+
+          {/* Tier list */}
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={styles.list}
+            showsVerticalScrollIndicator={false}
+          >
+            {tiers.map((tier) => (
+              <ProducerCard
+                key={tier.id}
+                def={tier}
+                ownedCount={owned[tier.id] ?? 0}
+                capital={capital}
+                currentRound={fundingRoundIdx}
+                color={meta.color}
+                fresh={tier.tierIdx === newTierIdx}
+                onBuy={() => buy(tier.id, 1)}
+              />
+            ))}
+          </ScrollView>
+
+          {/* Total chain supply footer */}
+          <View style={styles.footer}>
+            <Text style={styles.footerLabel}>CHAIN OUTPUT</Text>
+            <Text style={[styles.footerValue, { color: meta.color }]}>
+              +{formatRate(totalTps)}
+            </Text>
+          </View>
+        </>
+      )}
     </View>
   );
 }
 
-// Indexed by current upgradeTier (0..3). The tier-3 entries are null because
-// there's no further upgrade beyond ×64.
-const UPGRADE_NEXT_THRESHOLD: readonly (number | null)[] = [10, 50, 100, null];
-const UPGRADE_NEXT_LABEL: readonly (string | null)[] = ["×2", "×8", "×64", null];
-
-function ProducerCard({
-  def,
-  ownedCount,
-  capital,
+// ─── AgentCard ───────────────────────────────────────────────────────────
+function AgentCard({
+  owned,
+  mult,
+  cost,
+  affordable,
   onBuy,
 }: {
-  def: ProducerDef;
-  ownedCount: number;
-  capital: ReturnType<typeof D>;
+  owned: number;
+  mult: Decimal;
+  cost: Decimal;
+  affordable: boolean;
   onBuy(): void;
 }) {
-  const cost = nextProducerCost(def, ownedCount);
-  const affordable = capital.gte(cost);
-  const upMult = upgradeMultiplier(ownedCount);
-  const tier = upgradeTier(ownedCount);
-  const effectiveRatePerOne = def.baseOutputPerSec * upMult;
-  const yourRate = D(effectiveRatePerOne).mul(ownedCount);
-  const nextThreshold = UPGRADE_NEXT_THRESHOLD[tier];
-  const nextLabel = UPGRADE_NEXT_LABEL[tier];
-
-  // Trigger counters: bump on buy and on upgrade-tier crossing.
-  const [buyPop, setBuyPop] = useState(0);
-  const [tierPop, setTierPop] = useState(0);
-  const lastTier = useRef(tier);
-  useEffect(() => {
-    if (tier > lastTier.current) setTierPop((n) => n + 1);
-    lastTier.current = tier;
-  }, [tier]);
-
-  const Icon = CHAIN_ICON[def.chain];
-  const chainColor = CHAIN_COLOR[def.chain];
-
   return (
     <View
       style={[
         styles.card,
-        { borderLeftColor: chainColor },
-        !affordable && styles.cardDisabled,
+        {
+          backgroundColor: colors.cream_hi,
+          borderColor: colors.ink,
+          shadowColor: colors.ink,
+        },
       ]}
     >
-      <View style={styles.iconBubble}>
-        <Icon size={20} color={chainColor} strokeWidth={2.25} />
-      </View>
-      <View style={styles.cardLeft}>
-        <View style={styles.titleRow}>
-          <Text style={type.h2}>{def.name}</Text>
-          {upMult > 1 && (
-            <View style={styles.upgradeBadge}>
-              <Text style={styles.upgradeBadgeText}>×{upMult}</Text>
-            </View>
-          )}
-        </View>
-        <Text style={type.caption}>
-          {formatRate(D(effectiveRatePerOne))} each · owned {ownedCount}
-          {ownedCount > 0 ? ` · ${formatRate(yourRate)}` : ""}
-        </Text>
-        {nextThreshold && nextLabel && (
-          <Text style={[type.caption, { color: colors.gold }]}>
-            {nextThreshold - ownedCount} more → {nextLabel} unlock
+      <View style={[styles.cardSwatch, { backgroundColor: colors.tension_2 }]} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <View style={styles.cardTitleRow}>
+          <Text style={[styles.cardTitle, { color: colors.ink }]} numberOfLines={1}>
+            {AUTONOMOUS_AGENT.name}
           </Text>
-        )}
-        {/* The +rate pop floats out of the title area on buy. */}
-        <FloatUp trigger={buyPop} label={`+${formatRate(D(effectiveRatePerOne))}`} color={chainColor} />
-        <FloatUp trigger={tierPop} label={`${nextLabel ?? "×?"} unlocked!`} color={colors.gold} scatter={false} />
-        <ParticleBurst trigger={tierPop} count={18} palette={[colors.gold, "#E8C25F", colors.cream]} />
+          <View style={[styles.upgradeBadge, { backgroundColor: colors.tension_hi }]}>
+            <Text style={[styles.upgradeBadgeText, { color: colors.cream_hi }]}>
+              ×{formatNumber(mult)}
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.cardMeta} numberOfLines={1}>
+          OWNED · {owned} · ×{AUTONOMOUS_AGENT.multPerUnit.toFixed(2)} GLOBAL EACH
+        </Text>
+        <Text style={styles.upgradeHint} numberOfLines={2}>
+          Each agent compounds total tokens/s. The flywheel of recursive self-improvement.
+        </Text>
       </View>
-      <Pressy
-        style={[styles.buyBtn, !affordable && styles.buyBtnDisabled]}
+      <Pressable
         onPress={() => {
           if (!affordable) return;
           onBuy();
-          setBuyPop((n) => n + 1);
         }}
         disabled={!affordable}
+        style={[
+          styles.buyBtn,
+          { backgroundColor: affordable ? colors.tension_2 : colors.disabled },
+        ]}
       >
-        {affordable && (
-          <LinearGradient
-            colors={gradient.terracotta}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0, y: 1 }}
-            style={StyleSheet.absoluteFill}
-          />
+        <Text style={styles.buyText}>${formatNumber(cost)}</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+// ─── ProducerCard ────────────────────────────────────────────────────────
+function ProducerCard({
+  def,
+  ownedCount,
+  capital,
+  currentRound,
+  color,
+  fresh,
+  onBuy,
+}: {
+  def: ProducerDef;
+  ownedCount: number;
+  capital: Decimal;
+  currentRound: number;
+  color: string;
+  fresh: boolean;
+  onBuy(): void;
+}) {
+  const unlockRound = unlockRoundForTier(def.tierIdx);
+  const locked = currentRound < unlockRound;
+
+  const cost = nextProducerCost(def, ownedCount);
+  const affordable = !locked && capital.gte(cost);
+  const upMult = upgradeMultiplier(ownedCount);
+  const tier = upgradeTier(ownedCount);
+  const effectiveRate = D(def.baseOutputPerSec * upMult);
+  const nextThreshold = UPGRADE_NEXT_THRESHOLD[tier];
+  const nextLabel = UPGRADE_NEXT_LABEL[tier];
+
+  // NEW-tier pulse — slow 1.6s opacity sine so it draws the eye without
+  // shouting. Matches the design's `slackPulse` keyframe (kept simple).
+  const pulse = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    if (!fresh) return;
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 800, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 800, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ])
+    );
+    anim.start();
+    return () => anim.stop();
+  }, [fresh, pulse]);
+
+  return (
+    <Animated.View
+      style={[
+        styles.cardWrap,
+        fresh && {
+          opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 0.7] }),
+        },
+      ]}
+    >
+      <View
+        style={[
+          styles.card,
+          {
+            backgroundColor: locked ? colors.cream_2 : colors.cream_hi,
+            borderColor: locked ? colors.cream_4 : colors.ink,
+            shadowColor: locked ? colors.cream_4 : colors.ink,
+            opacity: locked ? 0.6 : 1,
+          },
+        ]}
+      >
+        {/* Chain-color swatch on left, doubles as "category" stripe */}
+        <View style={[styles.cardSwatch, { backgroundColor: locked ? colors.muted : color }]} />
+
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <View style={styles.cardTitleRow}>
+            <Text style={[styles.cardTitle, { color: locked ? colors.muted : colors.ink }]} numberOfLines={1}>
+              {def.name}
+            </Text>
+            {upMult > 1 && (
+              <View style={styles.upgradeBadge}>
+                <Text style={styles.upgradeBadgeText}>×{upMult}</Text>
+              </View>
+            )}
+            {fresh && !locked && (
+              <Text style={styles.newBadge}>NEW</Text>
+            )}
+          </View>
+          <Text style={styles.cardMeta} numberOfLines={1}>
+            OWNED · {ownedCount} · OUT {formatRate(effectiveRate)}
+          </Text>
+          {!locked && nextThreshold !== null && nextLabel !== null && (
+            <Text style={styles.upgradeHint} numberOfLines={1}>
+              {nextThreshold - ownedCount} → {nextLabel} multiplier
+            </Text>
+          )}
+        </View>
+
+        {/* Right: buy button OR lock badge */}
+        {locked ? (
+          <View style={styles.lockBadge}>
+            <Text style={styles.lockBadgeText}>
+              🔒 {getRound(unlockRound).name.replace("Series ", "S")}
+            </Text>
+          </View>
+        ) : (
+          <Pressable
+            onPress={() => {
+              if (!affordable) return;
+              onBuy();
+            }}
+            disabled={!affordable}
+            style={[
+              styles.buyBtn,
+              { backgroundColor: affordable ? color : colors.disabled },
+            ]}
+          >
+            <Text style={styles.buyText}>${formatNumber(cost)}</Text>
+          </Pressable>
         )}
-        <Text style={[styles.buyText, !affordable && styles.buyTextDisabled]}>
-          ${formatNumber(cost)}
+      </View>
+    </Animated.View>
+  );
+}
+
+const UPGRADE_NEXT_THRESHOLD: readonly (number | null)[] = [10, 50, 100, null];
+const UPGRADE_NEXT_LABEL: readonly (string | null)[] = ["×2", "×8", "×64", null];
+
+// ─── ScreenHeader (inline, reusable later) ───────────────────────────────
+function ScreenHeader({
+  title, sub, onBack, right,
+}: {
+  title: string;
+  sub?: string;
+  onBack(): void;
+  /** Optional right-aligned slot for a stat chip (e.g. live Capital). */
+  right?: React.ReactNode;
+}) {
+  return (
+    <View style={styles.header}>
+      <Pressable onPress={onBack} hitSlop={12} style={styles.backBtn}>
+        <Text style={styles.backChevron}>‹</Text>
+      </Pressable>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.brand}>
+          BURN<Text style={{ color: colors.terracotta }}>·</Text>RATE
         </Text>
-      </Pressy>
+        <Text style={styles.title}>{title}</Text>
+        {sub && <Text style={styles.sub}>{sub}</Text>}
+      </View>
+      {right}
+    </View>
+  );
+}
+
+// Capital chip for the header — terracotta swatch (matches the chain accent
+// of "Product" / Capital in the allocation strip) + big mono number. Reads
+// at a glance so the player can decide whether to scroll the tier list.
+function CapitalChip({ capital }: { capital: Decimal }) {
+  return (
+    <View style={styles.capitalChip}>
+      <View style={[styles.capitalSwatch, { backgroundColor: colors.terracotta }]} />
+      <View style={{ alignItems: "flex-end" }}>
+        <Text style={styles.capitalLabel}>CAPITAL</Text>
+        <Text style={styles.capitalValue}>${formatNumber(capital)}</Text>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  shell: {
     flex: 1,
     backgroundColor: colors.cream,
-    paddingHorizontal: spacing.l,
-    paddingTop: spacing.xl,
-    gap: spacing.m,
   },
   header: {
+    paddingTop: 14,
+    paddingBottom: 10,
+    paddingHorizontal: 12,
+    backgroundColor: colors.cream_2,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.cream_4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  backBtn: {
+    padding: 6,
+  },
+  backChevron: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 22,
+    color: colors.ink,
+    lineHeight: 22,
+  },
+  brand: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 9,
+    color: colors.muted,
+    letterSpacing: 1.5,
+  },
+  title: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 18,
+    color: colors.ink,
+    marginTop: 2,
+    lineHeight: 18,
+  },
+  sub: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 9,
+    color: colors.muted,
+    letterSpacing: 0.5,
+    marginTop: 2,
+  },
+  capitalChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    backgroundColor: colors.cream_hi,
+    borderWidth: 1,
+    borderColor: colors.ink,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: PIXEL },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 0,
+  },
+  capitalSwatch: {
+    width: 10,
+    height: 10,
+  },
+  capitalLabel: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 8,
+    color: colors.muted,
+    letterSpacing: 1,
+  },
+  capitalValue: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 14,
+    color: colors.ink,
+    lineHeight: 14,
+    marginTop: 1,
+  },
+  tabsRow: {
+    flexDirection: "row",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingTop: 8,
+  },
+  tab: {
+    // Pressable now BOTH provides the touch target AND owns the visual chrome.
+    // Inner View takes care of centering label + bottleneck dot in a row.
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    borderWidth: 1,
+    borderColor: colors.ink,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: PIXEL },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 0,
+  },
+  tabInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  tabLabel: {
+    fontFamily: fonts.display,
+    // Bumped 11 → 14: Silkscreen at 11 is borderline-invisible on retina iOS.
+    // 14 reads cleanly on phone without breaking web layout (tabs still fit).
+    fontSize: 14,
+    letterSpacing: 1,
+    lineHeight: 16,
+  },
+  bottleneckDot: {
+    width: 6,
+    height: 6,
+  },
+  chainHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 6,
+  },
+  chainSwatch: {
+    width: 12,
+    height: 12,
+  },
+  chainLabel: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 16,
+    lineHeight: 16,
+  },
+  chainSub: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 9,
+    color: colors.muted,
+    letterSpacing: 0.5,
+    marginTop: 2,
+  },
+  list: {
+    paddingHorizontal: 8,
+    paddingBottom: spacing.xl,
+    gap: 6,
+  },
+  cardWrap: {},
+  card: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: PIXEL },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 0,
+  },
+  cardSwatch: {
+    width: 4,
+    alignSelf: "stretch",
+  },
+  cardTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  cardTitle: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 14,
+    lineHeight: 16,
+    flexShrink: 1,
+  },
+  upgradeBadge: {
+    backgroundColor: colors.gold,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderWidth: 1,
+    borderColor: colors.ink,
+  },
+  upgradeBadgeText: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 10,
+    color: colors.ink,
+    letterSpacing: 0.5,
+  },
+  newBadge: {
+    fontFamily: fonts.display,
+    fontSize: 8,
+    color: colors.gold_2,
+    letterSpacing: 1,
+  },
+  cardMeta: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 8,
+    color: colors.muted,
+    letterSpacing: 0.5,
+    marginTop: 2,
+  },
+  upgradeHint: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 8,
+    color: colors.gold_2,
+    letterSpacing: 0.5,
+    marginTop: 2,
+  },
+  buyBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    minWidth: 68,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.ink,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: PIXEL },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 0,
+  },
+  buyText: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 13,
+    color: colors.cream_hi,
+    letterSpacing: 0.5,
+  },
+  lockBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    backgroundColor: "#FCE6E8",
+    borderWidth: 1,
+    borderColor: colors.tensionRed,
+    minWidth: 68,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  lockBadgeText: {
+    fontFamily: fonts.display,
+    fontSize: 8,
+    color: colors.tensionRed,
+    letterSpacing: 1,
+  },
+  footer: {
+    margin: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: colors.cream_hi,
+    borderWidth: 1,
+    borderColor: colors.ink,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: PIXEL },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 0,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  back: { color: colors.terracotta, fontSize: 14, fontWeight: "600" },
-  tabs: {
-    flexDirection: "row",
-    gap: spacing.xs,
-    backgroundColor: colors.cardBg,
-    padding: spacing.xs,
-    borderRadius: radii.md,
+  footerLabel: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 9,
+    color: colors.muted,
+    letterSpacing: 1,
   },
-  tab: {
-    flex: 1,
-    paddingVertical: spacing.s,
-    alignItems: "center",
-    borderRadius: radii.sm,
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 6,
+  footerValue: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 16,
   },
-  tabActive: { backgroundColor: colors.cream },
-  tabText: { fontSize: 13, color: colors.muted, fontWeight: "500" },
-  tabTextActive: { color: colors.ink, fontWeight: "700" },
-  bottleneckDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.tensionRed,
-  },
-  card: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.cardBg,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.sage,
-    borderRadius: radii.md,
-    padding: spacing.m,
-    gap: spacing.m,
-    ...shadow.sm,
-  },
-  cardDisabled: { opacity: 0.55 },
-  iconBubble: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.cream,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: colors.hairline,
-  },
-  cardLeft: { flex: 1, gap: spacing.xs },
-  titleRow: { flexDirection: "row", alignItems: "center", gap: spacing.s },
-  upgradeBadge: {
-    backgroundColor: colors.gold,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: radii.sm,
-  },
-  upgradeBadgeText: { color: colors.ink, fontSize: 11, fontWeight: "700" },
-  buyBtn: {
-    backgroundColor: colors.terracotta,
-    paddingHorizontal: spacing.l,
-    paddingVertical: spacing.m,
-    borderRadius: radii.sm,
-    minWidth: 110,
-    alignItems: "center",
-    overflow: "hidden",
-    ...shadow.md,
-  },
-  buyBtnDisabled: { backgroundColor: colors.disabled },
-  buyText: { color: colors.cream, fontWeight: "700", fontSize: 14 },
-  buyTextDisabled: { color: colors.muted },
 });

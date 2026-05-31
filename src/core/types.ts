@@ -90,6 +90,21 @@ export interface PersistentState {
   // player pays debt back down below the threshold, the event doesn't re-fire.
   // The bell can't be unrung.
   firedDebtThresholds: number[];
+  // GDD §5 (narrative spine) + §16 save schema. Vignette IDs that have ever
+  // fired for this player. PERSIST across prestige — the player keeps their
+  // story even after closing a funding round. Set semantics; order = unlock
+  // order so the inbox can show newest-first.
+  unlockedVignettes: string[];
+  // Subset of unlockedVignettes that the player hasn't opened yet. Drives
+  // the unread badge on the SLACK button in the HUD. Drained when the
+  // player taps a row in the inbox.
+  unreadVignettes: string[];
+  // GDD §4 Beat 3: Slack DMs let the player pick a reply that modifies a
+  // stat for 1h. The pick is one-shot — re-opening the vignette must NOT
+  // re-apply the effect (would be a buff farm). Map: vignette id → index
+  // of the reply the player chose. Presence in the map = "resolved";
+  // absence = "still open for a pick" (if the vignette has replyEffects).
+  resolvedVignettes: Record<string, number>;
 }
 
 export interface AccountState {
@@ -99,7 +114,12 @@ export interface AccountState {
   onboardingStep: number;
 }
 
-export const SCHEMA_VERSION = 5 as const;
+// v5 → v6: PersistentState gains unlockedVignettes + unreadVignettes for the
+// narrative spine (GDD §5).
+// v6 → v7: + resolvedVignettes (Record<id, replyIdx>) for the Beat 3 Slack
+// reply mechanic (GDD §4). Empty map on migrate — player can pick a reply
+// the next time they open an already-unlocked vignette.
+export const SCHEMA_VERSION = 7 as const;
 
 export interface SaveBlob {
   schemaVersion: typeof SCHEMA_VERSION;

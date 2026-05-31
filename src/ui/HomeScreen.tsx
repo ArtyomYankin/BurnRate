@@ -1,14 +1,10 @@
-import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
-import { D, Decimal } from "../core/decimal";
-import { CHAINS } from "../core/producers";
+import { Dimensions, Pressable, StyleSheet, Text, View } from "react-native";
+import { D } from "../core/decimal";
+import { PRODUCER_BY_ID } from "../core/producers";
 import { getRound } from "../core/rounds";
-import { ChainId } from "../core/types";
-import { engineerMultiplier } from "../core/math";
+import { ChainId, ProducerDef } from "../core/types";
 import {
-  allChainSupplies,
-  bottleneckChain,
   selectActiveEffects,
   selectAlignmentDebtStr,
   selectAllocation,
@@ -16,17 +12,20 @@ import {
   selectCapitalStr,
   selectEquityStr,
   selectFundingRoundIdx,
-  selectHypeStr,
   selectProducersOwned,
-  selectResearchPointsStr,
   selectTokensStr,
+  selectUnreadVignetteCount,
   tokensPerSec,
   useGame,
 } from "../game/store";
-import { formatNumber, formatRate, formatSupply } from "./formatNumber";
-import { CHAIN_COLOR, CHAIN_ICON, ICON } from "./icons";
+import { BottomAllocation } from "./BottomAllocation";
+import { formatNumber, formatRate } from "./formatNumber";
+import { ItemPopup, PopupContent } from "./ItemPopup";
+import { HitId, PixelScene, sceneForRound } from "./PixelScene";
 import { Pressy } from "./Pressy";
-import { colors, gradient, radii, shadow, spacing, type } from "./theme";
+import { colors, fonts } from "./theme";
+import { DevPanel } from "./DevPanel";
+import { TopHUD } from "./TopHUD";
 
 interface Props {
   onOpenProducers(chain?: ChainId): void;
@@ -34,7 +33,26 @@ interface Props {
   onOpenResearch(): void;
   onOpenTraining(): void;
   onOpenPrestige(): void;
+  onOpenVignettes(): void;
 }
+
+// Map each hit zone in the scene to a producer tier (so the popup can show
+// "Owned N · Cost $X" without HomeScreen needing chain awareness for every
+// click). Wall items (research, plant) and cosmetic items have no tier.
+const HIT_TO_PRODUCER: Partial<Record<HitId, string>> = {
+  engineer: "intern",
+  monitor:  "intern",   // training run uses the monitor as its hit; producer field is read for context only
+  gpu:      "single_h100",
+  books:    "common_crawl",
+  energy:   "office_grid",
+};
+
+const HIT_TO_CHAIN: Partial<Record<HitId, ChainId>> = {
+  engineer: "engineers",
+  gpu:      "gpu",
+  books:    "data",
+  energy:   "energy",
+};
 
 export function HomeScreen({
   onOpenProducers,
@@ -42,11 +60,10 @@ export function HomeScreen({
   onOpenResearch,
   onOpenTraining,
   onOpenPrestige,
+  onOpenVignettes,
 }: Props) {
   const tokensStr = useGame(selectTokensStr);
   const capitalStr = useGame(selectCapitalStr);
-  const hypeStr = useGame(selectHypeStr);
-  const rpStr = useGame(selectResearchPointsStr);
   const equityStr = useGame(selectEquityStr);
   const debtStr = useGame(selectAlignmentDebtStr);
   const allocation = useGame(selectAllocation);
@@ -54,16 +71,13 @@ export function HomeScreen({
   const activeEffects = useGame(selectActiveEffects);
   const fundingRoundIdx = useGame(selectFundingRoundIdx);
   const canPrestige = useGame(selectCanPrestige);
+  const unreadVignettes = useGame(selectUnreadVignetteCount);
 
   const tokens = D(tokensStr);
   const capital = D(capitalStr);
-  const hype = D(hypeStr);
-  const rp = D(rpStr);
   const equity = D(equityStr);
   const debt = D(debtStr);
-  // The rate-shaped calculators only inspect producersOwned + engineers/
-  // gpu/data/energy chains, so we don't need real values for allocation/hype/
-  // etc. — but the type contract requires them. Cheap to fill in.
+
   const runForCalc = {
     fundingRoundIdx,
     tokens: tokensStr,
@@ -76,516 +90,354 @@ export function HomeScreen({
     trainingPity: 0,
   };
   const tps = tokensPerSec(runForCalc);
-  const supplies = allChainSupplies(runForCalc);
-  const bottleneck = bottleneckChain(runForCalc);
 
   const round = getRound(fundingRoundIdx);
   const threshold = D(10).pow(round.tokenThresholdLog10);
   const pct = Math.min(100, tokens.div(threshold).toNumber() * 100);
+  const nextRound = getRound(fundingRoundIdx + 1);
 
-  const TokensIcon = ICON.tokens;
-  const CapitalIcon = ICON.capital;
-  const HypeIcon = ICON.hype;
-  const ResearchIcon = ICON.research;
-  const EquityIcon = ICON.equity;
-  const ShieldIcon = ICON.shield;
+  // Pixel scene dimensions — fit width of the phone (minus 8px gutter), keep
+  // 2:3 ratio matching the design's 240×360 native scene.
+  const screenW = Dimensions.get("window").width;
+  const sceneW = Math.min(screenW, 420);
+  const sceneH = Math.round(sceneW * (360 / 240));
+
+  const [popup, setPopup] = React.useState<PopupContent | null>(null);
+  const [activeHit, setActiveHit] = React.useState<HitId | null>(null);
+  // Dev-cheats modal. Only opens via long-press on BURN·RATE in __DEV__
+  // builds. Release bundles tree-shake DevPanel out via the `__DEV__` import
+  // guard at the top of App.tsx — we keep the state hook here either way
+  // so the conditional render below stays simple.
+  const [devOpen, setDevOpen] = React.useState(false);
+
+  const handleHit = (id: HitId) => {
+    setActiveHit(id);
+    setPopup(buildPopup(id, owned));
+  };
+
+  const closePopup = () => {
+    setPopup(null);
+    setActiveHit(null);
+  };
+
+  // Primary CTA in the popup — route to the right screen/modal. Buys happen
+  // on the dedicated screen (we don't shortcut buy-1 from the home for now;
+  // the user can BUY 1 in the modal Producers screen, where cost shows live).
+  const handlePopupAction = () => {
+    if (!popup) return;
+    closePopup();
+    if (popup.hit === "monitor") {
+      onOpenTraining();
+      return;
+    }
+    if (popup.hit === "research") {
+      onOpenResearch();
+      return;
+    }
+    const chain = HIT_TO_CHAIN[popup.hit];
+    if (chain) {
+      onOpenProducers(chain);
+    }
+  };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={type.caption}>BURN RATE</Text>
-        <Text style={type.caption}>
-          {round.name} · round {round.idx + 1}
-        </Text>
-      </View>
-
-      <View style={styles.heroBlock}>
-        <LinearGradient
-          colors={gradient.hero}
-          start={{ x: 0.5, y: 0 }}
-          end={{ x: 0.5, y: 1 }}
-          style={StyleSheet.absoluteFill}
+    <View style={styles.root}>
+      <View style={styles.sceneWrap}>
+        <PixelScene
+          width={sceneW}
+          height={sceneH}
+          onHit={handleHit}
+          activeHit={activeHit}
+          scene={sceneForRound(fundingRoundIdx)}
         />
-        <View style={styles.heroIconRow}>
-          <TokensIcon size={18} color={colors.gold} strokeWidth={2.5} />
-          <Text style={[type.caption, { color: colors.muted }]}>tokens</Text>
-        </View>
-        <Text style={styles.tokenNumber}>{formatNumber(tokens)}</Text>
-        <Text style={[type.caption, { marginTop: spacing.xs }]}>
-          + {formatRate(tps)}
-        </Text>
-        <Text style={[type.caption, { marginTop: 2, fontSize: 11 }]}>
-          min({formatSupply(supplies.gpu)}, {formatSupply(supplies.data)}, {formatSupply(supplies.energy)}) × {formatSupply(engineerMultiplier(supplies.engineers))} (Eng)
-        </Text>
       </View>
 
-      <View style={styles.progressBlock}>
-        <View style={styles.progressTrack}>
-          <View style={[styles.progressFill, { width: `${pct}%` }]} />
-        </View>
-        <Text style={type.caption}>
-          {round.name} · next funding round at 1e{round.tokenThresholdLog10} tokens
-        </Text>
-      </View>
+      <TopHUD
+        tokens={formatNumber(tokens)}
+        rate={formatRate(tps)}
+        pct={pct}
+        roundLabel={`${round.name.toUpperCase()} · ROUND ${round.idx + 1}`}
+        capital={formatNumber(capital)}
+        equity={formatNumber(equity)}
+        nextThresholdLabel={`NEXT: ${nextRound.name.toUpperCase()} · 1e${nextRound.tokenThresholdLog10} TOKENS`}
+      />
 
-      <View style={styles.suppliesBlock}>
-        {CHAINS.map((c) => (
-          <ChainRow
-            key={c.id}
-            chain={c.id}
-            label={c.name}
-            supply={supplies[c.id]}
-            ownedTotal={totalOwnedInChain(c.id, owned)}
-            isBottleneck={c.id === bottleneck}
-            allSupplies={supplies}
-          />
-        ))}
-      </View>
-
-      <Pressy style={styles.allocCard} onPress={onOpenAllocate}>
-        <View style={styles.allocHeader}>
-          <Text style={type.caption}>Allocation</Text>
-          <Text style={[type.caption, { color: colors.terracotta }]}>edit →</Text>
-        </View>
-        <View style={styles.allocRow}>
-          <AllocPill icon={ResearchIcon}  iconColor={colors.sage}        label="R&D"       pct={allocation.rd}        value={formatNumber(rp)} />
-          <AllocPill icon={CapitalIcon}   iconColor={colors.terracotta}  label="Product"   pct={allocation.product}   value={formatNumber(capital)} />
-          <AllocPill icon={HypeIcon}      iconColor={colors.gold}        label="Marketing" pct={allocation.marketing} value={formatNumber(hype)} />
-          <AllocPill
-            icon={ShieldIcon}
-            iconColor={colors.tensionRed}
-            label="Safety"
-            pct={allocation.safety}
-            value={debt.gt(0) ? `debt ${formatNumber(debt)}` : "ok"}
-            warn={allocation.safety < 0.10}
-          />
-        </View>
-      </Pressy>
-
-      {debt.gt(0) && (
-        <View style={styles.debtStrip}>
-          <Text style={styles.debtLabel}>Alignment Debt</Text>
-          <Text style={styles.debtValue}>{formatNumber(debt)}</Text>
-        </View>
+      {/* Visible-in-dev cheat trigger. Replaces an earlier hidden long-press
+          on BURN·RATE — that gesture is flaky on RN-Web (Pressable's long-
+          press timer cancels if the cursor drifts off the text). A small
+          tag in the corner is more honest and tree-shakes out in release. */}
+      {__DEV__ && (
+        <Pressable style={styles.devChip} onPress={() => setDevOpen(true)}>
+          <Text style={styles.devChipText}>DEV</Text>
+        </Pressable>
       )}
+      {__DEV__ && <DevPanel visible={devOpen} onClose={() => setDevOpen(false)} />}
 
-      {activeEffects.length > 0 && <ActiveEffectsStrip />}
 
-      <View style={styles.statsRow}>
-        <Stat icon={CapitalIcon} iconColor={colors.terracotta} label="Capital ($)" value={formatNumber(capital)} />
-        <Stat icon={EquityIcon}  iconColor={colors.gold}       label="Equity"      value={formatNumber(equity)} />
-      </View>
-
-      <Pressy
-        style={styles.cta}
-        onPress={canPrestige ? onOpenPrestige : () => onOpenProducers()}
-      >
-        <LinearGradient
-          colors={canPrestige ? gradient.gold : gradient.terracotta}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 1 }}
-          style={StyleSheet.absoluteFill}
-        />
-        <Text style={[styles.ctaText, canPrestige && { color: colors.ink }]}>
-          {canPrestige ? "Close funding round →" : "Hire / build →"}
-        </Text>
-      </Pressy>
-
-      <View style={styles.secondaryRow}>
-        <Pressy style={styles.secondaryBtn} onPress={() => onOpenProducers()}>
-          <Text style={styles.secondaryBtnText}>Producers</Text>
+      {/* Bottom row of secondary buttons — keep prestige + producers/research
+          reachable even when the player ignores hit zones. Sits above the
+          allocation strip. */}
+      <View style={styles.secondaryRow} pointerEvents="box-none">
+        {/* Inbox button — always visible so the player knows it exists.
+            Badge appears when unreadVignettes > 0; tap navigates to the
+            inbox screen, which also marks rows as read on open. */}
+        <Pressy onPress={onOpenVignettes}>
+          <View style={styles.inboxBtn}>
+            <Text style={styles.inboxText}>INBOX</Text>
+            {unreadVignettes > 0 && (
+              <View style={styles.inboxBadge}>
+                <Text style={styles.inboxBadgeText}>{unreadVignettes}</Text>
+              </View>
+            )}
+          </View>
         </Pressy>
-        <Pressy style={styles.secondaryBtn} onPress={onOpenResearch}>
-          <Text style={styles.secondaryBtnText}>
-            Research{equity.gt(0) ? `  ·  ${formatNumber(equity)} Eq` : ""}
-          </Text>
-        </Pressy>
-        <Pressy style={styles.secondaryBtn} onPress={onOpenTraining}>
-          <Text style={styles.secondaryBtnText}>Training</Text>
-        </Pressy>
-      </View>
-    </View>
-  );
-}
-
-type EffectKey = "tokens" | "capital" | "hype" | "rp" | "debt" | "supply_gpu" | "supply_data" | "supply_energy" | "supply_eng";
-
-const EFFECT_KEY_LABEL: Record<EffectKey, string> = {
-  tokens:        "Tokens",
-  capital:       "Capital",
-  hype:          "Hype",
-  rp:            "Research Pts",
-  debt:          "Debt accrual",
-  supply_gpu:    "GPU supply",
-  supply_data:   "Data supply",
-  supply_energy: "Energy supply",
-  supply_eng:    "Eng supply",
-};
-
-function effectKey(e: ReturnType<typeof selectActiveEffects>[number]): EffectKey {
-  switch (e.effect.type) {
-    case "tokens_mult":       return "tokens";
-    case "capital_mult":      return "capital";
-    case "hype_mult":         return "hype";
-    case "rp_mult":           return "rp";
-    case "debt_accrual_mult": return "debt";
-    case "chain_supply_mult":
-      switch (e.effect.chain) {
-        case "engineers": return "supply_eng";
-        case "gpu":       return "supply_gpu";
-        case "data":      return "supply_data";
-        case "energy":    return "supply_energy";
-      }
-  }
-}
-
-function ActiveEffectsStrip() {
-  // Re-render once a second to keep the countdown alive. Cheap — strip is
-  // rarely visible (only when something is active).
-  const [, force] = React.useState(0);
-  React.useEffect(() => {
-    const id = setInterval(() => force((n) => n + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
-  const effects = useGame(selectActiveEffects);
-  const now = Date.now();
-  const live = effects.filter((e) => e.expiresAt > now);
-  if (live.length === 0) return null;
-
-  // Group by effect category and combine multiplicatively (matches the math
-  // layer's aggregator). One chip per category instead of one per effect —
-  // 30 individual "+5% Tokens" chips were unreadable.
-  const groups = new Map<EffectKey, { mult: number; count: number; minExpiresAt: number }>();
-  for (const e of live) {
-    const k = effectKey(e);
-    const g = groups.get(k) ?? { mult: 1, count: 0, minExpiresAt: Infinity };
-    g.mult *= e.effect.value;
-    g.count += 1;
-    g.minExpiresAt = Math.min(g.minExpiresAt, e.expiresAt);
-    groups.set(k, g);
-  }
-
-  return (
-    <View style={styles.effectsStrip}>
-      {[...groups.entries()].map(([key, g]) => {
-        const remainingSec = Math.max(0, Math.round((g.minExpiresAt - now) / 1000));
-        const min = Math.floor(remainingSec / 60);
-        const sec = remainingSec % 60;
-        const pct = Math.round((g.mult - 1) * 100);
-        const isPositive = g.mult >= 1;
-        const sign = pct >= 0 ? "+" : "";
-        return (
-          <View key={key} style={styles.effectChip}>
-            <Text style={styles.effectChipText}>
-              {EFFECT_KEY_LABEL[key]}{" "}
-              <Text style={{ color: isPositive ? colors.sage : colors.tensionRed }}>
-                {sign}{pct}%
-              </Text>
-              {g.count > 1 ? ` · ${g.count} buffs` : ""}
-            </Text>
-            <Text style={styles.effectChipTime}>
-              next: {min}:{sec.toString().padStart(2, "0")}
+        {canPrestige && (
+          <Pressy style={styles.prestigeBtn} onPress={onOpenPrestige}>
+            <Text style={styles.prestigeText}>CLOSE ROUND →</Text>
+          </Pressy>
+        )}
+        {activeEffects.length > 0 && (
+          <View style={styles.effectsChip}>
+            <Text style={styles.effectsChipText}>
+              {activeEffects.length} BUFF{activeEffects.length === 1 ? "" : "S"}
             </Text>
           </View>
-        );
-      })}
-    </View>
-  );
-}
-
-function ChainRow({
-  chain,
-  label,
-  supply,
-  ownedTotal,
-  isBottleneck,
-  allSupplies,
-}: {
-  chain: ChainId;
-  label: string;
-  supply: Decimal;
-  ownedTotal: number;
-  isBottleneck: boolean;
-  allSupplies: ReturnType<typeof allChainSupplies>;
-}) {
-  const maxSupply = Decimal.max(
-    allSupplies.engineers,
-    Decimal.max(allSupplies.gpu, Decimal.max(allSupplies.data, allSupplies.energy))
-  );
-  const widthPct = maxSupply.lte(0)
-    ? 0
-    : Math.min(100, supply.div(maxSupply).toNumber() * 100);
-  const Icon = CHAIN_ICON[chain];
-  const chainColor = isBottleneck ? colors.tensionRed : CHAIN_COLOR[chain];
-
-  return (
-    <View style={styles.chainRow}>
-      <View style={styles.chainRowLeft}>
-        <Icon size={16} color={chainColor} strokeWidth={2.25} />
-        <View style={styles.miniBarTrack}>
-          <View
-            style={[
-              styles.miniBarFill,
-              { width: `${widthPct}%`, backgroundColor: chainColor },
-            ]}
-          />
-        </View>
-        <Text style={[type.body, { fontWeight: "600", color: chainColor }]}>
-          {label}
-        </Text>
+        )}
+        {debt.gt(0) && (
+          <View style={styles.debtChip}>
+            <Text style={styles.debtChipText}>DBT {formatNumber(debt)}</Text>
+          </View>
+        )}
       </View>
-      <Text style={type.caption}>
-        {ownedTotal} · {formatRate(supply)}
-      </Text>
+
+      <BottomAllocation allocation={allocation} onEdit={onOpenAllocate} />
+
+      <ItemPopup item={popup} onClose={closePopup} onAction={handlePopupAction} />
     </View>
   );
 }
 
-function totalOwnedInChain(
-  chainId: ChainId,
-  owned: Record<string, number>
-): number {
-  const chain = CHAINS.find((c) => c.id === chainId);
-  if (!chain) return 0;
-  return chain.producers.reduce((acc, p) => acc + (owned[p.id] ?? 0), 0);
+function buildPopup(id: HitId, owned: Record<string, number>): PopupContent {
+  const producerId = HIT_TO_PRODUCER[id];
+  const def = producerId ? PRODUCER_BY_ID[producerId] : undefined;
+
+  switch (id) {
+    case "monitor":
+      return {
+        hit: id,
+        kind: "action",
+        title: "Training Run",
+        subtitle: "ROLL THE GACHA",
+        body: "Spend tokens to roll: Failed · Marginal · Solid · SOTA · Breakthrough. Pity guaranteed at 50.",
+        flavor: "Just one more run, the loss curve looks weird.",
+        cta: "OPEN TRAINING",
+      };
+    case "engineer":
+      return producerCard(id, "Hire Intern", "ENGINEERS · TIER 0", owned, def, "Snacks are in the kitchen.");
+    case "gpu":
+      return producerCard(id, "Buy GPU", "COMPUTE · TIER 0", owned, def, "It runs hot. The room is hot.");
+    case "books":
+      return producerCard(id, "Buy Data", "DATA · TIER 0", owned, def, "Some of this is even labeled.");
+    case "energy":
+      return producerCard(id, "Buy Energy", "ENERGY · TIER 0", owned, def, "The landlord doesn't ask questions.");
+    case "research":
+      return {
+        hit: id,
+        kind: "action",
+        title: "Research",
+        subtitle: "EQUITY SINK",
+        body: "Spend Equity on permanent multipliers. 6 branches, ~30 nodes at v1.0.",
+        flavor: "Every JIRA epic has been delivered. Nobody knows what it does.",
+        cta: "OPEN RESEARCH",
+      };
+    case "plant":
+      return {
+        hit: id,
+        kind: "cosmetic",
+        title: "Snake Plant",
+        subtitle: "BACKGROUND ITEM",
+        body: "Office morale +0.0%. Hard to kill.",
+      };
+    case "mug":
+      return {
+        hit: id,
+        kind: "cosmetic",
+        title: "Coffee Mug",
+        subtitle: "OFFICE ITEM",
+        body: "Still warm. The intern made it.",
+      };
+    case "pizza":
+      return {
+        hit: id,
+        kind: "cosmetic",
+        title: "Pizza Box",
+        subtitle: "EVIDENCE",
+        body: "Friday's all-hands ended at midnight. The box stayed.",
+      };
+    case "clock":
+      return {
+        hit: id,
+        kind: "cosmetic",
+        title: "Wall Clock",
+        subtitle: "TIME PASSES",
+        body: "Tick. Tick. The clock judges you.",
+      };
+    case "window":
+      return {
+        hit: id,
+        kind: "cosmetic",
+        title: "Window",
+        subtitle: "OUTSIDE",
+        body: "It's a nice day. The cloud moves like it's in a hurry.",
+      };
+    case "roomba":
+      return {
+        hit: id,
+        kind: "cosmetic",
+        title: "Roomba",
+        subtitle: "AUTONOMOUS AGENT v0.1",
+        body: "It cleans the floor. Eventually it will do more.",
+      };
+  }
 }
 
-function AllocPill({
-  icon: Icon,
-  iconColor,
-  label,
-  pct,
-  value,
-  warn,
-}: {
-  icon: React.ComponentType<{ size: number; color: string; strokeWidth?: number }>;
-  iconColor: string;
-  label: string;
-  pct: number;
-  value: string;
-  warn?: boolean;
-}) {
-  const tint = warn ? colors.tensionRed : iconColor;
-  return (
-    <View style={[styles.pill, warn && styles.pillWarn]}>
-      <View style={styles.pillTop}>
-        <Icon size={14} color={tint} strokeWidth={2.25} />
-        <Text style={[type.caption, { color: tint, fontWeight: "600" }]}>
-          {Math.round(pct * 100)}%
-        </Text>
-      </View>
-      <Text style={[type.caption, { fontSize: 10 }]}>{label}</Text>
-      <Text style={[styles.pillValue, warn && { color: colors.tensionRed }]}>
-        {value}
-      </Text>
-    </View>
-  );
-}
-
-function Stat({
-  icon: Icon,
-  iconColor,
-  label,
-  value,
-}: {
-  icon: React.ComponentType<{ size: number; color: string; strokeWidth?: number }>;
-  iconColor: string;
-  label: string;
-  value: string;
-}) {
-  return (
-    <View style={styles.stat}>
-      <View style={styles.statHeader}>
-        <Icon size={14} color={iconColor} strokeWidth={2.25} />
-        <Text style={type.caption}>{label}</Text>
-      </View>
-      <Text style={type.h2}>{value}</Text>
-    </View>
-  );
+function producerCard(
+  id: HitId,
+  title: string,
+  subtitle: string,
+  owned: Record<string, number>,
+  def: ProducerDef | undefined,
+  flavor: string,
+): PopupContent {
+  if (!def) {
+    return { hit: id, kind: "cosmetic", title, subtitle, body: "—" };
+  }
+  return {
+    hit: id,
+    kind: "producer",
+    title,
+    subtitle,
+    owned: owned[def.id] ?? 0,
+    rate: `${def.baseOutputPerSec}`,
+    cost: `${def.baseCostCapital}`,
+    flavor,
+  };
 }
 
 const styles = StyleSheet.create({
-  container: {
+  root: { flex: 1, backgroundColor: colors.cream, position: "relative" },
+  sceneWrap: {
     flex: 1,
-    backgroundColor: colors.cream,
-    paddingHorizontal: spacing.l,
-    paddingTop: spacing.xl,
-    gap: spacing.l,
-  },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
+    justifyContent: "flex-start",
+    paddingTop: 96, // leave room for TopHUD to float over the wall
   },
-  heroBlock: {
-    alignItems: "center",
-    paddingVertical: spacing.xl,
-    position: "relative",
-    borderRadius: radii.lg,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: colors.hairline,
-    ...shadow.md,
-  },
-  heroIconRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginBottom: spacing.xs,
-  },
-  tokenNumber: {
-    ...type.display,
-    fontSize: 56,
-    color: colors.ink,
-  },
-  progressBlock: { gap: spacing.s },
-  progressTrack: {
-    height: 12,
-    backgroundColor: colors.hairline,
-    borderRadius: radii.sm,
-    overflow: "hidden",
-  },
-  progressFill: { height: "100%", backgroundColor: colors.sage },
-  suppliesBlock: {
-    backgroundColor: colors.cardBg,
-    borderRadius: radii.md,
-    padding: spacing.m,
-    gap: spacing.s,
-    borderWidth: 1,
-    borderColor: colors.hairline,
-    ...shadow.sm,
-  },
-  chainRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: spacing.m,
-  },
-  chainRowLeft: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.s,
-  },
-  miniBarTrack: {
-    width: 80,
-    height: 6,
-    backgroundColor: colors.hairline,
-    borderRadius: 3,
-    overflow: "hidden",
-  },
-  miniBarFill: { height: "100%", backgroundColor: colors.sage },
-  miniBarFillBottleneck: { backgroundColor: colors.tensionRed },
-  allocCard: {
-    backgroundColor: colors.cardBg,
-    borderRadius: radii.md,
-    padding: spacing.m,
-    gap: spacing.s,
-    borderWidth: 1,
-    borderColor: colors.hairline,
-    ...shadow.md,
-  },
-  allocHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  allocRow: { flexDirection: "row", gap: spacing.xs },
-  pill: {
-    flex: 1,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: 6,
-    borderRadius: radii.sm,
-    backgroundColor: colors.cream,
-    borderWidth: 1,
-    borderColor: colors.hairline,
-    gap: 2,
-    minWidth: 0,
-  },
-  pillWarn: { borderColor: colors.tensionRed },
-  pillTop: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 4,
-    marginBottom: 2,
-  },
-  pillValue: { fontSize: 12, color: colors.ink, fontWeight: "600" },
-  debtStrip: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: colors.tensionRed,
-    paddingHorizontal: spacing.m,
-    paddingVertical: spacing.s,
-    borderRadius: radii.md,
-  },
-  debtLabel: { color: colors.cream, fontSize: 13, fontWeight: "600" },
-  debtValue: { color: colors.cream, fontSize: 16, fontWeight: "700" },
-  statsRow: { flexDirection: "row", gap: spacing.l },
-  stat: {
-    flex: 1,
-    backgroundColor: colors.cardBg,
-    padding: spacing.m,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.hairline,
-    gap: 4,
-    ...shadow.sm,
-  },
-  statHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  cta: {
-    padding: spacing.l,
-    borderRadius: radii.md,
-    alignItems: "center",
-    marginTop: spacing.s,
-    overflow: "hidden",
-    ...shadow.lg,
-  },
-  ctaText: { color: colors.cream, fontSize: 16, fontWeight: "700" },
-  effectsStrip: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.xs,
-    backgroundColor: colors.cardBg,
-    padding: spacing.s,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.gold,
-    ...shadow.sm,
-  },
-  effectChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.s,
-    backgroundColor: colors.cream,
-    paddingHorizontal: spacing.s,
-    paddingVertical: 4,
-    borderRadius: radii.sm,
-    borderWidth: 1,
-    borderColor: colors.gold,
-  },
-  effectChipText: { fontSize: 12, color: colors.ink, fontWeight: "600" },
-  effectChipTime: { fontSize: 11, color: colors.muted, fontFamily: "Courier" },
   secondaryRow: {
+    position: "absolute",
+    left: 8,
+    right: 8,
+    bottom: 95,
     flexDirection: "row",
-    gap: spacing.s,
-    marginTop: spacing.s,
+    gap: 8,
+    justifyContent: "flex-end",
+    zIndex: 22,
   },
-  secondaryBtn: {
-    flex: 1,
-    paddingVertical: spacing.m,
-    paddingHorizontal: spacing.m,
-    borderRadius: radii.md,
-    backgroundColor: colors.cardBg,
+  prestigeBtn: {
+    backgroundColor: colors.gold,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderWidth: 1,
-    borderColor: colors.hairline,
-    alignItems: "center",
-    ...shadow.sm,
+    borderColor: colors.ink,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 0,
   },
-  secondaryBtnText: { color: colors.ink, fontSize: 13, fontWeight: "600" },
+  prestigeText: {
+    fontFamily: fonts.display,
+    fontSize: 11,
+    color: colors.ink,
+    letterSpacing: 1,
+  },
+  effectsChip: {
+    backgroundColor: colors.cream_hi,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: colors.gold,
+  },
+  effectsChipText: {
+    fontFamily: fonts.display,
+    fontSize: 9,
+    color: colors.gold_2,
+    letterSpacing: 1,
+  },
+  debtChip: {
+    backgroundColor: colors.tensionRed,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: colors.ink,
+  },
+  debtChipText: {
+    fontFamily: fonts.display,
+    fontSize: 9,
+    color: colors.cream,
+    letterSpacing: 1,
+  },
+  inboxBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.cream_hi,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: colors.ink,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 0,
+  },
+  inboxText: {
+    fontFamily: fonts.display,
+    fontSize: 11,
+    color: colors.ink,
+    letterSpacing: 1,
+  },
+  inboxBadge: {
+    backgroundColor: colors.tensionRed,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    minWidth: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  inboxBadgeText: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 11,
+    color: colors.cream_hi,
+    lineHeight: 13,
+  },
+  devChip: {
+    // Top-right corner so it doesn't fight the bottom INBOX / allocation row.
+    // High zIndex so it sits above HUD/scene overlays.
+    position: "absolute",
+    top: 6,
+    right: 6,
+    backgroundColor: colors.tensionRed,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: colors.ink,
+    zIndex: 90,
+  },
+  devChipText: {
+    fontFamily: fonts.display,
+    fontSize: 10,
+    color: colors.cream_hi,
+    letterSpacing: 1,
+  },
 });

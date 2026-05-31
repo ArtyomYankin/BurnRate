@@ -5,7 +5,25 @@
       "Bash(npm list *)",
       "Bash(npx vitest *)",
       "Bash(npx tsc *)",
-      "Bash(npx expo *)"
+      "Bash(npx expo *)",
+      "Bash(wc -l \"c:/Users/artem/Downloads/A _ Seed garage.html\")",
+      "Read(//c/Users/artem/Downloads/**)",
+      "Bash(awk 'NR==152 { gsub\\(/></, \">\\\\n<\"\\); print }' \"c:/Users/artem/Downloads/A _ Seed garage.html\")",
+      "Bash(awk 'NR==152 { gsub\\(/></, \">\\\\n<\"\\); gsub\\(/ style=\"[^\"]*\"/, \"\"\\); gsub\\(/ data-om-id=\"[^\"]*\"/, \"\"\\); gsub\\(/ data-om-text=\"[^\"]*\"/, \"\"\\); gsub\\(/ class=\"[^\"]*\"/, \"\"\\); gsub\\(/src=\"data:[^\"]*\"/, \"src=\\\\\"[PNG]\\\\\"\"\\); print }' \"c:/Users/artem/Downloads/A _ Seed garage.html\")",
+      "Bash(grep -v \"^<div>\\\\s*$\\\\|^</div>\\\\s*$\\\\|^<span>\\\\s*$\\\\|^</span>\\\\s*$\")",
+      "Bash(sed 's/^[ \\\\t]*//')",
+      "Bash(echo \"exit=$?\")",
+      "WebFetch(domain:api.anthropic.com)",
+      "Bash(grep -n \"^function draw\\\\|^function Pixel\\\\|GarageScene\\\\|SeedScene\" \"C:/Users/artem/AppData/Local/Temp/burnrate_design/project/pixel-art.jsx\" | head -40)",
+      "Read(//c/Users/artem/AppData/Local/Temp/burnrate_design/project/**)",
+      "Bash(curl -sS -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8081 --max-time 5)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill /F /PID 28252)",
+      "Bash(taskkill //F //PID 29704)",
+      "PowerShell(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch 'Loopback|vEthernet|WSL' -and $_.IPAddress -notmatch '^169' } | Select-Object InterfaceAlias, IPAddress | Format-Table -AutoSize)",
+      "Bash(tar -xzf webfetch-1779980143530-qzbici.bin -C design_extract)",
+      "Bash(findstr :8081)",
+      "Bash(findstr LISTENING)"
     ]
   }
 }

@@ -58,6 +58,59 @@ export const PRODUCER_BY_ID: Record<string, ProducerDef> = Object.fromEntries(
   ALL_PRODUCERS.map((p) => [p.id, p])
 );
 
+// --------------------------- AUTONOMOUS AGENT -----------------------------
+// GDD §6 AGI arc. The 29th "producer" — but it is NOT a pipeline chain. Each
+// one owned multiplies TOTAL tokens/sec by `multPerUnit` (a self-improving-AI
+// flywheel), applied on top of the Liebig pipeline in math.ts. Kept out of
+// CHAINS / ALL_PRODUCERS so it never feeds chainSupply, but registered in the
+// cost lookup so the generic buy path works unchanged.
+export interface AgentDef {
+  id: string;
+  name: string;
+  baseCostCapital: number;
+  costMult: number;
+  /** Global tokens/sec multiplier contributed per unit owned (stacks ^owned). */
+  multPerUnit: number;
+  /** Funding-round index at which the agent becomes available to buy. */
+  unlockRoundIdx: number;
+}
+
+export const AUTONOMOUS_AGENT: AgentDef = {
+  id: "autonomous_agent",
+  name: "Autonomous Agent",
+  baseCostCapital: 1_000_000_000,
+  costMult: 1.25,
+  multPerUnit: 1.10,
+  unlockRoundIdx: 7, // Acquisition — the AGI arc opens here.
+};
+
+// Cost-only def lookup that includes the agent. buyProducer / cost helpers read
+// just { baseCostCapital, costMult }, so the agent rides the same buy path
+// without polluting the chain pipeline.
+export const COST_DEF_BY_ID: Record<
+  string,
+  { baseCostCapital: number; costMult: number }
+> = {
+  ...PRODUCER_BY_ID,
+  [AUTONOMOUS_AGENT.id]: AUTONOMOUS_AGENT,
+};
+
 export function producersForChain(chain: ChainId): ProducerDef[] {
   return CHAINS.find((c) => c.id === chain)?.producers ?? [];
 }
+
+/**
+ * Funding-round index at which a producer tier becomes available. Tiers 0–3
+ * are unlocked from the start (Seed); each higher tier needs one more round
+ * closed. Matches the rough cadence of Claude Design's hardcoded mock:
+ * Engineers Staff → Series A, Principal → Series B, Distinguished → Series C,
+ * Fellow → Series D, and so on across the four chains.
+ *
+ * The actual game-loop ignores this for now — `buyProducer` will let any tier
+ * through if Capital is enough. The UI uses this to gray out locked tiers so
+ * the player doesn't burn cash early.
+ */
+export function unlockRoundForTier(tierIdx: number): number {
+  return Math.max(0, tierIdx - 3);
+}
+

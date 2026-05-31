@@ -17,10 +17,9 @@ export const FUNDING_ROUNDS: FundingRoundDef[] = [
   { id: "agi_singularity",    idx: 11, name: "AGI Singularity Round", tokenThresholdLog10: 140, equityMult: 86.70, offlineCapHours: 24 },
 ];
 
-// M+1 bumps the cap to Series C (idx 3). Liebig math needs cost headroom to
-// show off — bottlenecks, sqrt scaling, the dance of balancing four chains
-// — none of that lands inside the Seed -> Series A range alone.
-export const M0_LAST_ROUND_IDX = 3;
+// M+2 opens the full AGI arc: all 12 rounds through the AGI Singularity are
+// playable. Closing the final round loops you back into it (soft endgame).
+export const LAST_ROUND_IDX = FUNDING_ROUNDS.length - 1;
 
 export function getRound(idx: number): FundingRoundDef {
   const r = FUNDING_ROUNDS[Math.max(0, Math.min(idx, FUNDING_ROUNDS.length - 1))];

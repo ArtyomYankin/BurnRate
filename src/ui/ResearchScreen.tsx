@@ -1,15 +1,11 @@
-import { LinearGradient } from "expo-linear-gradient";
-import {
-  Banknote,
-  Beaker,
-  Cpu,
-  Database,
-  LucideIcon,
-  Shield,
-  Zap,
-} from "lucide-react-native";
 import React from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { D } from "../core/decimal";
 import {
   nodeCost,
@@ -23,42 +19,26 @@ import {
   useGame,
 } from "../game/store";
 import { formatNumber } from "./formatNumber";
-import { ParticleBurst } from "./ParticleBurst";
-import { Pressy } from "./Pressy";
-import { colors, gradient, radii, shadow, spacing, type } from "./theme";
+import { colors, fonts, PIXEL } from "./theme";
 
 interface Props {
   onBack(): void;
 }
 
-const BRANCH_LABEL: Record<ResearchBranch, string> = {
-  rd:      "R&D",
-  compute: "Compute",
-  data:    "Data",
-  energy:  "Energy",
-  safety:  "Safety",
-  capital: "Capital",
+// ─── Branch metadata ─────────────────────────────────────────────────────
+// Labels + accent colors used for the branch headers and node accents.
+// Colors mirror Claude Design `sub-screens.jsx::RESEARCH_BRANCHES` where
+// each branch maps to a distinct chain color.
+const BRANCH_META: Record<ResearchBranch, { label: string; color: string }> = {
+  rd:      { label: "R&D",         color: colors.sage },
+  compute: { label: "COMPUTE",     color: colors.terracotta },
+  data:    { label: "DATA",        color: colors.gold },
+  energy:  { label: "ENERGY",      color: colors.tensionRed },
+  safety:  { label: "SAFETY",      color: colors.tension_hi },
+  capital: { label: "CAPITAL",     color: colors.gold_2 },
 };
 
-const BRANCH_ICON: Record<ResearchBranch, LucideIcon> = {
-  rd:      Beaker,
-  compute: Cpu,
-  data:    Database,
-  energy:  Zap,
-  safety:  Shield,
-  capital: Banknote,
-};
-
-const BRANCH_COLOR: Record<ResearchBranch, string> = {
-  rd:      colors.sage,
-  compute: colors.terracotta,
-  data:    colors.gold,
-  energy:  colors.tensionRed,
-  safety:  colors.tensionRed,
-  capital: colors.terracotta,
-};
-
-// Pre-grouped nodes by branch, preserving GDD ordering.
+// Pre-grouped nodes by branch, preserving definition order.
 const NODES_BY_BRANCH: Record<ResearchBranch, ResearchNode[]> = (() => {
   const out: Record<ResearchBranch, ResearchNode[]> = {
     rd: [], compute: [], data: [], energy: [], safety: [], capital: [],
@@ -67,224 +47,361 @@ const NODES_BY_BRANCH: Record<ResearchBranch, ResearchNode[]> = (() => {
   return out;
 })();
 
+type NodeState = "owned" | "available" | "locked";
+
 export function ResearchScreen({ onBack }: Props) {
   const equityStr = useGame(selectEquityStr);
   const unlocked = useGame(selectUnlockedResearch);
   const buy = useGame((s) => s.buyResearchNode);
   const equity = D(equityStr);
 
-  const [burst, setBurst] = React.useState(0);
+  // A node is "owned" if its id is in `unlocked`, "available" if affordable
+  // AND any prerequisite of lower tier in the same branch is owned, otherwise
+  // "locked". Current data has no explicit prereq field; we infer one: tier N
+  // is gated behind ALL tier N-1 nodes in the same branch being owned.
+  // (Matches the design's tree-walk intent — lower tiers come first.)
+  const stateOf = (node: ResearchNode): NodeState => {
+    if (unlocked.includes(node.id)) return "owned";
+    const cost = nodeCost(node.tier);
+    if (!equity.gte(cost)) return "locked";
+    // Tier 1 nodes are always reachable (no prereq).
+    if (node.tier === 1) return "available";
+    const prereqsInSameBranch = NODES_BY_BRANCH[node.branch]
+      .filter((n) => n.tier === node.tier - 1)
+      .map((n) => n.id);
+    const allPrereqsOwned = prereqsInSameBranch.every((id) => unlocked.includes(id));
+    return allPrereqsOwned ? "available" : "locked";
+  };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: spacing.xxl }}>
-      <View style={styles.header}>
-        <Pressable onPress={onBack} hitSlop={12}>
-          <Text style={styles.back}>← back</Text>
-        </Pressable>
-        <Text style={type.caption}>
-          Equity: <Text style={{ color: colors.gold, fontWeight: "700" }}>{formatNumber(equity)}</Text>
-        </Text>
+    <View style={styles.shell}>
+      <ScreenHeader
+        title="Research Tree"
+        sub={`${formatNumber(equity)} Equity available · spend before prestige`}
+        onBack={onBack}
+      />
+
+      {/* Equity card — gold accent, big number left, "next tier cost" right */}
+      <View style={styles.equityCard}>
+        <View style={[styles.equitySwatch, { backgroundColor: colors.gold }]} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.equityLabel}>EQUITY</Text>
+          <Text style={styles.equityValue}>{formatNumber(equity)}</Text>
+        </View>
+        <View style={{ alignItems: "flex-end" }}>
+          <Text style={styles.equityLabel}>NEXT TIER</Text>
+          <Text style={styles.equityNextHint}>×3 cost</Text>
+        </View>
       </View>
 
-      <Text style={[type.body, { color: colors.muted, marginBottom: spacing.s }]}>
-        Spend Equity on permanent multipliers. Effects stack multiplicatively
-        and persist across funding rounds.
-      </Text>
-
-      {(Object.keys(NODES_BY_BRANCH) as ResearchBranch[])
-        .filter((b) => NODES_BY_BRANCH[b].length > 0)
-        .map((branch) => (
-          <Branch
-            key={branch}
-            branch={branch}
-            nodes={NODES_BY_BRANCH[branch]}
-            unlocked={unlocked}
-            equity={equity}
-            onBuy={(id) => {
-              const r = buy(id);
-              if (r.bought) setBurst((n) => n + 1);
-            }}
-          />
-        ))}
-      <ParticleBurst trigger={burst} count={16} palette={[colors.gold, colors.cream, colors.sage]} />
-    </ScrollView>
+      {/* Branches as vertical rows; each row is a horizontal scroll of nodes */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.branchList}
+        showsVerticalScrollIndicator={false}
+      >
+        {(Object.keys(NODES_BY_BRANCH) as ResearchBranch[])
+          .filter((b) => NODES_BY_BRANCH[b].length > 0)
+          .map((branch) => (
+            <Branch
+              key={branch}
+              branch={branch}
+              nodes={NODES_BY_BRANCH[branch]}
+              stateOf={stateOf}
+              onBuy={(id) => buy(id)}
+            />
+          ))}
+      </ScrollView>
+    </View>
   );
 }
 
 function Branch({
   branch,
   nodes,
-  unlocked,
-  equity,
+  stateOf,
   onBuy,
 }: {
   branch: ResearchBranch;
   nodes: ResearchNode[];
-  unlocked: string[];
-  equity: ReturnType<typeof D>;
+  stateOf(n: ResearchNode): NodeState;
   onBuy(id: string): void;
 }) {
-  const Icon = BRANCH_ICON[branch];
-  const color = BRANCH_COLOR[branch];
-
+  const meta = BRANCH_META[branch];
   return (
-    <View style={styles.branchBlock}>
+    <View style={styles.branch}>
       <View style={styles.branchHeader}>
-        <Icon size={16} color={color} strokeWidth={2.5} />
-        <Text style={[type.h2, { color }]}>{BRANCH_LABEL[branch]}</Text>
+        <View style={[styles.branchSwatch, { backgroundColor: meta.color }]} />
+        <Text style={[styles.branchLabel, { color: meta.color }]}>{meta.label}</Text>
       </View>
-      {nodes.map((node) => {
-        const isOwned = unlocked.includes(node.id);
-        const cost = nodeCost(node.tier);
-        const affordable = equity.gte(cost);
-        return (
-          <NodeCard
-            key={node.id}
-            node={node}
-            isOwned={isOwned}
-            affordable={affordable}
-            color={color}
-            onBuy={() => onBuy(node.id)}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.nodeRow}
+      >
+        {nodes.map((n) => (
+          <ResearchNodeCard
+            key={n.id}
+            node={n}
+            color={meta.color}
+            state={stateOf(n)}
+            onBuy={() => onBuy(n.id)}
           />
-        );
-      })}
+        ))}
+      </ScrollView>
     </View>
   );
 }
 
-function NodeCard({
+function ResearchNodeCard({
   node,
-  isOwned,
-  affordable,
   color,
+  state,
   onBuy,
 }: {
   node: ResearchNode;
-  isOwned: boolean;
-  affordable: boolean;
   color: string;
+  state: NodeState;
   onBuy(): void;
 }) {
+  // Accent color follows state — owned uses sage (always positive), available
+  // uses the branch color (interactable), locked goes muted.
+  const accent =
+    state === "owned" ? colors.sage :
+    state === "available" ? color :
+    colors.muted;
+
+  const bg =
+    state === "owned" ? "#EAF1EC" :  // washed sage
+    state === "locked" ? colors.cream_2 :
+    colors.cream_hi;
+
   const cost = nodeCost(node.tier);
+
   return (
-    <View
+    <Pressable
+      onPress={state === "available" ? onBuy : undefined}
+      disabled={state !== "available"}
       style={[
-        styles.node,
-        { borderLeftColor: color },
-        isOwned && styles.nodeOwned,
-        !isOwned && !affordable && styles.nodeDisabled,
+        styles.nodeCard,
+        {
+          backgroundColor: bg,
+          borderColor: accent,
+          shadowColor: accent,
+          opacity: state === "locked" ? 0.55 : 1,
+        },
       ]}
     >
-      <View style={styles.nodeText}>
-        <View style={styles.nodeTitleRow}>
-          <Text style={type.h2}>{node.name}</Text>
-          <View style={[styles.tierPill, { backgroundColor: color }]}>
-            <Text style={styles.tierPillText}>T{node.tier}</Text>
-          </View>
+      {/* Top row — tier badge + state indicator */}
+      <View style={styles.nodeTopRow}>
+        <View style={[styles.tierBadge, { backgroundColor: accent }]}>
+          <Text style={styles.tierBadgeText}>T{node.tier}</Text>
         </View>
-        <Text style={type.caption}>{node.description}</Text>
-      </View>
-      {isOwned ? (
-        <View style={styles.ownedTag}>
-          <Text style={styles.ownedText}>OWNED</Text>
-        </View>
-      ) : (
-        <Pressy
-          style={[styles.buyBtn, !affordable && styles.buyBtnDisabled]}
-          onPress={onBuy}
-          disabled={!affordable}
-        >
-          {affordable && (
-            <LinearGradient
-              colors={gradient.gold}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 0, y: 1 }}
-              style={StyleSheet.absoluteFill}
-            />
+        <View style={styles.stateIndicator}>
+          {state === "owned" && (
+            <Text style={[styles.indicatorOwned, { color: colors.sage }]}>✓</Text>
           )}
-          <Text style={[styles.buyText, !affordable && styles.buyTextDisabled]}>
-            {cost} Eq
-          </Text>
-        </Pressy>
-      )}
+          {state === "locked" && (
+            <Text style={styles.indicatorLocked}>🔒</Text>
+          )}
+          {state === "available" && (
+            <Text style={[styles.indicatorCost, { color: accent }]}>
+              {cost}
+              <Text style={styles.indicatorEq}> Eq</Text>
+            </Text>
+          )}
+        </View>
+      </View>
+
+      {/* Node name + effect summary */}
+      <Text style={styles.nodeName} numberOfLines={2}>{node.name}</Text>
+      <Text style={[styles.nodeEffect, { color: accent }]} numberOfLines={2}>
+        {node.description}
+      </Text>
+    </Pressable>
+  );
+}
+
+// ─── ScreenHeader (same pattern as Producers/Allocate) ───────────────────
+function ScreenHeader({ title, sub, onBack }: { title: string; sub?: string; onBack(): void }) {
+  return (
+    <View style={styles.header}>
+      <Pressable onPress={onBack} hitSlop={12} style={styles.backBtn}>
+        <Text style={styles.backChevron}>‹</Text>
+      </Pressable>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.brand}>
+          BURN<Text style={{ color: colors.terracotta }}>·</Text>RATE
+        </Text>
+        <Text style={styles.title}>{title}</Text>
+        {sub && <Text style={styles.sub} numberOfLines={1}>{sub}</Text>}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.cream,
-    paddingHorizontal: spacing.l,
-    paddingTop: spacing.xl,
-  },
+  shell: { flex: 1, backgroundColor: colors.cream },
   header: {
+    paddingTop: 14,
+    paddingBottom: 10,
+    paddingHorizontal: 12,
+    backgroundColor: colors.cream_2,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.cream_4,
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: spacing.s,
+    gap: 8,
   },
-  back: { color: colors.terracotta, fontSize: 14, fontWeight: "600" },
-  branchBlock: { marginBottom: spacing.l, gap: spacing.s },
+  backBtn: { padding: 6 },
+  backChevron: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 22,
+    color: colors.ink,
+    lineHeight: 22,
+  },
+  brand: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 9,
+    color: colors.muted,
+    letterSpacing: 1.5,
+  },
+  title: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 18,
+    color: colors.ink,
+    marginTop: 2,
+    lineHeight: 18,
+  },
+  sub: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 9,
+    color: colors.muted,
+    letterSpacing: 0.5,
+    marginTop: 2,
+  },
+  equityCard: {
+    margin: 8,
+    marginBottom: 0,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: colors.cream_hi,
+    borderWidth: 1,
+    borderColor: colors.ink,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: PIXEL },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  equitySwatch: {
+    width: 16,
+    height: 16,
+  },
+  equityLabel: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 8,
+    color: colors.muted,
+    letterSpacing: 1,
+  },
+  equityValue: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 20,
+    color: colors.gold,
+    lineHeight: 20,
+    marginTop: 2,
+  },
+  equityNextHint: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 12,
+    color: colors.ink,
+    marginTop: 2,
+  },
+  branchList: {
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    gap: 10,
+  },
+  branch: {},
   branchHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.s,
-    marginBottom: spacing.xs,
+    gap: 6,
+    marginBottom: 4,
+    paddingHorizontal: 2,
   },
-  node: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.cardBg,
-    borderRadius: radii.md,
-    borderLeftWidth: 3,
+  branchSwatch: {
+    width: 8,
+    height: 8,
+  },
+  branchLabel: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 11,
+    letterSpacing: 1,
+  },
+  nodeRow: {
+    gap: 6,
+    paddingHorizontal: 2,
+    paddingBottom: 4,
+  },
+  nodeCard: {
+    width: 110,
+    padding: 6,
     borderWidth: 1,
-    borderColor: colors.hairline,
-    padding: spacing.m,
-    gap: spacing.m,
-    ...shadow.sm,
+    shadowOffset: { width: 0, height: PIXEL },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 0,
   },
-  nodeOwned: {
-    backgroundColor: "#F0EBDD",
-    borderColor: colors.gold,
+  nodeTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
-  nodeDisabled: { opacity: 0.6 },
-  nodeText: { flex: 1, gap: spacing.xs },
-  nodeTitleRow: {
+  tierBadge: {
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  tierBadgeText: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 9,
+    color: colors.cream_hi,
+    letterSpacing: 0.5,
+  },
+  stateIndicator: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.s,
   },
-  tierPill: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: radii.sm,
+  indicatorOwned: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 12,
   },
-  tierPillText: {
-    color: colors.cream,
-    fontSize: 10,
-    fontWeight: "700",
+  indicatorLocked: {
+    fontSize: 11,
   },
-  buyBtn: {
-    paddingHorizontal: spacing.l,
-    paddingVertical: spacing.m,
-    borderRadius: radii.sm,
-    minWidth: 90,
-    alignItems: "center",
-    backgroundColor: colors.gold,
-    overflow: "hidden",
-    ...shadow.md,
+  indicatorCost: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 11,
   },
-  buyBtnDisabled: { backgroundColor: colors.disabled },
-  buyText: { color: colors.ink, fontWeight: "700", fontSize: 14 },
-  buyTextDisabled: { color: colors.muted },
-  ownedTag: {
-    paddingHorizontal: spacing.m,
-    paddingVertical: spacing.s,
-    borderRadius: radii.sm,
-    backgroundColor: colors.sage,
-    minWidth: 90,
-    alignItems: "center",
+  indicatorEq: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 7,
   },
-  ownedText: { color: colors.cream, fontWeight: "700", fontSize: 12, letterSpacing: 0.6 },
+  nodeName: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 11,
+    color: colors.ink,
+    marginTop: 4,
+    lineHeight: 13,
+  },
+  nodeEffect: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 7,
+    letterSpacing: 0.5,
+    marginTop: 3,
+    lineHeight: 9,
+  },
 });

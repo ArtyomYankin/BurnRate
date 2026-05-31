@@ -1,297 +1,427 @@
-import { LinearGradient } from "expo-linear-gradient";
-import { Banknote, Beaker, Megaphone, Shield } from "lucide-react-native";
 import React, { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { DEFAULT_ALLOCATION } from "../core/math";
 import { Allocation } from "../core/types";
 import { selectAllocation, useGame } from "../game/store";
-import { Pressy } from "./Pressy";
-import { colors, gradient, radii, shadow, spacing, type } from "./theme";
-
-type DeptIcon = React.ComponentType<{ size: number; color: string; strokeWidth?: number }>;
-const ICONS: Record<keyof Allocation, DeptIcon> = {
-  rd: Beaker,
-  product: Banknote,
-  marketing: Megaphone,
-  safety: Shield,
-};
-const COLORS: Record<keyof Allocation, string> = {
-  rd: colors.sage,
-  product: colors.terracotta,
-  marketing: colors.gold,
-  safety: colors.tensionRed,
-};
+import { colors, fonts, PIXEL } from "./theme";
 
 interface Props {
   onBack(): void;
 }
 
-// GDD §4 Beat 2: budget sliders for the four departments. Each row is a
-// stepper (-/+) because true sliders on web+RN are fiddly and the integer-%
-// experience is fine for an idle game.
-const STEP = 0.05;
-const KEYS: (keyof Allocation)[] = ["rd", "product", "marketing", "safety"];
-const LABELS: Record<keyof Allocation, string> = {
-  rd: "R&D",
-  product: "Product",
-  marketing: "Marketing",
-  safety: "Safety",
+// 5% steps — matches Claude Design `AllocateModal` exactly. Big enough that
+// every tap moves the bar visibly, small enough to land on round numbers.
+const STEP_PCT = 5;
+
+type RowMeta = {
+  key: keyof Allocation;
+  label: string;
+  sub: string;
+  color: string;
 };
-const HELP: Record<keyof Allocation, string> = {
-  rd: "Research Points → permanent multipliers (research tree).",
-  product: "Capital → buy producers, fund the buildout.",
-  marketing: "Hype → eases funding-round closure.",
-  safety: "Pays down Alignment Debt (≥10% to avoid accrual).",
-};
+
+const ROWS: ReadonlyArray<RowMeta> = [
+  { key: "rd",        label: "R&D",       sub: "→ Research Points",  color: colors.sage },
+  { key: "product",   label: "Product",   sub: "→ Capital, Users",   color: colors.terracotta },
+  { key: "marketing", label: "Marketing", sub: "→ Hype",             color: colors.gold },
+  { key: "safety",    label: "Safety",    sub: "→ Pay Down Debt",    color: colors.tensionRed },
+];
 
 export function AllocateScreen({ onBack }: Props) {
   const stored = useGame(selectAllocation);
   const setAllocation = useGame((s) => s.setAllocation);
 
-  // Edit a local draft so the sliders don't fight each other tick-by-tick;
-  // commit on "Apply".
-  const [draft, setDraft] = useState<Allocation>(stored);
+  // Local draft as integer percentages 0..100. Easier to reason about for
+  // the proportional rebalance than fractional 0..1. Commit on Save.
+  const [draftPct, setDraftPct] = useState<Record<keyof Allocation, number>>({
+    rd:        Math.round(stored.rd * 100),
+    product:   Math.round(stored.product * 100),
+    marketing: Math.round(stored.marketing * 100),
+    safety:    Math.round(stored.safety * 100),
+  });
 
-  const adjust = (key: keyof Allocation, delta: number) => {
-    setDraft((d) => {
-      const next = clamp01(d[key] + delta);
-      const otherKeys = KEYS.filter((k) => k !== key);
-      // Redistribute the inverse delta across the other three proportionally
-      // to preserve sum=1. If others are all zero, split evenly.
-      const otherSum = otherKeys.reduce((acc, k) => acc + d[k], 0);
-      const inv = next - d[key]; // signed change we just applied to `key`
-      const out: Allocation = { ...d, [key]: next } as Allocation;
-      if (otherSum === 0) {
-        // even split if siblings have no room
-        for (const k of otherKeys) out[k] = clamp01((1 - next) / otherKeys.length);
-      } else {
-        for (const k of otherKeys) {
-          const share = d[k] / otherSum;
-          out[k] = clamp01(d[k] - inv * share);
-        }
+  const total =
+    draftPct.rd + draftPct.product + draftPct.marketing + draftPct.safety;
+  const balanced = total === 100;
+  const safetyLow = draftPct.safety < 10;
+
+  // Bump one key by `delta`%, then proportionally take/give the inverse from
+  // the other three so the sum stays at 100. Matches design's algorithm.
+  function bump(key: keyof Allocation, delta: number) {
+    setDraftPct((prev) => {
+      const next = Math.max(0, Math.min(100, prev[key] + delta));
+      const diff = next - prev[key];
+      const others = (Object.keys(prev) as (keyof Allocation)[]).filter((k) => k !== key);
+      const otherSum = others.reduce((s, k) => s + prev[k], 0);
+      const result = { ...prev, [key]: next };
+      if (otherSum > 0) {
+        let leftover = -diff;
+        others.forEach((k, i) => {
+          if (i === others.length - 1) {
+            // Soak any rounding error into the last sibling.
+            result[k] = Math.max(0, prev[k] + leftover);
+          } else {
+            const share = Math.round(-diff * (prev[k] / otherSum));
+            result[k] = Math.max(0, prev[k] + share);
+            leftover -= share;
+          }
+        });
       }
-      return normalizeLocal(out);
+      return result;
+    });
+  }
+
+  const reset = () => {
+    setDraftPct({
+      rd:        Math.round(DEFAULT_ALLOCATION.rd * 100),
+      product:   Math.round(DEFAULT_ALLOCATION.product * 100),
+      marketing: Math.round(DEFAULT_ALLOCATION.marketing * 100),
+      safety:    Math.round(DEFAULT_ALLOCATION.safety * 100),
     });
   };
 
-  const reset = () => setDraft(DEFAULT_ALLOCATION);
-  const apply = () => {
-    setAllocation(draft);
+  const save = () => {
+    if (!balanced) return;
+    setAllocation({
+      rd:        draftPct.rd / 100,
+      product:   draftPct.product / 100,
+      marketing: draftPct.marketing / 100,
+      safety:    draftPct.safety / 100,
+    });
     onBack();
   };
-  const dirty =
-    Math.abs(draft.rd - stored.rd) +
-      Math.abs(draft.product - stored.product) +
-      Math.abs(draft.marketing - stored.marketing) +
-      Math.abs(draft.safety - stored.safety) >
-    1e-9;
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Pressable onPress={onBack} hitSlop={12}>
-          <Text style={styles.back}>← back</Text>
-        </Pressable>
-        <Text style={type.caption}>Token budget</Text>
-      </View>
+    <View style={styles.shell}>
+      <ScreenHeader title="Allocate" sub="Split each token across departments" onBack={onBack} />
 
-      <Text style={type.body}>
-        Each tick your incoming tokens get split across these four departments.
-      </Text>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        {/* Stacked-bar preview — visual mirror of the bottom-of-Home alloc strip */}
+        <View style={styles.previewWrap}>
+          <View style={styles.previewBar}>
+            {ROWS.map((r, i) => (
+              <View
+                key={r.key}
+                style={{
+                  flex: Math.max(draftPct[r.key], 0.001),
+                  backgroundColor: r.color,
+                  borderRightWidth: i < ROWS.length - 1 ? 1 : 0,
+                  borderRightColor: "rgba(42,42,42,0.4)",
+                }}
+              >
+                <View style={styles.previewHi} />
+              </View>
+            ))}
+          </View>
+        </View>
 
-      <View style={styles.list}>
-        {KEYS.map((k) => (
-          <Row
-            key={k}
-            icon={ICONS[k]}
-            iconColor={COLORS[k]}
-            label={LABELS[k]}
-            help={HELP[k]}
-            value={draft[k]}
-            onDec={() => adjust(k, -STEP)}
-            onInc={() => adjust(k, +STEP)}
-            warnFloor={k === "safety" && draft.safety < 0.10}
-          />
-        ))}
-      </View>
+        {/* 4 stepper rows */}
+        <View style={styles.list}>
+          {ROWS.map((row) => {
+            const v = draftPct[row.key];
+            const warn = row.key === "safety" && v < 10;
+            return (
+              <View
+                key={row.key}
+                style={[
+                  styles.row,
+                  {
+                    backgroundColor: warn ? "#FCE6E8" : colors.cream_hi,
+                    borderColor: warn ? colors.tensionRed : colors.hairline,
+                  },
+                ]}
+              >
+                {/* Left: swatch + label + sub */}
+                <View style={styles.rowLeft}>
+                  <View style={[styles.swatch, { backgroundColor: warn ? colors.tensionRed : row.color }]} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={[styles.rowLabel, { color: warn ? colors.tensionRed : row.color }]}>
+                      {row.label}
+                    </Text>
+                    <Text style={styles.rowSub} numberOfLines={1}>{row.sub}</Text>
+                  </View>
+                </View>
 
-      <View style={styles.sumRow}>
-        <Text style={type.caption}>Total</Text>
-        <Text style={type.h2}>
-          {Math.round((draft.rd + draft.product + draft.marketing + draft.safety) * 100)}%
-        </Text>
-      </View>
+                {/* Minus stepper */}
+                <Pressable
+                  onPress={() => bump(row.key, -STEP_PCT)}
+                  style={[styles.stepperBtn, { backgroundColor: colors.cream_2 }]}
+                  hitSlop={6}
+                >
+                  <Text style={styles.stepperBtnText}>−</Text>
+                </Pressable>
 
-      <View style={styles.actions}>
-        <Pressy style={styles.secondary} onPress={reset}>
-          <Text style={styles.secondaryText}>Reset to default</Text>
-        </Pressy>
-        <Pressy
-          style={[styles.primary, !dirty && styles.primaryDisabled]}
-          onPress={apply}
-          disabled={!dirty}
-        >
-          {dirty && (
-            <LinearGradient
-              colors={gradient.terracotta}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 0, y: 1 }}
-              style={StyleSheet.absoluteFill}
-            />
+                {/* Big % value */}
+                <View style={styles.pctWrap}>
+                  <Text style={[styles.pct, { color: warn ? colors.tensionRed : row.color }]}>
+                    {v}
+                    <Text style={styles.pctSign}>%</Text>
+                  </Text>
+                </View>
+
+                {/* Plus stepper — colored to match the dept */}
+                <Pressable
+                  onPress={() => bump(row.key, +STEP_PCT)}
+                  style={[styles.stepperBtn, { backgroundColor: row.color }]}
+                  hitSlop={6}
+                >
+                  <Text style={[styles.stepperBtnText, { color: colors.cream_hi }]}>+</Text>
+                </Pressable>
+              </View>
+            );
+          })}
+        </View>
+
+        {/* Status line: total + warn/ok */}
+        <View style={styles.statusRow}>
+          <Text style={styles.statusTotal}>TOTAL · {total}%</Text>
+          {!balanced && (
+            <Text style={[styles.statusWarn, { color: colors.tensionRed }]}>
+              ⚠ MUST SUM TO 100%
+            </Text>
           )}
-          <Text style={styles.primaryText}>{dirty ? "Apply" : "Already applied"}</Text>
-        </Pressy>
-      </View>
-    </View>
-  );
-}
+          {balanced && safetyLow && (
+            <Text style={[styles.statusWarn, { color: colors.tensionRed }]}>
+              ⚠ ALIGNMENT DEBT WILL ACCRUE
+            </Text>
+          )}
+          {balanced && !safetyLow && (
+            <Text style={[styles.statusWarn, { color: colors.sage_2 }]}>
+              ✓ BALANCED
+            </Text>
+          )}
+        </View>
+      </ScrollView>
 
-function Row({
-  icon: Icon,
-  iconColor,
-  label,
-  help,
-  value,
-  onDec,
-  onInc,
-  warnFloor,
-}: {
-  icon: DeptIcon;
-  iconColor: string;
-  label: string;
-  help: string;
-  value: number;
-  onDec(): void;
-  onInc(): void;
-  warnFloor?: boolean;
-}) {
-  const tint = warnFloor ? colors.tensionRed : iconColor;
-  return (
-    <View style={[styles.row, warnFloor && { borderColor: colors.tensionRed }]}>
-      <View style={styles.iconBubble}>
-        <Icon size={20} color={tint} strokeWidth={2.25} />
-      </View>
-      <View style={styles.rowText}>
-        <Text style={[type.h2, { color: tint }]}>{label}</Text>
-        <Text style={type.caption}>{help}</Text>
-        {warnFloor && (
-          <Text style={[type.caption, { color: colors.tensionRed }]}>
-            Below 10% — Alignment Debt is accruing.
+      {/* Sticky CTA row at bottom */}
+      <View style={styles.ctaRow}>
+        <Pressable onPress={reset} style={[styles.btn, { backgroundColor: colors.cream_2 }]}>
+          <Text style={[styles.btnText, { color: colors.ink }]}>RESET</Text>
+        </Pressable>
+        <Pressable
+          onPress={save}
+          disabled={!balanced}
+          style={[
+            styles.btn,
+            styles.btnPrimary,
+            { backgroundColor: balanced ? colors.sage : colors.disabled },
+          ]}
+        >
+          <Text style={styles.btnText}>
+            {balanced ? "SAVE ALLOCATION" : `OFF BY ${total - 100 > 0 ? "+" : ""}${total - 100}%`}
           </Text>
-        )}
-      </View>
-      <View style={styles.stepperRow}>
-        <Pressy style={styles.stepBtn} onPress={onDec}>
-          <Text style={styles.stepText}>−</Text>
-        </Pressy>
-        <Text style={styles.pct}>{Math.round(value * 100)}%</Text>
-        <Pressy style={styles.stepBtn} onPress={onInc}>
-          <Text style={styles.stepText}>+</Text>
-        </Pressy>
+        </Pressable>
       </View>
     </View>
   );
 }
 
-function clamp01(x: number): number {
-  if (x < 0) return 0;
-  if (x > 1) return 1;
-  return x;
-}
-
-/** Renormalize a near-1 allocation back to exact 1 to avoid float drift. */
-function normalizeLocal(a: Allocation): Allocation {
-  const s = a.rd + a.product + a.marketing + a.safety;
-  if (s <= 0) return DEFAULT_ALLOCATION;
-  return {
-    rd: a.rd / s,
-    product: a.product / s,
-    marketing: a.marketing / s,
-    safety: a.safety / s,
-  };
+// ─── ScreenHeader (same pattern as ProducersScreen) ──────────────────────
+function ScreenHeader({ title, sub, onBack }: { title: string; sub?: string; onBack(): void }) {
+  return (
+    <View style={styles.header}>
+      <Pressable onPress={onBack} hitSlop={12} style={styles.backBtn}>
+        <Text style={styles.backChevron}>‹</Text>
+      </Pressable>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.brand}>
+          BURN<Text style={{ color: colors.terracotta }}>·</Text>RATE
+        </Text>
+        <Text style={styles.title}>{title}</Text>
+        {sub && <Text style={styles.sub}>{sub}</Text>}
+      </View>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.cream,
-    paddingHorizontal: spacing.l,
-    paddingTop: spacing.xl,
-    gap: spacing.m,
-  },
+  shell: { flex: 1, backgroundColor: colors.cream },
   header: {
+    paddingTop: 14,
+    paddingBottom: 10,
+    paddingHorizontal: 12,
+    backgroundColor: colors.cream_2,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.cream_4,
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
+    gap: 8,
   },
-  back: { color: colors.terracotta, fontSize: 14, fontWeight: "600" },
-  list: { gap: spacing.s, marginTop: spacing.s },
+  backBtn: { padding: 6 },
+  backChevron: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 22,
+    color: colors.ink,
+    lineHeight: 22,
+  },
+  brand: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 9,
+    color: colors.muted,
+    letterSpacing: 1.5,
+  },
+  title: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 18,
+    color: colors.ink,
+    marginTop: 2,
+    lineHeight: 18,
+  },
+  sub: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 9,
+    color: colors.muted,
+    letterSpacing: 0.5,
+    marginTop: 2,
+  },
+  scroll: {
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    paddingBottom: 100,
+  },
+  previewWrap: {
+    marginHorizontal: 4,
+    marginBottom: 10,
+  },
+  previewBar: {
+    flexDirection: "row",
+    height: 16,
+    borderWidth: 1,
+    borderColor: colors.ink,
+    backgroundColor: colors.cream_2,
+    overflow: "hidden",
+  },
+  previewHi: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 2,
+    backgroundColor: "rgba(255,255,255,0.25)",
+  },
+  list: {
+    gap: 6,
+    marginHorizontal: 4,
+  },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: colors.cardBg,
-    borderRadius: radii.md,
-    padding: spacing.m,
-    gap: spacing.m,
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
     borderWidth: 1,
-    borderColor: colors.hairline,
-    ...shadow.sm,
   },
-  iconBubble: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.cream,
+  rowLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    width: 110,
+    minWidth: 0,
+  },
+  swatch: {
+    width: 10,
+    height: 10,
+  },
+  rowLabel: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 13,
+    lineHeight: 13,
+  },
+  rowSub: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 7,
+    color: colors.muted,
+    letterSpacing: 0.5,
+    marginTop: 2,
+  },
+  stepperBtn: {
+    width: 26,
+    height: 26,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: colors.hairline,
+    borderColor: colors.ink,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: PIXEL },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 0,
   },
-  rowText: { flex: 1, gap: spacing.xs },
-  stepperRow: { flexDirection: "row", alignItems: "center", gap: spacing.s },
-  stepBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.sage,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  stepText: { color: colors.cream, fontSize: 18, fontWeight: "700" },
-  pct: {
-    minWidth: 44,
-    textAlign: "center",
+  stepperBtnText: {
+    fontFamily: fonts.bodyBold,
     fontSize: 16,
-    fontWeight: "700",
     color: colors.ink,
+    lineHeight: 16,
   },
-  sumRow: {
+  pctWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 50,
+  },
+  pct: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 22,
+    lineHeight: 22,
+  },
+  pctSign: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 9,
+  },
+  statusRow: {
+    marginTop: 10,
+    marginHorizontal: 4,
+    paddingHorizontal: 8,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: spacing.s,
-    paddingVertical: spacing.s,
   },
-  actions: { flexDirection: "row", gap: spacing.m, marginTop: spacing.s },
-  primary: {
-    flex: 1,
-    backgroundColor: colors.terracotta,
-    padding: spacing.l,
-    borderRadius: radii.md,
-    alignItems: "center",
-    overflow: "hidden",
-    ...shadow.md,
+  statusTotal: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 9,
+    color: colors.muted,
+    letterSpacing: 1,
   },
-  primaryDisabled: { backgroundColor: colors.disabled },
-  primaryText: { color: colors.cream, fontWeight: "700" },
-  secondary: {
-    flex: 1,
-    padding: spacing.l,
-    borderRadius: radii.md,
-    alignItems: "center",
-    backgroundColor: colors.cardBg,
+  statusWarn: {
+    fontFamily: fonts.display,
+    fontSize: 9,
+    letterSpacing: 1,
+  },
+  ctaRow: {
+    position: "absolute",
+    left: 8,
+    right: 8,
+    bottom: 16,
+    flexDirection: "row",
+    gap: 8,
+  },
+  btn: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderWidth: 1,
-    borderColor: colors.hairline,
+    borderColor: colors.ink,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: PIXEL },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 88,
   },
-  secondaryText: { color: colors.ink, fontWeight: "600" },
+  btnPrimary: {
+    flex: 1,
+  },
+  btnText: {
+    fontFamily: fonts.display,
+    fontSize: 12,
+    color: colors.cream_hi,
+    letterSpacing: 1,
+  },
 });

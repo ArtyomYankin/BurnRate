@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { D } from "../decimal";
 import {
+  agiArcDebtMultiplier,
   allChainSupplies,
+  autonomousAgentMult,
   bottleneckChain,
   buyProducer,
   canPrestige,
@@ -20,7 +22,8 @@ import {
   upgradeMultiplier,
   upgradeTier,
 } from "../math";
-import { PRODUCER_BY_ID } from "../producers";
+import { AUTONOMOUS_AGENT, PRODUCER_BY_ID } from "../producers";
+import { NO_RESEARCH_EFFECTS } from "../research";
 import { Allocation, PersistentState, RunState } from "../types";
 
 const close = (actual: ReturnType<typeof D>, expected: number, eps = 1e-6) => {
@@ -54,6 +57,9 @@ const freshPersistent = (debt = 0): PersistentState => ({
   alignmentDebt: D(debt).toString(),
   unlockedResearch: [],
   firedDebtThresholds: [],
+  unlockedVignettes: [],
+  unreadVignettes: [],
+  resolvedVignettes: {},
 });
 
 describe("producer cost math", () => {
@@ -151,17 +157,28 @@ describe("Liebig pipeline (GDD §7)", () => {
     expect(tokensPerSec(s).toNumber()).toBe(0);
   });
 
-  it("balanced lowest-tier yields min × engineerMultiplier(eng_supply)", () => {
+  it("balanced lowest-tier: engineer multiplier is FLOORED at 1.0 below eng_supply 1.0", () => {
+    // 1 of each tier-0 → eng_supply 0.10 → raw 0.10^0.8 = 0.158, but the
+    // floor lifts it to 1.0. So tokens = min(0.30,0.20,0.15) × 1.0 = 0.15.
     const s = balanced1();
-    // engineer side uses ^ENGINEER_SCALING_EXPONENT, not sqrt
-    const expected = 0.15 * Math.pow(0.10, ENGINEER_SCALING_EXPONENT);
-    expect(tokensPerSec(s).toNumber()).toBeCloseTo(expected, 9);
+    expect(tokensPerSec(s).toNumber()).toBeCloseTo(0.15, 9);
   });
 
-  it("doubling all four chains scales tokens by 2 × 2^ENG_EXPONENT", () => {
-    // min scales linearly (2x); engineers scale via pow(2, ENGINEER_SCALING_EXPONENT).
+  it("doubling all four chains while still under the engineer floor scales by min only", () => {
+    // balanced1 eng_supply 0.10 (floored→1.0); ×2 → eng_supply 0.20 (still
+    // floored→1.0). Engineer part is flat 1.0 in both, so the ratio is just
+    // the 2× from the min(flow) side.
     const s1 = balanced1();
     const s2 = withOwned({ intern: 2, single_h100: 2, common_crawl: 2, office_grid: 2 });
+    const ratio = tokensPerSec(s2).div(tokensPerSec(s1)).toNumber();
+    expect(ratio).toBeCloseTo(2, 6);
+  });
+
+  it("above the engineer floor, doubling scales by 2 × 2^ENG_EXPONENT (power curve intact)", () => {
+    // Use 20 of each so eng_supply (2.0) is well past the 1.0 floor, where the
+    // pure power curve governs. Doubling to 40 each keeps both sides above floor.
+    const s1 = withOwned({ intern: 20, single_h100: 20, common_crawl: 20, office_grid: 20 });
+    const s2 = withOwned({ intern: 40, single_h100: 40, common_crawl: 40, office_grid: 40 });
     const ratio = tokensPerSec(s2).div(tokensPerSec(s1)).toNumber();
     expect(ratio).toBeCloseTo(2 * Math.pow(2, ENGINEER_SCALING_EXPONENT), 6);
   });
@@ -183,13 +200,21 @@ describe("Liebig pipeline (GDD §7)", () => {
     expect(tokensPerSec(s).toNumber()).toBeCloseTo(expected, 4);
   });
 
-  it("engineerMultiplier follows ENGINEER_SCALING_EXPONENT", () => {
-    expect(engineerMultiplier(D(0)).toNumber()).toBe(0);
+  it("engineerMultiplier follows ENGINEER_SCALING_EXPONENT above the 1.0 floor", () => {
+    expect(engineerMultiplier(D(0)).toNumber()).toBe(0); // no engineers ⇒ no tokens
     expect(engineerMultiplier(D(1)).toNumber()).toBeCloseTo(1, 9);
     expect(engineerMultiplier(D(10)).toNumber()).toBeCloseTo(
       Math.pow(10, ENGINEER_SCALING_EXPONENT),
       6
     );
+  });
+
+  it("engineerMultiplier floors at 1.0 for positive supply below 1.0", () => {
+    // Raw 0.10^0.8 = 0.158 and 0.50^0.8 = 0.574 — both lifted to 1.0.
+    expect(engineerMultiplier(D(0.1)).toNumber()).toBe(1);
+    expect(engineerMultiplier(D(0.5)).toNumber()).toBe(1);
+    // At exactly 1.0 the floor and the curve agree.
+    expect(engineerMultiplier(D(1)).toNumber()).toBeCloseTo(1, 9);
   });
 
   it("research tokensMult scales tokens linearly", () => {
@@ -273,6 +298,43 @@ describe("buyProducer", () => {
   });
 });
 
+describe("Autonomous Agent (GDD §6 AGI arc)", () => {
+  it("no agents ⇒ ×1 multiplier (no-op for the whole pre-AGI game)", () => {
+    expect(autonomousAgentMult(balanced1()).toNumber()).toBe(1);
+  });
+
+  it("agent multiplier stacks as multPerUnit^owned", () => {
+    const s = withOwned({ ...balanced1().producersOwned, [AUTONOMOUS_AGENT.id]: 3 });
+    const expected = Math.pow(AUTONOMOUS_AGENT.multPerUnit, 3);
+    close(autonomousAgentMult(s), expected, 1e-9);
+  });
+
+  it("tokensPerSec scales by the agent multiplier", () => {
+    const base = tokensPerSec(balanced1());
+    const withAgents = tokensPerSec(
+      withOwned({ ...balanced1().producersOwned, [AUTONOMOUS_AGENT.id]: 5 })
+    );
+    const ratio = withAgents.div(base).toNumber();
+    expect(ratio).toBeCloseTo(Math.pow(AUTONOMOUS_AGENT.multPerUnit, 5), 6);
+  });
+
+  it("the agent never feeds the chain pipeline (supplies unchanged)", () => {
+    const without = allChainSupplies(balanced1());
+    const withAgents = allChainSupplies(
+      withOwned({ ...balanced1().producersOwned, [AUTONOMOUS_AGENT.id]: 9 })
+    );
+    expect(withAgents.gpu.toNumber()).toBe(without.gpu.toNumber());
+    expect(withAgents.engineers.toNumber()).toBe(without.engineers.toNumber());
+  });
+
+  it("buyProducer can purchase the agent via the shared cost path", () => {
+    const s0 = { ...freshRunState(), capital: D(AUTONOMOUS_AGENT.baseCostCapital).toString() };
+    const r = buyProducer(s0, AUTONOMOUS_AGENT.id, 1);
+    expect(r.bought).toBe(1);
+    expect(r.run.producersOwned[AUTONOMOUS_AGENT.id]).toBe(1);
+  });
+});
+
 describe("Allocate beat (GDD §4 Beat 2 + §9)", () => {
   it("default allocation sums to 1.0", () => {
     const a = DEFAULT_ALLOCATION;
@@ -350,6 +412,43 @@ describe("Alignment Debt economy (GDD §9)", () => {
   });
 });
 
+describe("AGI-arc debt escalation (GDD §5)", () => {
+  it("pre-arc rounds (0-6) have no escalation: ×1", () => {
+    expect(agiArcDebtMultiplier(0)).toBe(1);
+    expect(agiArcDebtMultiplier(6)).toBe(1);
+  });
+
+  it("escalates +0.5/round from Acquisition (7) onward", () => {
+    expect(agiArcDebtMultiplier(7)).toBeCloseTo(1.5, 9);
+    expect(agiArcDebtMultiplier(8)).toBeCloseTo(2.0, 9);
+    expect(agiArcDebtMultiplier(11)).toBeCloseTo(3.5, 9);
+  });
+
+  it("debtRatePerSec accrual scales by the arc multiplier", () => {
+    const preArc = debtRatePerSec(0, NO_RESEARCH_EFFECTS, 0);
+    const inArc = debtRatePerSec(0, NO_RESEARCH_EFFECTS, 7);
+    expect(inArc).toBeCloseTo(preArc * 1.5, 12);
+  });
+
+  it("pay-down (Safety surplus) is NOT escalated by the arc", () => {
+    const preArc = debtRatePerSec(0.5, NO_RESEARCH_EFFECTS, 0);
+    const inArc = debtRatePerSec(0.5, NO_RESEARCH_EFFECTS, 11);
+    expect(inArc).toBe(preArc);
+  });
+
+  it("tickRun in the AGI arc accrues debt faster than pre-arc", () => {
+    const alloc = { rd: 0, product: 0, marketing: 0, safety: 0 }; // max neglect
+    const preArc = withOwned({}, alloc);
+    const inArc = { ...withOwned({}, alloc), fundingRoundIdx: 11 };
+    const rPre = tickRun(preArc, freshPersistent(0), 100);
+    const rArc = tickRun(inArc, freshPersistent(0), 100);
+    expect(D(rArc.persistent.alignmentDebt).toNumber()).toBeCloseTo(
+      D(rPre.persistent.alignmentDebt).toNumber() * 3.5,
+      6
+    );
+  });
+});
+
 describe("freshRunState", () => {
   it("starts with asymmetric tier-0 counts: 1 Engineer, 3 of each flow chain", () => {
     const s = freshRunState();
@@ -359,28 +458,28 @@ describe("freshRunState", () => {
     expect(s.producersOwned["office_grid"]).toBe(3);
   });
 
-  it("starting tokens/sec is non-zero and playable", () => {
+  it("starting tokens/sec is non-zero and playable (engineer floor lifts the opening rate)", () => {
     const s = freshRunState();
     // supplies: {eng: 0.10, gpu: 0.90, data: 0.60, energy: 0.45}
-    // min(0.90, 0.60, 0.45) × engMult(0.10) = 0.45 × 0.10^0.8 ≈ 0.0714
-    const expected = 0.45 * Math.pow(0.10, ENGINEER_SCALING_EXPONENT);
-    expect(tokensPerSec(s).toNumber()).toBeCloseTo(expected, 6);
+    // engMult(0.10) is floored to 1.0, so rate = min(0.90, 0.60, 0.45) × 1.0.
+    expect(tokensPerSec(s).toNumber()).toBeCloseTo(0.45, 6);
   });
 
-  it("buying 1 more Intern outperforms buying 1 more Office Grid at start (Engineer ROI window)", () => {
+  it("at the start a flow buy (Office Grid) beats an engineer buy (engineers sit under the floor)", () => {
     const s = freshRunState();
     const baseRate = tokensPerSec(s).toNumber();
+    // +1 Intern: eng_supply 0.10 → 0.20, both floored to 1.0 → no rate gain.
     const withExtraIntern = tokensPerSec({
       ...s,
       producersOwned: { ...s.producersOwned, intern: 2 },
     }).toNumber();
+    // +1 Office Grid: lifts the energy bottleneck 0.45 → 0.60 → real gain.
     const withExtraOffice = tokensPerSec({
       ...s,
       producersOwned: { ...s.producersOwned, office_grid: 4 },
     }).toNumber();
-    // The starter is tuned so the first Engineer purchase is the highest-ROI
-    // move. Once eng_supply grows past ~0.44 × min, Office Grid takes over.
-    expect(withExtraIntern - baseRate).toBeGreaterThan(withExtraOffice - baseRate);
+    expect(withExtraIntern - baseRate).toBeCloseTo(0, 9); // engineer buy is flat under the floor
+    expect(withExtraOffice - baseRate).toBeGreaterThan(0.1); // flow buy moves the needle
   });
 });
 

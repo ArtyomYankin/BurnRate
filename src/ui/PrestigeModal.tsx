@@ -3,7 +3,7 @@ import React, { useEffect, useState } from "react";
 import { Modal, StyleSheet, Text, View } from "react-native";
 import { D } from "../core/decimal";
 import { equityFromPrestige } from "../core/math";
-import { getRound, M0_LAST_ROUND_IDX } from "../core/rounds";
+import { getRound, LAST_ROUND_IDX } from "../core/rounds";
 import { useGame } from "../game/store";
 import { formatNumber } from "./formatNumber";
 import { ParticleBurst } from "./ParticleBurst";
@@ -20,8 +20,8 @@ export function PrestigeModal({ visible, onClose }: Props) {
   const prestige = useGame((s) => s.prestige);
   const award = equityFromPrestige(run);
   const round = getRound(run.fundingRoundIdx);
-  const nextRound = getRound(Math.min(run.fundingRoundIdx + 1, M0_LAST_ROUND_IDX + 1));
-  const atM0Cap = run.fundingRoundIdx >= M0_LAST_ROUND_IDX;
+  const nextRound = getRound(Math.min(run.fundingRoundIdx + 1, LAST_ROUND_IDX));
+  const atFinalRound = run.fundingRoundIdx >= LAST_ROUND_IDX;
   const [burst, setBurst] = useState(0);
 
   // Reset burst counter when the modal opens so the burst can fire again on
@@ -57,7 +57,7 @@ export function PrestigeModal({ visible, onClose }: Props) {
             <Stat label="Equity awarded" value={`+ ${formatNumber(award)}`} highlight />
             <Stat
               label="Next round"
-              value={atM0Cap ? "(unlocks past Series C in M+2)" : nextRound.name}
+              value={atFinalRound ? "Singularity achieved — loop" : nextRound.name}
             />
           </View>
 

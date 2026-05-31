@@ -1,4 +1,7 @@
 import { StatusBar } from "expo-status-bar";
+import { useFonts, PixelifySans_400Regular, PixelifySans_500Medium, PixelifySans_600SemiBold, PixelifySans_700Bold } from "@expo-google-fonts/pixelify-sans";
+import { Silkscreen_400Regular, Silkscreen_700Bold } from "@expo-google-fonts/silkscreen";
+import { VT323_400Regular } from "@expo-google-fonts/vt323";
 import React, { useEffect, useRef, useState } from "react";
 import { AppState, AppStateStatus, SafeAreaView, StyleSheet } from "react-native";
 import { freshSave } from "./src/core/save";
@@ -13,12 +16,22 @@ import { PrestigeModal } from "./src/ui/PrestigeModal";
 import { ProducersScreen } from "./src/ui/ProducersScreen";
 import { ResearchScreen } from "./src/ui/ResearchScreen";
 import { TrainingRunModal } from "./src/ui/TrainingRunModal";
+import { VignettesInbox } from "./src/ui/VignettesInbox";
 import { colors } from "./src/ui/theme";
 import { ChainId } from "./src/core/types";
 
-type Screen = "home" | "producers" | "allocate" | "research";
+type Screen = "home" | "producers" | "allocate" | "research" | "vignettes";
 
 export default function App() {
+  const [fontsLoaded] = useFonts({
+    PixelifySans_400Regular,
+    PixelifySans_500Medium,
+    PixelifySans_600SemiBold,
+    PixelifySans_700Bold,
+    Silkscreen_400Regular,
+    Silkscreen_700Bold,
+    VT323_400Regular,
+  });
   const [screen, setScreen] = useState<Screen>("home");
   const [producersChain, setProducersChain] = useState<ChainId | undefined>(undefined);
   const [prestigeOpen, setPrestigeOpen] = useState(false);
@@ -76,6 +89,13 @@ export default function App() {
     return () => clearInterval(id);
   }, [hydrated, toSaveBlob]);
 
+  if (!fontsLoaded) {
+    // Keep the splash visible until pixel fonts arrive — first paint must be
+    // in-style, otherwise text reflows from system sans to Pixelify and
+    // everything jumps. Cheap: bundled .ttfs load in <100ms.
+    return <SafeAreaView style={styles.root} />;
+  }
+
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar style="dark" />
@@ -89,7 +109,11 @@ export default function App() {
           onOpenResearch={() => setScreen("research")}
           onOpenTraining={() => setTrainingOpen(true)}
           onOpenPrestige={() => setPrestigeOpen(true)}
+          onOpenVignettes={() => setScreen("vignettes")}
         />
+      )}
+      {screen === "vignettes" && (
+        <VignettesInbox onBack={() => setScreen("home")} />
       )}
       {screen === "producers" && (
         <ProducersScreen

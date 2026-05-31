@@ -1,12 +1,16 @@
 import { D, Decimal, ZERO } from "./decimal";
-import { Allocation, ChainId, PersistentState, ProducerDef, RunState } from "./types";
+import { Allocation, ChainId, PersistentState, RunState } from "./types";
 import {
   activeEffectForDebtEvent,
   detectThresholdsCrossed,
   getDebtEvent,
 } from "./debtEvents";
 import { aggregateActiveEffects, mergeEffects, pruneExpired } from "./effects";
-import { PRODUCER_BY_ID, producersForChain } from "./producers";
+import {
+  AUTONOMOUS_AGENT,
+  COST_DEF_BY_ID,
+  producersForChain,
+} from "./producers";
 import { NO_RESEARCH_EFFECTS, ResearchEffects } from "./research";
 import { getRound } from "./rounds";
 
@@ -43,6 +47,22 @@ const SAFETY_FLOOR = 0.10;
 const DEBT_K_PER_HOUR = 25;
 const SECS_PER_HOUR = 3600;
 
+// GDD §5 AGI arc: from the Acquisition round (idx 7) on, alignment debt
+// ACCRUES faster — a more capable model makes safety neglect compound harder.
+// Pay-down is untouched; only the accrual side escalates. Matches the round
+// where the Autonomous Agent unlocks (AUTONOMOUS_AGENT.unlockRoundIdx).
+export const AGI_ARC_START_ROUND = 7;
+const AGI_DEBT_ESCALATION_PER_ROUND = 0.5;
+
+/**
+ * Accrual multiplier for the AGI arc. ×1 for all pre-arc rounds, then climbs
+ * +0.5 per round: round 7 → ×1.5, round 8 → ×2.0, … round 11 → ×3.5.
+ */
+export function agiArcDebtMultiplier(roundIdx: number): number {
+  if (roundIdx < AGI_ARC_START_ROUND) return 1;
+  return 1 + (roundIdx - (AGI_ARC_START_ROUND - 1)) * AGI_DEBT_ESCALATION_PER_ROUND;
+}
+
 export function normalizeAllocation(a: Allocation): Allocation {
   const sum = a.rd + a.product + a.marketing + a.safety;
   if (sum <= 0) return { ...DEFAULT_ALLOCATION };
@@ -59,7 +79,7 @@ export function normalizeAllocation(a: Allocation): Allocation {
  * Geometric series: base * mult^owned * (mult^count - 1) / (mult - 1)
  */
 export function producerBatchCost(
-  def: ProducerDef,
+  def: { baseCostCapital: number; costMult: number },
   owned: number,
   count = 1
 ): Decimal {
@@ -77,7 +97,10 @@ export function producerBatchCost(
 /**
  * GDD §6: cost of the *next* single producer of a tier.
  */
-export function nextProducerCost(def: ProducerDef, owned: number): Decimal {
+export function nextProducerCost(
+  def: { baseCostCapital: number; costMult: number },
+  owned: number
+): Decimal {
   return D(def.baseCostCapital).mul(D(def.costMult).pow(owned));
 }
 
@@ -151,16 +174,27 @@ export function allChainSupplies(
  * any flow chain's, and the whole branch turns into decoration.
  *
  * 0.8 preserves the sub-linear "9 women, 1 month" intent (still diminishing
- * returns on headcount) but shifts the marginal-ROI threshold to
- *   eng_supply < 0.71 × min_supply
- * which is just above the natural parity ratio of 0.67. Engineers stay in
- * the buy rotation, the GDD joke survives, the chain is no longer dead.
+ * returns on headcount).
  */
 export const ENGINEER_SCALING_EXPONENT = 0.8;
 
+/**
+ * Engineer multiplier, FLOORED AT 1.0 for any positive supply.
+ *
+ * Why the floor: at the fresh-start state (1 Intern → eng_supply 0.10), a raw
+ * 0.10^0.8 = 0.158 multiplier deflated production ~6× and made the first
+ * purchase take minutes. A multiplier below 1.0 also reads as nonsense —
+ * "having one engineer makes me produce LESS?" The floor means engineers
+ * never penalize; they only ever add, once you push supply past 1.0
+ * (≈10 tier-0 Interns). Below that the curve is flat 1.0 — the player is
+ * meant to invest in the flow chains first (raising min), then engineers.
+ *
+ * The floor only touches eng_supply < 1.0, so late-game pacing (hundreds of
+ * engineers) is byte-for-byte unchanged from the pure-power curve.
+ */
 export function engineerMultiplier(engSupply: Decimal): Decimal {
-  if (engSupply.lte(0)) return ZERO;
-  return engSupply.pow(ENGINEER_SCALING_EXPONENT);
+  if (engSupply.lte(0)) return ZERO; // GDD §7: no engineers ⇒ no tokens
+  return Decimal.max(1, engSupply.pow(ENGINEER_SCALING_EXPONENT));
 }
 
 /**
@@ -182,7 +216,22 @@ export function tokensPerSec(
   if (s.engineers.lte(0)) return ZERO;
   const bottleneck = Decimal.min(s.gpu, Decimal.min(s.data, s.energy));
   if (bottleneck.lte(0)) return ZERO;
-  return bottleneck.mul(engineerMultiplier(s.engineers)).mul(effects.tokensMult);
+  return bottleneck
+    .mul(engineerMultiplier(s.engineers))
+    .mul(effects.tokensMult)
+    .mul(autonomousAgentMult(run));
+}
+
+/**
+ * GDD §6 AGI arc: self-improving-AI flywheel. Each Autonomous Agent owned
+ * multiplies TOTAL tokens/sec by `multPerUnit`, stacking exponentially with
+ * the count owned. Returns ×1 when none are owned, so it's a no-op for the
+ * entire pre-AGI game.
+ */
+export function autonomousAgentMult(run: RunState): Decimal {
+  const owned = run.producersOwned[AUTONOMOUS_AGENT.id] ?? 0;
+  if (owned <= 0) return D(1);
+  return D(AUTONOMOUS_AGENT.multPerUnit).pow(owned);
 }
 
 /**
@@ -224,11 +273,14 @@ export function bottleneckChain(
  */
 export function debtRatePerSec(
   safetyPct: number,
-  effects: ResearchEffects = NO_RESEARCH_EFFECTS
+  effects: ResearchEffects = NO_RESEARCH_EFFECTS,
+  roundIdx = 0
 ): number {
   const offset = SAFETY_FLOOR - safetyPct;
   const base = (offset * DEBT_K_PER_HOUR) / SECS_PER_HOUR;
-  if (base > 0) return base * effects.debtAccrualMult;
+  if (base > 0) {
+    return base * effects.debtAccrualMult * agiArcDebtMultiplier(roundIdx);
+  }
   return base;
 }
 
@@ -300,7 +352,7 @@ export function tickRun(
 
   // Alignment debt: accrues whenever Safety < 10%. Capped at zero.
   const prevDebt = D(persistent.alignmentDebt);
-  const debtDelta = debtRatePerSec(alloc.safety, effects) * dtSeconds;
+  const debtDelta = debtRatePerSec(alloc.safety, effects, run.fundingRoundIdx) * dtSeconds;
   const nextDebt = Decimal.max(0, prevDebt.add(debtDelta));
 
   // Threshold events: compare prev vs new debt against the unfired thresholds.
@@ -355,7 +407,7 @@ export function buyProducer(
   producerId: string,
   count = 1
 ): { run: RunState; bought: number; spent: Decimal } {
-  const def = PRODUCER_BY_ID[producerId];
+  const def = COST_DEF_BY_ID[producerId];
   if (!def) return { run, bought: 0, spent: ZERO };
   const owned = run.producersOwned[producerId] ?? 0;
   const cost = producerBatchCost(def, owned, count);
@@ -425,11 +477,18 @@ export const STARTER_FLOW = 3;
  * Fresh starting run-state. Identical every time — research-tree multipliers
  * (purchased with persistent Equity) are what compound across prestiges.
  */
+// Seed capital so the player can make their first 1–2 purchases the instant
+// they open the game, instead of staring at a slow capital trickle. Re-granted
+// every prestige (freshRunState runs on round close) so each round opens with
+// a little buying power rather than a dead trickle. Negligible against
+// late-game capital magnitudes.
+export const STARTER_CAPITAL = 30;
+
 export function freshRunState(): RunState {
   return {
     fundingRoundIdx: 0,
     tokens: ZERO.toString(),
-    capital: ZERO.toString(),
+    capital: D(STARTER_CAPITAL).toString(),
     hype: ZERO.toString(),
     researchPoints: ZERO.toString(),
     allocation: { ...DEFAULT_ALLOCATION },

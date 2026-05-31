@@ -15,6 +15,9 @@ const persistent = (overrides: Partial<PersistentState> = {}): PersistentState =
   alignmentDebt: D(0).toString(),
   unlockedResearch: [],
   firedDebtThresholds: [],
+  unlockedVignettes: [],
+  unreadVignettes: [],
+  resolvedVignettes: {},
   ...overrides,
 });
 

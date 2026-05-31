@@ -28,6 +28,9 @@ export function freshSave(now: number = Date.now()): SaveBlob {
       alignmentDebt: ZERO.toString(),
       unlockedResearch: [],
       firedDebtThresholds: [],
+      unlockedVignettes: [],
+      unreadVignettes: [],
+      resolvedVignettes: {},
     },
     account: {
       anonUid: genUid(),
@@ -67,6 +70,9 @@ export function migrate(raw: unknown): SaveBlob {
       alignmentDebt: string;
       unlockedResearch: string[];
       firedDebtThresholds: number[];
+      unlockedVignettes: string[];
+      unreadVignettes: string[];
+      resolvedVignettes: Record<string, number>;
     }>;
     return {
       schemaVersion: SCHEMA_VERSION,
@@ -83,6 +89,15 @@ export function migrate(raw: unknown): SaveBlob {
         alignmentDebt:       oldPersist.alignmentDebt       ?? ZERO.toString(),
         unlockedResearch:    oldPersist.unlockedResearch    ?? [],
         firedDebtThresholds: oldPersist.firedDebtThresholds ?? [],
+        // v5 → v6: vignettes added. Empty arrays are safe — the trigger
+        // loop re-checks unlock conditions every tick and will repopulate
+        // anything the player has already qualified for on next session.
+        unlockedVignettes:   oldPersist.unlockedVignettes   ?? [],
+        unreadVignettes:     oldPersist.unreadVignettes     ?? [],
+        // v6 → v7: Beat 3 resolutions. Empty map = "no replies picked yet"
+        // — when the player re-opens an unlocked Slack DM with replyEffects,
+        // they get a fresh chance to pick a reply.
+        resolvedVignettes:   oldPersist.resolvedVignettes   ?? {},
       },
       account: blob.account as AccountState,
     };
