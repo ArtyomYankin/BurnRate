@@ -28,6 +28,7 @@ const freshPersistent = (overrides: Partial<PersistentState> = {}): PersistentSt
   unlockedVignettes: [],
   unreadVignettes: [],
   resolvedVignettes: {},
+  unlockedAchievements: [],
   ...overrides,
 });
 

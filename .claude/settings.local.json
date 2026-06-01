@@ -23,7 +23,15 @@
       "PowerShell(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch 'Loopback|vEthernet|WSL' -and $_.IPAddress -notmatch '^169' } | Select-Object InterfaceAlias, IPAddress | Format-Table -AutoSize)",
       "Bash(tar -xzf webfetch-1779980143530-qzbici.bin -C design_extract)",
       "Bash(findstr :8081)",
-      "Bash(findstr LISTENING)"
+      "Bash(findstr LISTENING)",
+      "Bash(node d:/BurnRate/tools/gen-placeholder-sfx.js)",
+      "Bash(mkdir -p design_v3)",
+      "Bash(tar -xzf webfetch-1780236717576-4enr8h.bin -C design_v3)",
+      "Bash(tar -tzf webfetch-1780236717576-4enr8h.bin)",
+      "Bash(mkdir -p design_v4)",
+      "Bash(tar -xzf webfetch-1780239270453-3aaswj.bin -C design_v4)",
+      "Bash(sed -i '566,723d' d:/BurnRate/src/ui/PixelScene.tsx)",
+      "Bash(sed -n '560,572p' d:/BurnRate/src/ui/PixelScene.tsx)"
     ]
   }
 }

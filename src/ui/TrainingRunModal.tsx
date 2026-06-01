@@ -15,6 +15,8 @@ import {
   selectTrainingPity,
   useGame,
 } from "../game/store";
+import * as audio from "../audio";
+import { CueId } from "../audio/registry";
 import { formatNumber } from "./formatNumber";
 import { colors, fonts, PIXEL } from "./theme";
 
@@ -47,6 +49,14 @@ const TIER_COLOR: Record<TrainingTier, string> = {
   Solid:        colors.sage_2,
   SOTA:         colors.terracotta,
   Breakthrough: colors.gold,
+};
+
+const TIER_CUE: Record<TrainingTier, CueId> = {
+  Failed:       "tr_failed",
+  Marginal:     "tr_marginal",
+  Solid:        "tr_solid",
+  SOTA:         "tr_sota",
+  Breakthrough: "tr_breakthrough",
 };
 
 // Display multiplier per tier — pulled from the *real* TIER_TOKEN_MULT table
@@ -132,6 +142,7 @@ export function TrainingRunModal({ visible, onClose }: Props) {
         // Snap to the locked-in result and flip to reveal
         setReelIdx(targetIdx);
         setPhase("reveal");
+        audio.play(TIER_CUE[result.tier]);
       }
     };
     const id = setTimeout(tick, interval);

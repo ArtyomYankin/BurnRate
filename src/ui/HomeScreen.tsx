@@ -4,6 +4,7 @@ import { D } from "../core/decimal";
 import { PRODUCER_BY_ID } from "../core/producers";
 import { getRound } from "../core/rounds";
 import { ChainId, ProducerDef } from "../core/types";
+import { effectiveRoundThreshold, hypeThresholdDiscount } from "../core/math";
 import {
   selectActiveEffects,
   selectAlignmentDebtStr,
@@ -12,16 +13,23 @@ import {
   selectCapitalStr,
   selectEquityStr,
   selectFundingRoundIdx,
+  selectHypeStr,
+  selectPendingDebtEvents,
   selectProducersOwned,
   selectTokensStr,
+  selectUnlockedAchievementCount,
   selectUnreadVignetteCount,
   tokensPerSec,
   useGame,
 } from "../game/store";
+import * as audio from "../audio";
+import { useAudioStore } from "../audio";
 import { BottomAllocation } from "./BottomAllocation";
+import { BuffsModal } from "./BuffsModal";
 import { formatNumber, formatRate } from "./formatNumber";
 import { ItemPopup, PopupContent } from "./ItemPopup";
 import { HitId, PixelScene, sceneForRound } from "./PixelScene";
+import { Onboarding, tutorialHighlightForStep } from "./Onboarding";
 import { Pressy } from "./Pressy";
 import { colors, fonts } from "./theme";
 import { DevPanel } from "./DevPanel";
@@ -34,6 +42,7 @@ interface Props {
   onOpenTraining(): void;
   onOpenPrestige(): void;
   onOpenVignettes(): void;
+  onOpenAchievements(): void;
 }
 
 // Map each hit zone in the scene to a producer tier (so the popup can show
@@ -61,10 +70,12 @@ export function HomeScreen({
   onOpenTraining,
   onOpenPrestige,
   onOpenVignettes,
+  onOpenAchievements,
 }: Props) {
   const tokensStr = useGame(selectTokensStr);
   const capitalStr = useGame(selectCapitalStr);
   const equityStr = useGame(selectEquityStr);
+  const hypeStr = useGame(selectHypeStr);
   const debtStr = useGame(selectAlignmentDebtStr);
   const allocation = useGame(selectAllocation);
   const owned = useGame(selectProducersOwned);
@@ -72,6 +83,11 @@ export function HomeScreen({
   const fundingRoundIdx = useGame(selectFundingRoundIdx);
   const canPrestige = useGame(selectCanPrestige);
   const unreadVignettes = useGame(selectUnreadVignetteCount);
+  const pendingDebtCount = useGame((s) => selectPendingDebtEvents(s).length);
+  const achievementCount = useGame(selectUnlockedAchievementCount);
+  const onboardingStep = useGame((s) => s.account.onboardingStep);
+  const sfxMuted = useAudioStore((s) => s.sfxMuted);
+  const toggleSfx = useAudioStore((s) => s.toggleSfx);
 
   const tokens = D(tokensStr);
   const capital = D(capitalStr);
@@ -88,11 +104,15 @@ export function HomeScreen({
     producersOwned: owned,
     activeEffects: [],
     trainingPity: 0,
+    sprintUpgradesUnlocked: [],
   };
   const tps = tokensPerSec(runForCalc);
 
   const round = getRound(fundingRoundIdx);
-  const threshold = D(10).pow(round.tokenThresholdLog10);
+  // Hype-discounted threshold: the progress bar fills against the effective
+  // bar the player actually has to clear, so Hype investments show up live.
+  const threshold = effectiveRoundThreshold(fundingRoundIdx, hypeStr);
+  const hypeDiscount = hypeThresholdDiscount(fundingRoundIdx, hypeStr);
   const pct = Math.min(100, tokens.div(threshold).toNumber() * 100);
   const nextRound = getRound(fundingRoundIdx + 1);
 
@@ -104,11 +124,41 @@ export function HomeScreen({
 
   const [popup, setPopup] = React.useState<PopupContent | null>(null);
   const [activeHit, setActiveHit] = React.useState<HitId | null>(null);
+
+  // ─── Reactive audio cues ───────────────────────────────────────────────
+  // Played on STATE GROWTH so they don't fire on mount/hydrate. The refs
+  // hold the previous value so we can compare on each re-render — cheap.
+  const prevUnreadRef = React.useRef(unreadVignettes);
+  React.useEffect(() => {
+    if (unreadVignettes > prevUnreadRef.current) audio.play("vignette_pop");
+    prevUnreadRef.current = unreadVignettes;
+  }, [unreadVignettes]);
+
+  const prevDebtCountRef = React.useRef(pendingDebtCount);
+  React.useEffect(() => {
+    if (pendingDebtCount > prevDebtCountRef.current) audio.play("debt_warn");
+    prevDebtCountRef.current = pendingDebtCount;
+  }, [pendingDebtCount]);
+
+  // Music: swap track on era change (rounds 0-3 garage, 4-7 tower, 8+ agi).
+  React.useEffect(() => {
+    audio.setMusicForRound(fundingRoundIdx);
+  }, [fundingRoundIdx]);
+
+  // Achievements unlocked → reuse the producer_upgrade cue (which is
+  // currently unused — upgrades auto-apply silently). Mood brief matches:
+  // "bigger confirm + sparkle, once per tier" reads as "achievement unlock."
+  const prevAchievementsRef = React.useRef(achievementCount);
+  React.useEffect(() => {
+    if (achievementCount > prevAchievementsRef.current) audio.play("producer_upgrade");
+    prevAchievementsRef.current = achievementCount;
+  }, [achievementCount]);
   // Dev-cheats modal. Only opens via long-press on BURN·RATE in __DEV__
   // builds. Release bundles tree-shake DevPanel out via the `__DEV__` import
   // guard at the top of App.tsx — we keep the state hook here either way
   // so the conditional render below stays simple.
   const [devOpen, setDevOpen] = React.useState(false);
+  const [buffsOpen, setBuffsOpen] = React.useState(false);
 
   const handleHit = (id: HitId) => {
     setActiveHit(id);
@@ -149,6 +199,7 @@ export function HomeScreen({
           onHit={handleHit}
           activeHit={activeHit}
           scene={sceneForRound(fundingRoundIdx)}
+          tutorialHighlight={tutorialHighlightForStep(onboardingStep)}
         />
       </View>
 
@@ -159,7 +210,11 @@ export function HomeScreen({
         roundLabel={`${round.name.toUpperCase()} · ROUND ${round.idx + 1}`}
         capital={formatNumber(capital)}
         equity={formatNumber(equity)}
-        nextThresholdLabel={`NEXT: ${nextRound.name.toUpperCase()} · 1e${nextRound.tokenThresholdLog10} TOKENS`}
+        nextThresholdLabel={
+          hypeDiscount > 0.005
+            ? `NEXT: ${round.name.toUpperCase()} · HYPE -${Math.round(hypeDiscount * 100)}%`
+            : `NEXT: ${nextRound.name.toUpperCase()} · 1e${nextRound.tokenThresholdLog10} TOKENS`
+        }
       />
 
       {/* Visible-in-dev cheat trigger. Replaces an earlier hidden long-press
@@ -172,6 +227,13 @@ export function HomeScreen({
         </Pressable>
       )}
       {__DEV__ && <DevPanel visible={devOpen} onClose={() => setDevOpen(false)} />}
+
+      {/* SFX mute toggle — small chip on the right edge, just below the DEV
+          chip. Tap to flip; reads from useAudioStore so it stays in sync if
+          anything else flips the mute. */}
+      <Pressable style={styles.sfxChip} onPress={toggleSfx}>
+        <Text style={styles.sfxChipText}>{sfxMuted ? "MUTE" : "SFX"}</Text>
+      </Pressable>
 
 
       {/* Bottom row of secondary buttons — keep prestige + producers/research
@@ -191,17 +253,30 @@ export function HomeScreen({
             )}
           </View>
         </Pressy>
+        <Pressy onPress={onOpenAchievements}>
+          <View style={styles.inboxBtn}>
+            <Text style={styles.inboxText}>ACH</Text>
+            {achievementCount > 0 && (
+              <View style={[styles.inboxBadge, { backgroundColor: colors.sage_2 }]}>
+                <Text style={styles.inboxBadgeText}>{achievementCount}</Text>
+              </View>
+            )}
+          </View>
+        </Pressy>
         {canPrestige && (
           <Pressy style={styles.prestigeBtn} onPress={onOpenPrestige}>
             <Text style={styles.prestigeText}>CLOSE ROUND →</Text>
           </Pressy>
         )}
         {activeEffects.length > 0 && (
-          <View style={styles.effectsChip}>
+          <Pressable
+            style={styles.effectsChip}
+            onPress={() => setBuffsOpen(true)}
+          >
             <Text style={styles.effectsChipText}>
-              {activeEffects.length} BUFF{activeEffects.length === 1 ? "" : "S"}
+              {activeEffects.length} BUFF{activeEffects.length === 1 ? "" : "S"} ▸
             </Text>
-          </View>
+          </Pressable>
         )}
         {debt.gt(0) && (
           <View style={styles.debtChip}>
@@ -213,6 +288,12 @@ export function HomeScreen({
       <BottomAllocation allocation={allocation} onEdit={onOpenAllocate} />
 
       <ItemPopup item={popup} onClose={closePopup} onAction={handlePopupAction} />
+      <BuffsModal visible={buffsOpen} onClose={() => setBuffsOpen(false)} />
+
+      {/* Guided tutorial card — hide while the item popup is open so its
+          BUY button isn't covered. Lives in HomeScreen (not App) so it
+          also auto-hides on the Producers/Allocate/etc. sub-screens. */}
+      {!popup && <Onboarding />}
     </View>
   );
 }
@@ -338,6 +419,7 @@ const styles = StyleSheet.create({
     right: 8,
     bottom: 95,
     flexDirection: "row",
+    alignItems: "center",
     gap: 8,
     justifyContent: "flex-end",
     zIndex: 22,
@@ -362,10 +444,16 @@ const styles = StyleSheet.create({
   },
   effectsChip: {
     backgroundColor: colors.cream_hi,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderWidth: 1,
     borderColor: colors.gold,
+    // Pixel shadow so it reads as a button, matching the INBOX chip.
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 0,
   },
   effectsChipText: {
     fontFamily: fonts.display,
@@ -375,8 +463,8 @@ const styles = StyleSheet.create({
   },
   debtChip: {
     backgroundColor: colors.tensionRed,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderWidth: 1,
     borderColor: colors.ink,
   },
@@ -422,10 +510,11 @@ const styles = StyleSheet.create({
     lineHeight: 13,
   },
   devChip: {
-    // Top-right corner so it doesn't fight the bottom INBOX / allocation row.
-    // High zIndex so it sits above HUD/scene overlays.
+    // Just below the TopHUD (which floats top:8 and is ~120px tall), on the
+    // right edge. Avoids overlapping the round label in HUD row 1 (that was
+    // the original bug) and stays clear of scene hit zones, which start lower.
     position: "absolute",
-    top: 6,
+    top: 140,
     right: 6,
     backgroundColor: colors.tensionRed,
     paddingHorizontal: 6,
@@ -438,6 +527,28 @@ const styles = StyleSheet.create({
     fontFamily: fonts.display,
     fontSize: 10,
     color: colors.cream_hi,
+    letterSpacing: 1,
+  },
+  sfxChip: {
+    // Same right-edge column as DEV chip. Sits below it (DEV at top:140, this
+    // at top:178) so they stack neatly without colliding with the tutorial
+    // card on the left or the HUD above.
+    position: "absolute",
+    top: 178,
+    right: 6,
+    minWidth: 44,
+    alignItems: "center",
+    backgroundColor: colors.cream_hi,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: colors.ink,
+    zIndex: 90,
+  },
+  sfxChipText: {
+    fontFamily: fonts.display,
+    fontSize: 10,
+    color: colors.ink,
     letterSpacing: 1,
   },
 });

@@ -18,8 +18,11 @@ import {
   aggregateResearchEffects,
   nodeCost,
   RESEARCH_BY_ID,
+  RESEARCH_NODES,
   ResearchEffects,
 } from "../core/research";
+import { AUTONOMOUS_AGENT, PRODUCER_BY_ID } from "../core/producers";
+import { SPRINT_UPGRADE_BY_ID } from "../core/sprintUpgrades";
 import {
   effectForTier,
   resolveTrainingRun,
@@ -28,10 +31,17 @@ import {
 } from "../core/trainingRun";
 import { freshSave } from "../core/save";
 import { getRound, LAST_ROUND_IDX } from "../core/rounds";
+import {
+  ACHIEVEMENTS,
+  AchievementContext,
+  pendingAchievementUnlocks,
+  setResearchBranchIndex,
+} from "../core/achievements";
 import { getVignette, pendingUnlocks, UnlockContext } from "../core/vignettes";
 import {
   AccountState,
   Allocation,
+  ChainId,
   PersistentState,
   RunState,
   SaveBlob,
@@ -55,6 +65,10 @@ interface GameState {
   tick(now?: number): void;
   buyProducer(producerId: string, count?: number): { bought: number };
   buyResearchNode(nodeId: string): { bought: boolean };
+  /** GDD §4 Beat 2: spend RP on a per-run sprint upgrade. Idempotent — buying
+   *  the same id twice is a no-op. Effects apply for the rest of the run and
+   *  reset at prestige (sprintUpgradesUnlocked isn't copied through freshRunState). */
+  buySprintUpgrade(id: string): { bought: boolean };
   /** Run a Training Run roll. Returns the tier rolled, or null if insufficient tokens. */
   rollTrainingRun():
     | { tier: TrainingTier; pityFired: boolean; spent: string }
@@ -113,6 +127,70 @@ function processVignetteUnlocks(
   };
 }
 
+// One-time: tell the achievements predicate which research nodes live in
+// which branch so `research_branch_complete` can be evaluated without
+// pulling research.ts into achievements.ts (avoids the circular import).
+{
+  const branchIndex = new Map<string, string[]>();
+  for (const n of RESEARCH_NODES) {
+    const arr = branchIndex.get(n.branch) ?? [];
+    arr.push(n.id);
+    branchIndex.set(n.branch, arr);
+  }
+  setResearchBranchIndex(branchIndex);
+}
+
+// GDD §10: achievements grid. Same trigger-loop shape as vignettes — walk
+// every condition against a snapshot of state, push newly-qualifying ids
+// into the persistent unlock list. Persists across prestige.
+function processAchievementUnlocks(
+  run: RunState,
+  persistent: PersistentState,
+): PersistentState {
+  const producersByChain: Record<ChainId, number> = {
+    engineers: 0, gpu: 0, data: 0, energy: 0,
+  };
+  let totalProducersOwned = 0;
+  for (const [pid, count] of Object.entries(run.producersOwned)) {
+    totalProducersOwned += count;
+    // Autonomous Agent isn't in PRODUCER_BY_ID (it's its own AgentDef) so it
+    // contributes to total + agent count but NOT to any chain.
+    const def = PRODUCER_BY_ID[pid];
+    if (def) producersByChain[def.chain] += count;
+  }
+  const ctx: AchievementContext = {
+    fundingRoundIdx: run.fundingRoundIdx,
+    totalPrestiges: persistent.totalPrestiges,
+    tokens: D(run.tokens),
+    producersOwned: run.producersOwned,
+    totalProducersOwned,
+    producersByChain,
+    unlockedResearch: persistent.unlockedResearch,
+    unlockedVignettes: persistent.unlockedVignettes,
+    sprintUpgradesInRun: run.sprintUpgradesUnlocked,
+    firedDebtThresholds: persistent.firedDebtThresholds,
+    autonomousAgentCount: run.producersOwned[AUTONOMOUS_AGENT.id] ?? 0,
+  };
+  const pending = pendingAchievementUnlocks(ctx, persistent.unlockedAchievements);
+  if (pending.length === 0) return persistent;
+  return {
+    ...persistent,
+    unlockedAchievements: [...persistent.unlockedAchievements, ...pending],
+  };
+}
+
+/**
+ * Run both unlock passes (vignettes then achievements) in dependency order:
+ * vignette-count achievements like "20 vignettes unlocked" depend on the
+ * vignette pass having run first this tick. Cheap to chain.
+ */
+function processUnlocks(
+  run: RunState,
+  persistent: PersistentState,
+): PersistentState {
+  return processAchievementUnlocks(run, processVignetteUnlocks(run, persistent));
+}
+
 export const useGame = create<GameState>((set, get) => ({
   ...freshSave(),
   lastTickAt: Date.now(),
@@ -146,7 +224,7 @@ export const useGame = create<GameState>((set, get) => ({
     // boosted starters can immediately surface "first_hire" if appropriate,
     // and so a migrated v5 save (which has empty vignette arrays) backfills
     // anything the player already qualified for.
-    const persistent = processVignetteUnlocks(run, save.persistent);
+    const persistent = processUnlocks(run, save.persistent);
     set({
       run,
       persistent,
@@ -168,7 +246,7 @@ export const useGame = create<GameState>((set, get) => ({
     const r = tickRun(s.run, s.persistent, dt, effects, now);
     // Vignettes re-checked AFTER the tick so token gains + new debt thresholds
     // from this catch-up window can trigger their conditions in one pass.
-    const persistent = processVignetteUnlocks(r.run, r.persistent);
+    const persistent = processUnlocks(r.run, r.persistent);
     set({
       run: r.run,
       persistent,
@@ -187,7 +265,7 @@ export const useGame = create<GameState>((set, get) => ({
     if (dt <= 0) return;
     const effects = aggregateResearchEffects(s.persistent.unlockedResearch);
     const r = tickRun(s.run, s.persistent, dt, effects, now);
-    const persistent = processVignetteUnlocks(r.run, r.persistent);
+    const persistent = processUnlocks(r.run, r.persistent);
     set({
       run: r.run,
       persistent,
@@ -205,8 +283,19 @@ export const useGame = create<GameState>((set, get) => ({
     if (r.bought > 0) {
       // Immediate vignette check — "first_hire" should fire on the SAME tap
       // that crosses the starter floor, not on the next 1s tick.
-      const persistent = processVignetteUnlocks(r.run, s.persistent);
-      set({ run: r.run, persistent });
+      const persistent = processUnlocks(r.run, s.persistent);
+      // Guided-tutorial auto-advance: step 1 → 2 on any engineers-chain buy,
+      // step 2 → 3 on any gpu-chain buy. The Onboarding component knows
+      // about the resulting step and rotates its highlight / text.
+      const chain = PRODUCER_BY_ID[producerId]?.chain;
+      const step = s.account.onboardingStep;
+      let account = s.account;
+      if (step === 1 && chain === "engineers") {
+        account = { ...account, onboardingStep: 2 };
+      } else if (step === 2 && chain === "gpu") {
+        account = { ...account, onboardingStep: 3 };
+      }
+      set({ run: r.run, persistent, account });
     }
     return { bought: r.bought };
   },
@@ -219,13 +308,28 @@ export const useGame = create<GameState>((set, get) => ({
     const cost = D(nodeCost(node.tier));
     const equity = D(s.persistent.equity);
     if (equity.lt(cost)) return { bought: false };
-    set({
-      persistent: {
-        ...s.persistent,
-        equity: equity.sub(cost).toString(),
-        unlockedResearch: [...s.persistent.unlockedResearch, nodeId],
-      },
-    });
+    const nextPersistent = {
+      ...s.persistent,
+      equity: equity.sub(cost).toString(),
+      unlockedResearch: [...s.persistent.unlockedResearch, nodeId],
+    };
+    set({ persistent: processUnlocks(s.run, nextPersistent) });
+    return { bought: true };
+  },
+
+  buySprintUpgrade(id) {
+    const s = get();
+    const def = SPRINT_UPGRADE_BY_ID[id];
+    if (!def) return { bought: false };
+    if (s.run.sprintUpgradesUnlocked.includes(id)) return { bought: false };
+    const rp = D(s.run.researchPoints);
+    if (rp.lt(def.costRP)) return { bought: false };
+    const nextRun = {
+      ...s.run,
+      researchPoints: rp.sub(def.costRP).toString(),
+      sprintUpgradesUnlocked: [...s.run.sprintUpgradesUnlocked, id],
+    };
+    set({ run: nextRun, persistent: processUnlocks(nextRun, s.persistent) });
     return { bought: true };
   },
 
@@ -264,17 +368,21 @@ export const useGame = create<GameState>((set, get) => ({
     const nextEquity = D(s.persistent.equity).add(awarded);
     const nextRoundIdx = Math.min(s.run.fundingRoundIdx + 1, LAST_ROUND_IDX);
     const fresh = freshRunState();
-    set({
-      // Carry allocation through prestige — re-picking it every round would
-      // punish the GDD's "respect the player's time" goal.
-      run: { ...fresh, fundingRoundIdx: nextRoundIdx, allocation: s.run.allocation },
-      persistent: {
-        ...s.persistent,
-        equity: nextEquity.toString(),
-        totalPrestiges: s.persistent.totalPrestiges + 1,
-        // alignmentDebt + unlockedResearch persist (the thematic + design point).
-      },
-    });
+    // Carry allocation through prestige — re-picking it every round would
+    // punish the GDD's "respect the player's time" goal.
+    const nextRun: RunState = {
+      ...fresh,
+      fundingRoundIdx: nextRoundIdx,
+      allocation: s.run.allocation,
+    };
+    const nextPersistent: PersistentState = {
+      ...s.persistent,
+      equity: nextEquity.toString(),
+      totalPrestiges: s.persistent.totalPrestiges + 1,
+      // alignmentDebt + unlockedResearch persist (the thematic + design point).
+    };
+    // Achievements like "Closed Series A" / "5 prestiges" fire here.
+    set({ run: nextRun, persistent: processUnlocks(nextRun, nextPersistent) });
     return { awarded: awarded.toString() };
   },
 
@@ -385,6 +493,8 @@ export const selectUnlockedVignettes = (s: GameState) => s.persistent.unlockedVi
 export const selectUnreadVignettes = (s: GameState) => s.persistent.unreadVignettes;
 export const selectUnreadVignetteCount = (s: GameState) => s.persistent.unreadVignettes.length;
 export const selectResolvedVignettes = (s: GameState) => s.persistent.resolvedVignettes;
+export const selectUnlockedAchievements = (s: GameState) => s.persistent.unlockedAchievements;
+export const selectUnlockedAchievementCount = (s: GameState) => s.persistent.unlockedAchievements.length;
 export const selectActiveEffects = (s: GameState) => s.run.activeEffects;
 export const selectTrainingPity = (s: GameState) => s.run.trainingPity;
 export const selectPendingDebtEvents = (s: GameState) => s.pendingDebtEvents;

@@ -11,16 +11,17 @@ import { useGame } from "./src/game/store";
 import { AllocateScreen } from "./src/ui/AllocateScreen";
 import { DebtEventModal } from "./src/ui/DebtEventModal";
 import { HomeScreen } from "./src/ui/HomeScreen";
-import { Onboarding } from "./src/ui/Onboarding";
+import { IntroModal } from "./src/ui/IntroModal";
 import { PrestigeModal } from "./src/ui/PrestigeModal";
 import { ProducersScreen } from "./src/ui/ProducersScreen";
+import { AchievementsScreen } from "./src/ui/AchievementsScreen";
 import { ResearchScreen } from "./src/ui/ResearchScreen";
 import { TrainingRunModal } from "./src/ui/TrainingRunModal";
 import { VignettesInbox } from "./src/ui/VignettesInbox";
 import { colors } from "./src/ui/theme";
 import { ChainId } from "./src/core/types";
 
-type Screen = "home" | "producers" | "allocate" | "research" | "vignettes";
+type Screen = "home" | "producers" | "allocate" | "research" | "vignettes" | "achievements";
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -110,10 +111,14 @@ export default function App() {
           onOpenTraining={() => setTrainingOpen(true)}
           onOpenPrestige={() => setPrestigeOpen(true)}
           onOpenVignettes={() => setScreen("vignettes")}
+          onOpenAchievements={() => setScreen("achievements")}
         />
       )}
       {screen === "vignettes" && (
         <VignettesInbox onBack={() => setScreen("home")} />
+      )}
+      {screen === "achievements" && (
+        <AchievementsScreen onBack={() => setScreen("home")} />
       )}
       {screen === "producers" && (
         <ProducersScreen
@@ -136,7 +141,7 @@ export default function App() {
         onClose={() => setTrainingOpen(false)}
       />
       <DebtEventModal />
-      <Onboarding />
+      <IntroModal />
     </SafeAreaView>
   );
 }

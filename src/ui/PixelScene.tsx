@@ -74,7 +74,7 @@ export interface HitZone {
   label: string;
 }
 
-export type SceneId = "seed" | "megacorp" | "agi";
+export type SceneId = "seed" | "coworking" | "office" | "megacorp" | "agi";
 
 // Per-scene hit zones. Coords align with each scene's sprite positions below —
 // keep them in sync if you move anything. HomeScreen reads the resulting HitId
@@ -97,57 +97,111 @@ const SEED_ZONES: HitZone[] = [
   { id: "roomba",   x: 152, y: 302, w: 14, h: 8,  label: "Autonomous Agent" },
 ];
 
-// MEGACORP OFFICE — zones map to what each object IS, so the action is always
-// logical: every engineer figure hires Engineers, every monitor launches a
-// Training Run, the in-glass GPU rack is Compute, the kanban whiteboard is
-// Research, the floor storage boxes are Data, and the wall HVAC unit is Energy.
-// Ids repeat across the 3 desks on purpose (all engineers = Hire, all monitors
-// = Training); the overlay keys them by index and the ring highlights every
-// matching object. Matches the drawn positions in MegacorpScene (desks at
-// x=12/92/172, deskY=256; glass rack 130,100; kanban 158,80; boxes ~20,320;
-// AC ~208,148).
+// MEGACORP OFFICE — coords ported 1:1 from Claude Design v5
+// (screens.jsx::MEGACORP_HITS). Design v5 narrowed the 3 desks to fit a
+// dedicated server-room alcove on the right, and grew the GPU zone to wrap
+// the WHOLE alcove (2 BigRacks + 2 GPU towers behind a glass partition).
 const MEGACORP_ZONES: HitZone[] = [
-  // desk 1 / 2 / 3 — monitor (Training) above, engineer (Hire) below
-  { id: "monitor",  x:  26, y: 230, w: 34, h: 26, label: "Training Run" },
-  { id: "engineer", x:  28, y: 260, w: 34, h: 38, label: "Hire Engineers" },
-  { id: "monitor",  x: 106, y: 230, w: 34, h: 26, label: "Training Run" },
-  { id: "engineer", x: 108, y: 260, w: 34, h: 38, label: "Hire Engineers" },
-  { id: "monitor",  x: 186, y: 230, w: 34, h: 26, label: "Training Run" },
-  { id: "engineer", x: 188, y: 260, w: 34, h: 38, label: "Hire Engineers" },
-  { id: "gpu",      x: 130, y: 100, w: 18, h: 60, label: "Buy GPU (rack)" },
-  { id: "research", x: 158, y:  80, w: 80, h: 34, label: "Research (kanban)" },
-  { id: "books",    x:  16, y: 310, w: 26, h: 22, label: "Buy Data (boxes)" },
-  { id: "energy",   x: 204, y: 144, w: 28, h: 18, label: "Buy Energy (HVAC)" },
+  // 3 narrower desks — engineer (Hire) below, monitor (Training) above
+  { id: "engineer", x:  16, y: 266, w: 22, h: 34, label: "Hire (desk 1)" },
+  { id: "engineer", x:  68, y: 266, w: 22, h: 34, label: "Hire (desk 2)" },
+  { id: "engineer", x: 120, y: 266, w: 22, h: 34, label: "Hire (desk 3)" },
+  { id: "monitor",  x:  13, y: 234, w: 26, h: 22, label: "Training (West cluster)" },
+  { id: "monitor",  x:  65, y: 234, w: 26, h: 22, label: "Training (Central cluster)" },
+  { id: "monitor",  x: 117, y: 234, w: 26, h: 22, label: "Training (East cluster)" },
+  // Server room alcove (Datacenter Pod) — wraps the whole alcove
+  { id: "gpu",      x: 192, y: 228, w: 48, h: 100, label: "Buy GPU (alcove)" },
+  // In-glass rack on the back wall — DATA (Synthetic Pipeline)
+  { id: "books",    x: 130, y: 100, w: 18, h: 56, label: "Buy Data (glass rack)" },
+  // Ceiling fluorescent strip — ENERGY (Substation)
+  { id: "energy",   x:   8, y:   1, w: 60, h:  5, label: "Buy Energy (substation)" },
+  // Corporate kanban whiteboard — RESEARCH
+  { id: "research", x: 158, y:  80, w: 80, h: 60, label: "Research (kanban)" },
+  // Far-left corner plant — cosmetic
+  { id: "plant",    x:   0, y: 262, w: 18, h: 30, label: "Cosmetic" },
 ];
 
-// AGI SINGULARITY — no diegetic producer props exist in deep space, so zones
-// map to the scene's landmarks abstractly: Earth = the human workforce, the
-// megastructure = Compute, the singularity flare = Training, and three sky
-// quadrants cover Data / Energy / Research. The popup names each on tap.
+// AGI SINGULARITY — coords ported 1:1 from Claude Design v3
+// (screens.jsx::AGI_HITS). The mega-structure core IS the Autonomous Agent
+// producer; the energy beam IS the Fusion Constellation; the orbital arrays
+// ARE the Data tap; Earth itself IS planetary compute (GPU); the pulsing
+// inner core IS Recursive Self-Training.
+//
+// Research isn't in design v3's AGI hits (the player is past spending Equity
+// at this point), but we keep a compact zone on the top-right nebula so
+// reaching the Research screen from Home stays possible across all scenes.
 const AGI_ZONES: HitZone[] = [
-  { id: "engineer", x:   8, y: 292, w: 92, h: 60, label: "Hire (Earth)" },
-  { id: "gpu",      x: 118, y: 121, w: 60, h: 60, label: "Buy GPU (core)" },
-  { id: "monitor",  x:  40, y: 308, w: 24, h: 24, label: "Training (flare)" },
-  { id: "books",    x:   8, y:  28, w: 70, h: 34, label: "Buy Data" },
-  { id: "energy",   x: 168, y:  36, w: 64, h: 44, label: "Buy Energy" },
-  { id: "research", x: 186, y: 150, w: 48, h: 44, label: "Research" },
+  { id: "engineer", x: 119, y: 121, w: 60, h: 60, label: "Autonomous Agent (core)" },
+  { id: "energy",   x:  70, y: 150, w: 60, h: 80, label: "Energy (beam)" },
+  { id: "books",    x:   0, y:  60, w: 70, h: 70, label: "Data (orbital arrays)" },
+  { id: "monitor",  x: 139, y: 141, w: 22, h: 22, label: "Recursive Self-Training" },
+  { id: "gpu",      x:   0, y: 250, w: 70, h: 90, label: "Planetary Compute (Earth)" },
+  // Off-design fallback so Research is still reachable from this scene.
+  { id: "research", x: 184, y:  30, w: 52, h: 38, label: "Research (nebula)" },
+];
+
+// COWORKING (Series B/C) — coords ported 1:1 from Claude Design v4
+// (screens.jsx::COWORKING_HITS). Shared bench with 3 engineers + 3 monitors,
+// La Croix tower = energy tap, half-height rack = GPU, kanban = research.
+// Cosmetics from the design (phone booth, foosball, kombucha) are skipped
+// for now — they'd need new HitIds + popup cases to read correctly. Plant
+// is reused as a generic "Cosmetic" with the existing popup flavor.
+const COWORKING_ZONES: HitZone[] = [
+  { id: "engineer", x:  49, y: 266, w: 22, h: 34, label: "Hire (bench 1)" },
+  { id: "engineer", x:  99, y: 266, w: 22, h: 34, label: "Hire (bench 2)" },
+  { id: "engineer", x: 149, y: 266, w: 22, h: 34, label: "Hire (bench 3)" },
+  { id: "monitor",  x:  48, y: 234, w: 26, h: 22, label: "Training (laptop 1)" },
+  { id: "monitor",  x:  98, y: 234, w: 26, h: 22, label: "Training (laptop 2)" },
+  { id: "monitor",  x: 148, y: 234, w: 26, h: 22, label: "Training (laptop 3)" },
+  // Design v4 zone is x:202 y:120 w:24 h:38 but that includes ~10px of empty
+  // brick above the kitchen items — the ring highlight ends up framing dead
+  // wall. Tightened to hug the visible kitchen content (La Croix pyramid +
+  // kombucha tap + counter top) so the selection feels accurate.
+  { id: "energy",   x: 198, y: 126, w: 42, h: 34, label: "Buy Energy (kitchen)" },
+  { id: "gpu",      x: 210, y: 300, w: 22, h: 32, label: "Buy GPU (rack)" },
+  { id: "research", x:  95, y:  35, w: 52, h: 40, label: "Research (kanban)" },
+  { id: "plant",    x: 184, y: 262, w: 22, h: 36, label: "Cosmetic" },
+];
+
+// STARTUP OFFICE (Series D/IPO) — coords ported 1:1 from Claude Design v4
+// (screens.jsx::OFFICE_HITS). 3 desks (Senior/Staff/Senior), tall rack +
+// GPU tower in right server nook, hanging planter = energy, whiteboard =
+// research. Design v4 has no Data prop in this scene; player uses Producers
+// screen tabs to buy Data here.
+const OFFICE_ZONES: HitZone[] = [
+  { id: "engineer", x:  24, y: 260, w: 22, h: 34, label: "Hire (desk 1)" },
+  { id: "engineer", x:  74, y: 260, w: 22, h: 34, label: "Hire (desk 2)" },
+  { id: "engineer", x: 124, y: 260, w: 22, h: 34, label: "Hire (desk 3)" },
+  { id: "monitor",  x:  23, y: 228, w: 26, h: 22, label: "Training (A100 pod 1)" },
+  { id: "monitor",  x:  73, y: 228, w: 26, h: 22, label: "Training (A100 pod 2)" },
+  { id: "monitor",  x: 123, y: 228, w: 26, h: 22, label: "Training (A100 pod 3)" },
+  { id: "gpu",      x: 194, y: 232, w: 46, h: 56, label: "Buy GPU (server nook)" },
+  { id: "research", x: 196, y:  64, w: 34, h: 24, label: "Research (whiteboard)" },
+  { id: "energy",   x: 148, y:  60, w: 14, h: 12, label: "Buy Energy (planter)" },
+  { id: "plant",    x: 156, y: 258, w: 22, h: 36, label: "Cosmetic" },
 ];
 
 export const HIT_ZONES_BY_SCENE: Record<SceneId, HitZone[]> = {
   seed: SEED_ZONES,
+  coworking: COWORKING_ZONES,
+  office: OFFICE_ZONES,
   megacorp: MEGACORP_ZONES,
   agi: AGI_ZONES,
 };
 
 /**
- * Funding-round → scene mapping. The Claude Design bundle ships three pixel
- * environments; we bucket the 12 rounds across them (per the user's split):
- *   seed     → rounds 0-3  (Seed … Series C)
- *   megacorp → rounds 4-8  (Series D … Sovereign Wealth)
- *   agi      → rounds 9-11 (Government Bailout … AGI Singularity)
+ * Funding-round → scene mapping. 5 scenes today; the 3 remaining slots
+ * (campus / datacenter / planetary) will land later between megacorp and agi.
+ *   seed      → rounds 0-1 (Seed, Series A)       — garage, solo founder
+ *   coworking → rounds 2-3 (Series B, Series C)   — WeWork bench
+ *   office    → rounds 4-5 (Series D, IPO)        — brick + Edison bulbs
+ *   megacorp  → rounds 6-8 (Secondary…Sovereign)  — corporate slate-blue
+ *   agi       → rounds 9-11 (Bailout…Singularity) — galactic endgame
  */
 export function sceneForRound(roundIdx: number): SceneId {
-  if (roundIdx <= 3) return "seed";
+  if (roundIdx <= 1) return "seed";
+  if (roundIdx <= 3) return "coworking";
+  if (roundIdx <= 5) return "office";
   if (roundIdx <= 8) return "megacorp";
   return "agi";
 }
@@ -158,6 +212,9 @@ interface Props {
   onHit?(id: HitId): void;
   activeHit?: HitId | null;
   scene?: SceneId;
+  /** Optional tutorial highlight: pulses a gold ring around the named zone
+   *  so the first-run tutorial can point at "the engineer" / "the GPU". */
+  tutorialHighlight?: HitId | null;
 }
 
 /**
@@ -172,7 +229,7 @@ interface Props {
  * Tick rate: 200ms (5fps). Pixel art doesn't need 60fps — the visible
  * jitter actually reads more "8-bit" than smooth motion would.
  */
-export function PixelScene({ width, height, onHit, activeHit, scene = "seed" }: Props) {
+export function PixelScene({ width, height, onHit, activeHit, scene = "seed", tutorialHighlight = null }: Props) {
   const t = useTick(200);
   const zones = HIT_ZONES_BY_SCENE[scene];
   // Which specific zone is highlighted. Tracked by index (not HitId) because a
@@ -197,6 +254,10 @@ export function PixelScene({ width, height, onHit, activeHit, scene = "seed" }: 
           <MegacorpScene t={t} />
         ) : scene === "agi" ? (
           <AGIScene t={t} />
+        ) : scene === "coworking" ? (
+          <CoworkingScene t={t} />
+        ) : scene === "office" ? (
+          <OfficeScene t={t} />
         ) : (
           <SeedScene t={t} />
         )}
@@ -204,6 +265,12 @@ export function PixelScene({ width, height, onHit, activeHit, scene = "seed" }: 
         {activeHit && activeIdx != null && zones[activeIdx] && (
           <HitOutline zone={zones[activeIdx]} />
         )}
+        {/* Tutorial pulse — gold pulsing ring around the first matching zone
+            with this id. Driven by the same tick the scene already uses. */}
+        {tutorialHighlight && (() => {
+          const z = zones.find((zz) => zz.id === tutorialHighlight);
+          return z ? <TutorialPulse zone={z} t={t} /> : null;
+        })()}
       </Svg>
 
       {/* Invisible touch overlay — one Pressable per hit zone. */}
@@ -235,6 +302,115 @@ export function PixelScene({ width, height, onHit, activeHit, scene = "seed" }: 
         </View>
       )}
     </View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// NEW HELPERS (used by Coworking scene — design v4)
+// ═══════════════════════════════════════════════════════════════════════
+
+// Half-height networking rack with glass front + patch cables. Used by the
+// CoworkingScene as the GPU compute target ("the corner server").
+function CoworkRack({ x, y, t }: { x: number; y: number; t: number }) {
+  const units = [];
+  for (let i = 0; i < 6; i++) {
+    units.push(
+      <G key={`u${i}`}>
+        <PixelRect x={x + 3} y={y + 3 + i * 4} w={16} h={3} c={P.ink_hi} />
+        <PixelRect x={x + 3} y={y + 3 + i * 4} w={16} h={1} c={P.ink_hi} />
+        <Px x={x + 5} y={y + 4 + i * 4} c={(t + i * 3) % 5 < 2 ? P.sage_hi : P.sage_3} />
+        <Px x={x + 7} y={y + 4 + i * 4} c={(t + i) % 7 < 3 ? P.gold : P.terracotta_3} />
+        <Px x={x + 16} y={y + 4 + i * 4} c={(t + i * 2) % 4 < 2 ? P.terracotta : P.ink_hi} />
+      </G>
+    );
+  }
+  return (
+    <G>
+      <PixelRect x={x} y={y} w={22} h={30} c={P.ink_2} />
+      <PixelRect x={x} y={y} w={22} h={1} c={P.muted} />
+      <PixelRect x={x + 21} y={y} w={1} h={30} c={P.ink_2} />
+      <Rect x={x + 2} y={y + 2} width={18} height={26} fill={P.sage_hi} opacity={0.3} />
+      <PixelRect x={x + 2} y={y + 2} w={18} h={1} c={P.sage_2} />
+      {units}
+      {/* Patch cables spilling out the side */}
+      <Px x={x + 22} y={y + 8} c={P.tension} />
+      <Px x={x + 23} y={y + 9} c={P.sage} />
+      <Px x={x + 22} y={y + 11} c={P.gold} />
+      {/* Caster feet */}
+      <PixelRect x={x + 1} y={y + 30} w={3} h={2} c={P.ink_2} />
+      <PixelRect x={x + 18} y={y + 30} w={3} h={2} c={P.ink_2} />
+      <PixelRect x={x - 1} y={y + 32} w={24} h={1} c={"#A88858"} />
+    </G>
+  );
+}
+
+// Tall server rack with 8 stacked 1U units, blinking LEDs, drive bays.
+// Used by the OfficeScene as the GPU compute target.
+function BigRack({ x, y, t }: { x: number; y: number; t: number }) {
+  const ledColors = [P.sage_hi, P.gold_hi, P.tension_hi, P.sage];
+  const units = [];
+  for (let i = 0; i < 8; i++) {
+    const sy = y + 3 + i * 6;
+    const leds = [];
+    for (let j = 0; j < 4; j++) {
+      const lit = (t + i * 5 + j * 3) % (4 + j * 2) < 2;
+      leds.push(
+        <Px key={`l${j}`} x={x + 4 + j * 2} y={sy + 2} c={lit ? ledColors[j % 4] : P.ink} />
+      );
+    }
+    units.push(
+      <G key={`u${i}`}>
+        <PixelRect x={x + 2} y={sy} w={20} h={5} c={P.ink_hi} />
+        <PixelRect x={x + 2} y={sy} w={20} h={1} c={P.ink_2} />
+        {leds}
+        <PixelRect x={x + 14} y={sy + 1} w={6} h={3} c={P.ink} />
+        <Px x={x + 16} y={sy + 2} c={P.sage_hi} />
+      </G>
+    );
+  }
+  return (
+    <G>
+      <PixelRect x={x} y={y} w={24} h={56} c={P.ink} />
+      <PixelRect x={x} y={y} w={24} h={1} c={P.ink_hi} />
+      <PixelRect x={x + 23} y={y} w={1} h={56} c={P.ink_2} />
+      <PixelRect x={x + 1} y={y + 1} w={22} h={54} c={P.muted_2} />
+      <PixelRect x={x + 1} y={y + 1} w={22} h={1} c={P.muted} />
+      {units}
+      <PixelRect x={x - 1} y={y + 56} w={26} h={1} c={P.terracotta_3} />
+    </G>
+  );
+}
+
+// "MOVE FAST" / "SHIP IT" framed poster. Used by OfficeScene wall decor.
+// variant=0 → first set of text widths, variant=1 → second set.
+function WallPoster({
+  x, y, color, variant,
+}: { x: number; y: number; color: string; variant: 0 | 1 }) {
+  return (
+    <G>
+      <PixelRect x={x - 1} y={y - 1} w={22} h={18} c={P.terracotta_3} />
+      <PixelRect x={x} y={y} w={20} h={16} c={P.cream_hi} />
+      <PixelRect x={x + 2} y={y + 2} w={16} h={6} c={color} />
+      <PixelRect x={x + 3} y={y + 10} w={14} h={1} c={P.ink} />
+      <PixelRect x={x + 3} y={y + 12} w={variant ? 8 : 11} h={1} c={P.ink} />
+      <PixelRect x={x + 3} y={y + 14} w={variant ? 12 : 7} h={1} c={color} />
+    </G>
+  );
+}
+
+// Gold beanbag chair (Office lounge corner).
+function Beanbag2({ x, y }: { x: number; y: number }) {
+  return (
+    <G>
+      <PixelRect x={x + 2} y={y + 8} w={18} h={6} c={P.gold_2} />
+      <PixelRect x={x} y={y + 9} w={22} h={4} c={P.gold_2} />
+      <PixelRect x={x + 4} y={y} w={14} h={5} c={P.gold} />
+      <PixelRect x={x + 2} y={y + 3} w={18} h={6} c={P.gold} />
+      <PixelRect x={x + 4} y={y} w={14} h={1} c={P.gold_hi} />
+      <PixelRect x={x + 6} y={y + 7} w={10} h={2} c={P.gold_2} />
+      <Px x={x + 6} y={y + 2} c={P.gold_hi} />
+      <PixelRect x={x - 1} y={y + 14} w={24} h={1} c={"#9A6E40"} />
+    </G>
   );
 }
 
@@ -281,6 +457,380 @@ function SeedScene({ t }: { t: number }) {
       <Roomba x={152} y={302} t={t} />
       {/* Particles */}
       <FloatingTokens spawnX={70} spawnY={236} t={t} />
+    </G>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// COWORKING / WEWORK SCENE — Series B/C, scrappy mid-2010s shared office.
+// Port of pixel-art.jsx::composeCoworkingScene (design v4).
+// ═══════════════════════════════════════════════════════════════════════
+const COWORK = {
+  wallTop:    "#F5EFE2",
+  wallTopHi:  "#FBF7EC",
+  wallBrick:  "#B57A5B",
+  brickDark:  "#8B5639",
+  brickEdge:  "#5C3924",
+  duct:       "#9CA098",
+  ductRivet:  "#7C7C7C",
+  ceilTop:    "#C8B89A",
+  ceilEdge:   "#A89878",
+  floor:      "#C8A878",
+  floorHi:    "#D8C090",
+  floorSeam:  "#A88858",
+  bulb:       "#EBBE6E",
+  bulbOff:    "#A88858",
+  glow:       "#FFFFEE",
+  boothBody:  "#3F5142",
+  boothEdge:  "#5C7560",
+  boothDark:  "#2A3A2E",
+  glass:      "#A4BDA9",
+  glassHi:    "#E0E4E8",
+  felt:       "#3F5142",
+  feltEdge:   "#5C7560",
+  feltDark:   "#2A3A2E",
+};
+
+function CoworkingScene({ t }: { t: number }) {
+  const FLOOR_Y = 222;
+  const els: React.ReactNode[] = [];
+  let k = 0;
+  const key = () => `cw${k++}`;
+  const R = (x: number, y: number, w: number, h: number, c: string) =>
+    els.push(<PixelRect key={key()} x={x} y={y} w={w} h={h} c={c} />);
+  const PX = (x: number, y: number, c: string) =>
+    els.push(<Px key={key()} x={x} y={y} c={c} />);
+
+  // Ceiling (exposed ducts)
+  R(0, 0, W, 7, COWORK.ceilTop);
+  R(0, 0, W, 1, COWORK.ceilEdge);
+  R(0, 3, W, 3, COWORK.duct);
+  for (let i = 4; i < W; i += 18) R(i, 3, 1, 3, COWORK.ductRivet);
+  // Cream upper wall
+  R(0, 7, W, 90, COWORK.wallTop);
+  for (let y = 9; y < 96; y += 8) R(0, y, W, 1, COWORK.wallTopHi);
+  // Exposed brick lower band
+  R(0, 96, W, FLOOR_Y - 96, COWORK.wallBrick);
+  for (let by = 96; by < FLOOR_Y; by += 6) {
+    R(0, by, W, 1, COWORK.brickDark);
+    const off = ((by / 6) % 2) * 8;
+    for (let bx = -off; bx < W; bx += 16) R(bx, by, 1, 6, COWORK.brickDark);
+  }
+  // Wall→floor seam
+  R(0, FLOOR_Y - 2, W, 1, COWORK.brickEdge);
+  // Blonde wood floor
+  R(0, FLOOR_Y, W, H - FLOOR_Y, COWORK.floor);
+  for (let i = 0; i < W; i += 20) R(i + ((i / 20) % 3) * 4, FLOOR_Y, 1, H - FLOOR_Y, COWORK.floorSeam);
+  R(0, FLOOR_Y, W, 1, COWORK.floorHi);
+  R(0, FLOOR_Y + 1, W, 1, COWORK.floor);
+  R(0, H - 3, W, 1, COWORK.floorSeam);
+
+  // Edison-bulb string lights
+  for (let x = 0; x < W; x++) {
+    const sag = (Math.sin(x / 30) * 4 + 14) | 0;
+    PX(x, sag, COWORK.brickEdge);
+  }
+  for (let bx = 14; bx < W; bx += 30) {
+    const sag = (Math.sin(bx / 30) * 4 + 14) | 0;
+    R(bx, sag + 1, 1, 3, COWORK.brickEdge);
+    const glow = (t + bx) % 40 < 36;
+    R(bx - 1, sag + 4, 3, 4, glow ? COWORK.bulb : COWORK.bulbOff);
+    PX(bx, sag + 3, glow ? COWORK.glow : COWORK.bulbOff);
+  }
+
+  // 2 phone-booth pods — translucent glass door is the defining detail,
+  // so we push a half-alpha <Rect> directly (R-helper only does opaque).
+  for (let p = 0; p < 2; p++) {
+    const bx = 8 + p * 40;
+    const by = 40;
+    // Solid green frame
+    R(bx, by, 26, 56, COWORK.boothBody);
+    R(bx, by, 26, 1, COWORK.boothEdge);
+    R(bx + 25, by, 1, 56, COWORK.boothDark);
+    // Glass door panel (alpha 0.4) — see-through, sits over the frame
+    els.push(
+      <Rect
+        key={key()}
+        x={bx + 4} y={by + 6} width={18} height={44}
+        fill={COWORK.glass} opacity={0.4}
+      />
+    );
+    // Door frame top + bottom edges
+    R(bx + 4, by + 6, 18, 1, COWORK.boothEdge);
+    R(bx + 4, by + 49, 18, 1, COWORK.boothDark);
+    // Vertical glass reflection streak
+    R(bx + 7, by + 10, 1, 30, COWORK.glassHi);
+    // Person silhouette inside (faint, behind the glass)
+    R(bx + 10, by + 18, 6, 18, COWORK.boothDark);
+    R(bx + 11, by + 14, 4, 4, COWORK.boothBody);
+    // Occupied indicator light
+    PX(bx + 21, by + 8, (p + (t >> 4)) % 2 ? colors.tensionRed : colors.sage);
+    // Roof
+    R(bx - 1, by - 2, 28, 2, COWORK.boothDark);
+  }
+
+  // Kanban whiteboard between pods and kitchen
+  const wbX = 96, wbY = 36;
+  R(wbX - 1, wbY - 1, 52, 40, COWORK.ceilEdge);
+  R(wbX, wbY, 50, 38, COWORK.wallTopHi);
+  R(wbX, wbY, 50, 2, COWORK.ceilEdge);
+  const colHeads = [colors.sage, colors.gold, colors.terracotta];
+  const stickyHues = ["#FCF066", "#A5C8FF", "#B6F2C7", "#FF9A8B"];
+  for (let c = 0; c < 3; c++) {
+    R(wbX + 4 + c * 16, wbY + 5, 1, 30, COWORK.ceilTop);
+    R(wbX + 6 + c * 16, wbY + 6, 10, 1, colHeads[c]);
+    for (let s = 0; s < 2 + (c % 2); s++) {
+      R(wbX + 5 + c * 16, wbY + 10 + s * 7, 12, 5, stickyHues[(c + s) % 4]);
+    }
+  }
+
+  // Kitchen counter + La Croix tower + kombucha tap
+  const kX = 200;
+  R(kX, 150, 40, 8, COWORK.floorSeam);
+  R(kX, 150, 40, 1, COWORK.floor);
+  R(kX, 158, 40, FLOOR_Y - 158, COWORK.brickDark);
+  R(kX + 4, 162, 14, FLOOR_Y - 166, "#7C5030");
+  R(kX + 22, 162, 14, FLOOR_Y - 166, "#7C5030");
+  PX(kX + 16, 170, colors.gold);
+  PX(kX + 24, 170, colors.gold);
+  // La Croix pyramid
+  const lcColors = ["#A5C8FF", "#FF9A8B", "#B6F2C7", "#EBBE6E"];
+  for (let row = 0; row < 4; row++) {
+    const count = 4 - row;
+    for (let c = 0; c < count; c++) {
+      const cx = kX + 4 + row * 2 + c * 4;
+      const cy = 148 - row * 6;
+      R(cx, cy, 3, 5, lcColors[(row + c) % 4]);
+      R(cx, cy, 3, 1, COWORK.wallTopHi);
+      PX(cx + 1, cy + 2, COWORK.wallTopHi);
+    }
+  }
+  // Kombucha tap
+  const ktX = kX + 28;
+  R(ktX, 138, 6, 12, "#5C5C5C");
+  R(ktX, 138, 6, 1, "#7C7C7C");
+  R(ktX + 2, 134, 2, 4, "#3A3A3A");
+  R(ktX + 1, 133, 4, 1, colors.gold);
+  PX(ktX + 3, 150, colors.terracotta);
+  R(ktX - 2, 128, 10, 3, COWORK.felt);
+  R(ktX, 129, 6, 1, COWORK.glass);
+
+  // Bench-style shared desktop
+  const podX = 30, podY = 256;
+  R(podX, podY, 150, 4, COWORK.floorSeam);
+  R(podX, podY, 150, 1, COWORK.floor);
+  R(podX, podY + 4, 150, 1, COWORK.brickDark);
+  R(podX + 2, podY + 5, 3, 28, COWORK.brickDark);
+  R(podX + 145, podY + 5, 3, 28, COWORK.brickDark);
+  R(podX + 73, podY + 5, 3, 28, COWORK.brickDark);
+  R(podX + 10, podY + 6, 130, 1, "#3A3A3A");
+
+  // Foosball table
+  const fbX = 8, fbY = 300;
+  R(fbX, fbY, 40, 18, COWORK.felt);
+  R(fbX, fbY, 40, 1, COWORK.feltEdge);
+  R(fbX, fbY + 17, 40, 1, COWORK.feltDark);
+  R(fbX, fbY, 1, 18, COWORK.brickDark);
+  R(fbX + 39, fbY, 1, 18, COWORK.brickDark);
+  R(fbX + 20, fbY, 1, 18, COWORK.feltEdge);
+  R(fbX, fbY + 7, 1, 4, "#1A1A1A");
+  R(fbX + 39, fbY + 7, 1, 4, "#1A1A1A");
+  for (let rod = 0; rod < 4; rod++) {
+    const rx = fbX + 6 + rod * 9;
+    R(rx, fbY - 2, 1, 22, COWORK.duct);
+    for (let fig = 0; fig < 3; fig++) {
+      R(rx - 1, fbY + 3 + fig * 5, 3, 3, rod % 2 ? colors.tensionRed : colors.gold);
+    }
+    R(rx - 1, fbY - 4, 3, 2, "#3A3A3A");
+  }
+  R(fbX + 2, fbY + 18, 2, 10, COWORK.brickEdge);
+  R(fbX + 36, fbY + 18, 2, 10, COWORK.brickEdge);
+
+  return (
+    <G>
+      {els}
+      {/* 3 workstations on the bench (sprites layered over the els bg) */}
+      {[0, 1, 2].map((i) => {
+        const dx = podX + 8 + i * 50;
+        return (
+          <G key={`ws${i}`}>
+            <Monitor x={dx + 10} y={podY - 22} t={t + i * 7} />
+            <EngineerOnChair x={dx + 13} y={podY + 12} t={t + i * 11} />
+            <Keyboard x={dx + 6} y={podY - 2} t={t + i * 5} />
+            <Succulent x={dx + 40} y={podY - 9} />
+          </G>
+        );
+      })}
+      {/* Big leafy floor plant (right of pod) + woven pot */}
+      <Plant x={186} y={FLOOR_Y + 46} t={t} />
+      <PixelRect x={186} y={FLOOR_Y + 64} w={18} h={10} c={COWORK.floorSeam} />
+      {[0, 3, 6, 9, 12, 15].map((dx) => (
+        <PixelRect key={`bk${dx}`} x={186 + dx} y={FLOOR_Y + 64} w={1} h={10} c={COWORK.brickDark} />
+      ))}
+      {/* Half-height networking rack — the pod's GPU */}
+      <CoworkRack x={210} y={FLOOR_Y + 78} t={t} />
+      <FloatingTokens spawnX={60} spawnY={244} t={t} />
+    </G>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// STARTUP OFFICE SCENE — Series D / IPO, exposed brick + Edison bulbs +
+// posters + couch lounge. Port of pixel-art.jsx::composeOfficeScene (design v4).
+// Note: FLOOR_Y=214 here (not 222) — design picks a higher floor so the
+// lounge couch + standing rack at the back fit comfortably below.
+// ═══════════════════════════════════════════════════════════════════════
+const OFFICE = {
+  beamDark:   "#5C3924",
+  beamMid:    "#8B5639",
+  wallCream:  "#F5EFE2",
+  wallHi:     "#FBF7EC",
+  brick:      "#A8503A",
+  brickEdge:  "#8B3A28",
+  brickHi:    "#B85C44",
+  floorWood:  "#B58858",
+  floorPlank: "#9A6E40",
+  floorHi:    "#C89868",
+  bulb:       "#EBBE6E",
+  bulbOff:    "#9A6E40",
+  posterRed:  "#C97B5B",
+  posterSage: "#7E9A85",
+  goldFrame:  "#D4A24C",
+  frameGreen: "#3F5142",
+  frameSage:  "#7E9A85",
+  neonOn:     "#D45A68",
+  neonOff:    "#5C2050",
+  switchBlue: "#4A6FA5",
+  switchRed:  "#B23A48",
+};
+
+function OfficeScene({ t }: { t: number }) {
+  const FLOOR_Y = 214;
+  const els: React.ReactNode[] = [];
+  let k = 0;
+  const key = () => `of${k++}`;
+  const R = (x: number, y: number, w: number, h: number, c: string) =>
+    els.push(<PixelRect key={key()} x={x} y={y} w={w} h={h} c={c} />);
+  const PX = (x: number, y: number, c: string) =>
+    els.push(<Px key={key()} x={x} y={y} c={c} />);
+
+  // Ceiling with exposed wood beams
+  R(0, 0, W, 6, OFFICE.beamDark);
+  for (let i = 0; i < W; i += 22) R(i, 0, 2, 6, OFFICE.beamMid);
+  // Cream upper wall
+  R(0, 6, W, 54, OFFICE.wallCream);
+  for (let y = 8; y < 58; y += 7) R(0, y, W, 1, OFFICE.wallHi);
+  // Exposed brick lower wall
+  R(0, 60, W, FLOOR_Y - 60, OFFICE.brick);
+  for (let by = 60; by < FLOOR_Y; by += 6) {
+    R(0, by, W, 1, OFFICE.brickEdge);
+    const off = ((by / 6) % 2) * 8;
+    for (let bx = -off; bx < W; bx += 16) R(bx, by, 1, 6, OFFICE.brickEdge);
+  }
+  // Lighter-brick highlights — break the texture monotony
+  for (let i = 0; i < 14; i++) {
+    const hx = (i * 37) % W, hy = 62 + ((i * 23) % (FLOOR_Y - 66));
+    R(hx, ((hy / 6) | 0) * 6, 14, 5, OFFICE.brickHi);
+  }
+  R(0, FLOOR_Y - 2, W, 1, OFFICE.beamDark);
+
+  // Warm wood floor
+  R(0, FLOOR_Y, W, H - FLOOR_Y, OFFICE.floorWood);
+  for (let i = 0; i < W; i += 22) R(i + ((i / 22) % 3) * 5, FLOOR_Y, 1, H - FLOOR_Y, OFFICE.floorPlank);
+  R(0, FLOOR_Y, W, 1, OFFICE.floorHi);
+  R(0, H - 3, W, 1, OFFICE.floorPlank);
+
+  // Edison bulb string with subtle sag
+  for (let x = 0; x < W; x++) {
+    const sag = ((Math.sin(x / 34) * 3 + 10) | 0);
+    PX(x, sag, "#3A3A3A");
+  }
+  for (let bx = 18; bx < W; bx += 34) {
+    const sag = ((Math.sin(bx / 34) * 3 + 10) | 0);
+    R(bx, sag + 1, 1, 2, "#3A3A3A");
+    const glow = (t + bx) % 44 < 40;
+    R(bx - 1, sag + 3, 3, 3, glow ? OFFICE.bulb : OFFICE.bulbOff);
+  }
+
+  // Framed first dollar (gold frame, green matte, sage bill)
+  R(80, 66, 16, 14, OFFICE.goldFrame);
+  R(81, 67, 14, 12, OFFICE.frameGreen);
+  R(83, 70, 10, 6, OFFICE.frameSage);
+  PX(88, 73, OFFICE.bulb);
+  R(84, 69, 8, 1, colors.sage_hi);
+
+  // Neon "AGI?" sign on the brick (4 vertical strokes, blinking)
+  const neonOn = (t >> 3) % 8 < 6;
+  const neon = neonOn ? OFFICE.neonOn : OFFICE.neonOff;
+  R(112, 68, 18, 1, neon);
+  R(112, 68, 1, 8, neon);
+  R(120, 68, 1, 8, neon);
+  R(128, 68, 1, 8, neon);
+
+  // Hanging planter (Energy hit target — design v4 uses the wall electrical
+  // at this position; we render the leafy planter as the "buy energy" prop).
+  R(150, 62, 10, 4, OFFICE.beamMid);
+  for (let i = 0; i < 8; i++) PX(148 + i * 2, 66 + (i % 3) * 3, OFFICE.posterSage);
+
+  // Yellow-and-black caution mat under the server nook
+  for (let sx = 192; sx < 240; sx += 6) R(sx, 234, 3, 1, OFFICE.goldFrame);
+
+  // Couch (mid-century terracotta) — left-front lounge
+  const cX = 8, cY = 308;
+  R(cX, cY, 40, 4, OFFICE.posterRed);
+  R(cX, cY + 4, 40, 12, "#B5664A");
+  R(cX, cY + 14, 44, 8, OFFICE.posterRed);
+  R(cX - 2, cY + 6, 4, 16, "#B5664A");
+  R(cX + 40, cY + 6, 4, 16, "#B5664A");
+  R(cX + 14, cY + 4, 1, 12, OFFICE.beamMid);
+  R(cX + 28, cY + 4, 1, 12, OFFICE.beamMid);
+  R(cX + 2, cY + 22, 2, 5, OFFICE.beamDark);
+  R(cX + 38, cY + 22, 2, 5, OFFICE.beamDark);
+  R(cX + 4, cY + 8, 9, 7, OFFICE.posterSage);
+  PX(cX + 7, cY + 11, colors.sage_hi);
+
+  // Switch console on a side table (next to beanbag)
+  R(cX + 74, cY + 18, 12, 2, OFFICE.beamDark);
+  R(cX + 76, cY + 12, 8, 5, "#2A2A2A");
+  R(cX + 77, cY + 13, 2, 3, OFFICE.switchRed);
+  R(cX + 82, cY + 13, 2, 3, OFFICE.switchBlue);
+  PX(cX + 80, cY + 14, (t >> 3) % 2 ? OFFICE.posterSage : OFFICE.frameGreen);
+
+  // Floor plant pot rim
+  R(158, FLOOR_Y + 62, 18, 10, OFFICE.floorPlank);
+
+  return (
+    <G>
+      {els}
+      {/* Wall decor — posters + clock + whiteboard layered as sprites */}
+      <WallPoster x={14} y={66} color={OFFICE.posterRed} variant={0} />
+      <WallPoster x={44} y={66} color={OFFICE.posterSage} variant={1} />
+      <Clock x={176} y={66} t={t} />
+      <Whiteboard x={196} y={64} />
+      {/* 3 desks (Senior/Staff/Senior per design v4) */}
+      {[0, 1, 2].map((i) => {
+        const dx = 14 + i * 50;
+        const podY = 250;
+        return (
+          <G key={`desk${i}`}>
+            <PixelRect x={dx} y={podY} w={44} h={4} c={OFFICE.floorPlank} />
+            <PixelRect x={dx} y={podY} w={44} h={1} c={OFFICE.floorHi} />
+            <PixelRect x={dx + 3} y={podY + 4} w={2} h={26} c={"#7C5030"} />
+            <PixelRect x={dx + 39} y={podY + 4} w={2} h={26} c={"#7C5030"} />
+            <Monitor x={dx + 9} y={podY - 22} t={t + i * 7} />
+            <EngineerOnChair x={dx + 12} y={podY + 12} t={t + i * 11} />
+            <Keyboard x={dx + 4} y={podY - 2} t={t + i * 5} />
+            <Succulent x={dx + 34} y={podY - 9} />
+          </G>
+        );
+      })}
+      {/* Server nook on the right (GPU): half-height rack + tower */}
+      <BigRack x={214} y={240} t={t} />
+      <GPU x={196} y={FLOOR_Y + 44} t={t} />
+      {/* Couch lounge accessories + big floor plant */}
+      <Beanbag2 x={58} y={316} />
+      <Plant x={158} y={FLOOR_Y + 44} t={t} />
+      <FloatingTokens spawnX={60} spawnY={228} t={t} />
     </G>
   );
 }
@@ -381,48 +931,69 @@ function MegacorpScene({ t }: { t: number }) {
   return (
     <G>
       {els}
-      {/* Front bank of 3 desks with engineers (sprites layer on top) */}
+      {/* Front bank of 3 desks — design v5 narrows them to make room for
+          the server-room alcove on the right (no mug; sleeker corporate). */}
       {[0, 1, 2].map((i) => {
-        const dx = 12 + i * 80;
+        const dx = 4 + i * 52;
         const deskY = 256;
         return (
           <G key={`desk${i}`}>
-            <PixelRect x={dx} y={deskY} w={68} h={4} c={CORP.dark} />
-            <PixelRect x={dx} y={deskY} w={68} h={1} c={CORP.mid} />
+            <PixelRect x={dx} y={deskY} w={46} h={4} c={CORP.dark} />
+            <PixelRect x={dx} y={deskY} w={46} h={1} c={CORP.mid} />
             <PixelRect x={dx + 4} y={deskY + 4} w={2} h={30} c={CORP.dark} />
-            <PixelRect x={dx + 62} y={deskY + 4} w={2} h={30} c={CORP.dark} />
-            <Monitor x={dx + 18} y={deskY - 22} t={t + i * 7} />
-            <EngineerOnChair x={dx + 22} y={deskY + 12} t={t + i * 11} />
-            <Keyboard x={dx + 14} y={deskY - 2} t={t + i * 5} />
-            <Mug x={dx + 3} y={deskY - 7} t={t + i * 13} />
+            <PixelRect x={dx + 40} y={deskY + 4} w={2} h={30} c={CORP.dark} />
+            <Monitor x={dx + 10} y={deskY - 22} t={t + i * 7} />
+            <EngineerOnChair x={dx + 13} y={deskY + 12} t={t + i * 11} />
+            <Keyboard x={dx + 6} y={deskY - 2} t={t + i * 5} />
           </G>
         );
       })}
-      {/* DATA — stack of storage boxes on the floor (Buy Data target) */}
-      <G>
-        <PixelRect x={20} y={320} w={16} h={8} c={P.cream_4} />
-        <PixelRect x={20} y={320} w={16} h={1} c={P.cream_3} />
-        <PixelRect x={20} y={327} w={16} h={1} c={P.terracotta_3} />
-        <PixelRect x={27} y={321} w={1} h={6} c={P.terracotta_2} />
-        <PixelRect x={22} y={323} w={12} h={1} c={P.cream_3} />
-        <PixelRect x={23} y={314} w={10} h={6} c={P.cream_3} />
-        <PixelRect x={23} y={314} w={10} h={1} c={P.cream_2} />
-        <PixelRect x={23} y={319} w={10} h={1} c={P.terracotta_3} />
-        <PixelRect x={27} y={315} w={1} h={4} c={P.terracotta_2} />
-        <PixelRect x={25} y={316} w={6} h={1} c={P.ink} />
-        <PixelRect x={25} y={317} w={4} h={1} c={P.ink} />
-        <PixelRect x={19} y={328} w={18} h={1} c={P.terracotta_3} />
-      </G>
-      {/* ENERGY — wall HVAC / power unit (Buy Energy target) */}
-      <G>
-        <PixelRect x={208} y={148} w={20} h={7} c={P.cream_4} />
-        <PixelRect x={208} y={148} w={20} h={1} c={P.muted_2} />
-        {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
-          <PixelRect key={`ac${i}`} x={211 + i * 2} y={149} w={1} h={4} c={P.ink_hi} />
-        ))}
-        <PixelRect x={208} y={154} w={20} h={1} c={P.cream_3} />
-      </G>
-      {/* Corporate plant — sleek black pot */}
+
+      {/* ── Server room alcove on the right ── (design v5 redesign)
+          Glass partition at x=180 separates the work zone from the
+          server room. Inside: 2 BigRacks + 2 GPU towers on a cold-aisle
+          dark-gray floor tint, "SERVER ROOM" sign over the door, and a
+          gold caution stripe at the threshold. */}
+
+      {/* Back wall partition for the server alcove */}
+      <PixelRect x={189} y={152} w={51} h={70} c={CORP.dark} />
+      <PixelRect x={189} y={152} w={51} h={1} c={CORP.mid} />
+      {/* Cold-aisle floor tint inside the alcove */}
+      <PixelRect x={189} y={FLOOR_Y} w={51} h={H - FLOOR_Y} c={"#4A4A4A"} />
+      {/* Glass-partition divider frame */}
+      <PixelRect x={180} y={150} w={3} h={72} c={CORP.darker} />
+      <PixelRect x={180} y={150} w={3} h={1} c={CORP.mid} />
+      {/* Glass pane (semi-transparent — direct Rect with opacity) */}
+      <Rect x={183} y={152} width={6} height={70} fill={CORP.glass} opacity={0.25} />
+      {/* Glass highlight streaks */}
+      <PixelRect x={184} y={158} w={1} h={30} c={"#E0E4E8"} />
+      <PixelRect x={186} y={170} w={1} h={20} c={"#E0E4E8"} />
+      {/* Door handle + gold key dot */}
+      <PixelRect x={181} y={188} w={2} h={8} c={CORP.mid} />
+      <Px x={181} y={192} c={colors.gold} />
+      {/* "SERVER ROOM" sign above the door */}
+      <PixelRect x={178} y={144} w={24} h={5} c={CORP.darker} />
+      <PixelRect x={178} y={144} w={24} h={1} c={CORP.mid} />
+      <PixelRect x={181} y={146} w={18} h={1} c={colors.sage} />
+      {/* 2 BigRacks standing in the alcove */}
+      <BigRack x={194} y={230} t={t} />
+      <BigRack x={214} y={230} t={t + 30} />
+      {/* 2 GPU towers in front of the racks */}
+      <GPU x={200} y={FLOOR_Y + 72} t={t} />
+      <GPU x={220} y={FLOOR_Y + 72} t={t + 17} />
+      {/* Caution stripe at alcove threshold */}
+      {Array.from({ length: 9 }, (_, i) => (
+        <PixelRect
+          key={`c${i}`}
+          x={189 + i * 6}
+          y={218}
+          w={3}
+          h={2}
+          c={colors.gold}
+        />
+      ))}
+
+      {/* Corporate plant — sleek black pot (far left per design v5) */}
       <PixelRect x={4} y={FLOOR_Y + 60} w={14} h={18} c={CORP.dark} />
       <PixelRect x={4} y={FLOOR_Y + 60} w={14} h={1} c={CORP.mid} />
       <Plant x={0} y={FLOOR_Y + 40} t={t} />
@@ -1465,6 +2036,40 @@ function HitOutline({ zone }: { zone: HitZone }) {
         height={zone.h + 4}
         fill="none"
         stroke={colors.ink}
+        strokeWidth={1}
+      />
+    </G>
+  );
+}
+
+/**
+ * Tutorial highlight: two nested gold rings + a slow pulse driven by the
+ * scene's existing tick so we don't pay for a separate Animated.Value. Uses
+ * a sine pulse (0.4 → 1.0 opacity) at roughly one cycle per second.
+ */
+function TutorialPulse({ zone, t }: { zone: HitZone; t: number }) {
+  // tick fires every 200ms (5/s). Two cycles per second feels lively
+  // without being epileptic — divide t by 1.2 so a full sine wave is ~2.4s.
+  const phase = Math.sin(t / 1.2);
+  const opacity = 0.4 + 0.6 * (phase * 0.5 + 0.5);
+  return (
+    <G opacity={opacity}>
+      <Rect
+        x={zone.x - 2}
+        y={zone.y - 2}
+        width={zone.w + 4}
+        height={zone.h + 4}
+        fill="none"
+        stroke={colors.gold_hi}
+        strokeWidth={2}
+      />
+      <Rect
+        x={zone.x - 4}
+        y={zone.y - 4}
+        width={zone.w + 8}
+        height={zone.h + 8}
+        fill="none"
+        stroke={colors.gold}
         strokeWidth={1}
       />
     </G>

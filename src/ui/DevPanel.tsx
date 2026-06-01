@@ -5,6 +5,7 @@ import {
   __devAddEquity,
   __devAddTokens,
   __devJumpToRound,
+  __devReplayIntro,
   __devResetVignetteResolutions,
   __devSkipTime,
   __devUnlockAllResearch,
@@ -50,6 +51,20 @@ export function DevPanel({ visible, onClose }: Props) {
             </View>
 
             <ScrollView style={{ maxHeight: 560 }} contentContainerStyle={styles.scrollPad}>
+              <Section label="START OVER">
+                <Btn
+                  label="RESTART GAME (wipe save)"
+                  danger
+                  onPress={() => {
+                    // Close the panel BEFORE the wipe — otherwise DevPanel
+                    // and IntroModal end up stacked on top of each other and
+                    // taps get caught in the middle.
+                    onClose();
+                    void __devWipeSave();
+                  }}
+                />
+              </Section>
+
               <Section label="TIME">
                 <Btn label="+1h"  onPress={() => __devSkipTime(3600)} />
                 <Btn label="+8h"  onPress={() => __devSkipTime(8 * 3600)} />
@@ -89,8 +104,8 @@ export function DevPanel({ visible, onClose }: Props) {
                 <Btn label="Unlock all nodes" onPress={() => __devUnlockAllResearch()} />
               </Section>
 
-              <Section label="SAVE — DESTRUCTIVE">
-                <Btn label="WIPE SAVE" danger onPress={() => __devWipeSave()} />
+              <Section label="ONBOARDING">
+                <Btn label="Replay intro" onPress={() => __devReplayIntro()} />
               </Section>
             </ScrollView>
           </View>

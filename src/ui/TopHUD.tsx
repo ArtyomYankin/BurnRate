@@ -45,7 +45,7 @@ export function TopHUD({
           <View style={styles.tokenRow}>
             <View style={styles.tokenIcon} />
             <Text style={styles.tokenBig}>{tokens}</Text>
-            <Text style={styles.tokenRate}>+{rate}/s</Text>
+            <Text style={styles.tokenRate}>+{rate}</Text>
           </View>
         </View>
 

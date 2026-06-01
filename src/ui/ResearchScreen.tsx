@@ -13,8 +13,10 @@ import {
   ResearchBranch,
   ResearchNode,
 } from "../core/research";
+import { SPRINT_UPGRADES, SprintUpgradeDef } from "../core/sprintUpgrades";
 import {
   selectEquityStr,
+  selectResearchPointsStr,
   selectUnlockedResearch,
   useGame,
 } from "../game/store";
@@ -51,9 +53,13 @@ type NodeState = "owned" | "available" | "locked";
 
 export function ResearchScreen({ onBack }: Props) {
   const equityStr = useGame(selectEquityStr);
+  const rpStr = useGame(selectResearchPointsStr);
   const unlocked = useGame(selectUnlockedResearch);
+  const ownedSprints = useGame((s) => s.run.sprintUpgradesUnlocked);
   const buy = useGame((s) => s.buyResearchNode);
+  const buySprint = useGame((s) => s.buySprintUpgrade);
   const equity = D(equityStr);
+  const rp = D(rpStr);
 
   // A node is "owned" if its id is in `unlocked`, "available" if affordable
   // AND any prerequisite of lower tier in the same branch is owned, otherwise
@@ -80,6 +86,33 @@ export function ResearchScreen({ onBack }: Props) {
         sub={`${formatNumber(equity)} Equity available · spend before prestige`}
         onBack={onBack}
       />
+
+      {/* Sprint section — per-run RP-bought boosts (GDD §4 Beat 2). Lives
+          above the Equity tree because RP is the R&D-allocation currency the
+          player just generated this round; resets on prestige. */}
+      <View style={styles.sprintHeader}>
+        <View style={[styles.sprintSwatch, { backgroundColor: colors.sage }]} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.sprintLabel}>SPRINT · RP</Text>
+          <Text style={styles.sprintSub}>per-run boosts · reset on prestige</Text>
+        </View>
+        <Text style={styles.sprintRp}>{formatNumber(rp)} RP</Text>
+      </View>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.sprintRow}
+      >
+        {SPRINT_UPGRADES.map((u) => (
+          <SprintCard
+            key={u.id}
+            def={u}
+            owned={ownedSprints.includes(u.id)}
+            affordable={rp.gte(u.costRP)}
+            onBuy={() => buySprint(u.id)}
+          />
+        ))}
+      </ScrollView>
 
       {/* Equity card — gold accent, big number left, "next tier cost" right */}
       <View style={styles.equityCard}>
@@ -218,6 +251,51 @@ function ResearchNodeCard({
       <Text style={[styles.nodeEffect, { color: accent }]} numberOfLines={2}>
         {node.description}
       </Text>
+    </Pressable>
+  );
+}
+
+// ─── SprintCard — per-run RP-bought boost ────────────────────────────────
+function SprintCard({
+  def,
+  owned,
+  affordable,
+  onBuy,
+}: {
+  def: SprintUpgradeDef;
+  owned: boolean;
+  affordable: boolean;
+  onBuy(): void;
+}) {
+  const accent = owned ? colors.sage_2 : affordable ? colors.sage : colors.cream_4;
+  const effectLabel =
+    def.effect.type === "tokens_mult"  ? `+${Math.round((def.effect.value - 1) * 100)}% tokens`
+    : def.effect.type === "capital_mult"? `+${Math.round((def.effect.value - 1) * 100)}% capital`
+    : def.effect.type === "hype_mult"   ? `+${Math.round((def.effect.value - 1) * 100)}% hype`
+    :                                     `+${Math.round((def.effect.value - 1) * 100)}% RP`;
+  return (
+    <Pressable
+      onPress={() => { if (!owned && affordable) onBuy(); }}
+      style={[
+        styles.sprintCard,
+        { borderColor: accent, opacity: owned ? 0.65 : 1 },
+      ]}
+    >
+      <View style={[styles.sprintCardSwatch, { backgroundColor: accent }]} />
+      <Text style={styles.sprintCardName} numberOfLines={2}>{def.name}</Text>
+      <Text style={[styles.sprintCardEffect, { color: accent }]} numberOfLines={1}>
+        {effectLabel}
+      </Text>
+      <Text style={styles.sprintCardFlavor} numberOfLines={2}>{def.flavor}</Text>
+      <View style={styles.sprintCardFooter}>
+        {owned ? (
+          <Text style={[styles.sprintCardCost, { color: colors.sage_2 }]}>OWNED</Text>
+        ) : (
+          <Text style={[styles.sprintCardCost, { color: affordable ? colors.ink : colors.muted }]}>
+            {def.costRP} RP
+          </Text>
+        )}
+      </View>
     </Pressable>
   );
 }
@@ -403,5 +481,86 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     marginTop: 3,
     lineHeight: 9,
+  },
+  sprintHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  sprintSwatch: {
+    width: 10,
+    height: 10,
+  },
+  sprintLabel: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 13,
+    color: colors.ink,
+    letterSpacing: 1,
+  },
+  sprintSub: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 8,
+    color: colors.muted,
+    letterSpacing: 0.5,
+    marginTop: 1,
+  },
+  sprintRp: {
+    fontFamily: fonts.mono,
+    fontSize: 14,
+    color: colors.ink,
+  },
+  sprintRow: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    gap: 6,
+  },
+  sprintCard: {
+    width: 132,
+    padding: 8,
+    backgroundColor: colors.cream_hi,
+    borderWidth: 1,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: PIXEL },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 0,
+  },
+  sprintCardSwatch: {
+    width: 14,
+    height: 4,
+    marginBottom: 4,
+  },
+  sprintCardName: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 12,
+    color: colors.ink,
+    lineHeight: 14,
+  },
+  sprintCardEffect: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 8,
+    letterSpacing: 0.5,
+    marginTop: 3,
+  },
+  sprintCardFlavor: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 7,
+    color: colors.muted,
+    letterSpacing: 0.5,
+    marginTop: 3,
+    lineHeight: 9,
+    minHeight: 18,
+  },
+  sprintCardFooter: {
+    marginTop: 6,
+    alignItems: "flex-end",
+  },
+  sprintCardCost: {
+    fontFamily: fonts.display,
+    fontSize: 10,
+    letterSpacing: 1,
   },
 });

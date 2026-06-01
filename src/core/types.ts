@@ -75,6 +75,12 @@ export interface RunState {
   activeEffects: ActiveEffectSerialized[];
   /** Training-run pity counter — resets to 0 on Breakthrough. */
   trainingPity: number;
+  /**
+   * GDD §4 Beat 2 + §9: R&D allocation buys "active-run research nodes"
+   * (sprint upgrades) with RP. They live for the current run only and
+   * disappear on prestige (because freshRunState() omits them).
+   */
+  sprintUpgradesUnlocked: string[];
 }
 
 export interface PersistentState {
@@ -105,6 +111,10 @@ export interface PersistentState {
   // of the reply the player chose. Presence in the map = "resolved";
   // absence = "still open for a pick" (if the vignette has replyEffects).
   resolvedVignettes: Record<string, number>;
+  // GDD §10: ~100 achievements at v1.0, persistent across prestige.
+  // Insertion order = unlock order so the grid can show newest-last (or
+  // newest-first if the screen flips it). Set semantics — no dupes.
+  unlockedAchievements: string[];
 }
 
 export interface AccountState {
@@ -119,7 +129,14 @@ export interface AccountState {
 // v6 → v7: + resolvedVignettes (Record<id, replyIdx>) for the Beat 3 Slack
 // reply mechanic (GDD §4). Empty map on migrate — player can pick a reply
 // the next time they open an already-unlocked vignette.
-export const SCHEMA_VERSION = 7 as const;
+// v7 → v8: RunState gains sprintUpgradesUnlocked (string[]) — per-run RP-
+// bought boosts (GDD §4 Beat 2 + §9 "Active-run research nodes"). Empty
+// array on migrate; player starts the next round with no sprints owned.
+// v8 → v9: PersistentState gains unlockedAchievements (string[]) — GDD §10
+// completionist hook (~100 at v1.0). Empty on migrate; achievements re-
+// evaluate every tick so anything the player has already earned will fire
+// on next session.
+export const SCHEMA_VERSION = 9 as const;
 
 export interface SaveBlob {
   schemaVersion: typeof SCHEMA_VERSION;

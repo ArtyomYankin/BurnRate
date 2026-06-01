@@ -31,6 +31,7 @@ export function freshSave(now: number = Date.now()): SaveBlob {
       unlockedVignettes: [],
       unreadVignettes: [],
       resolvedVignettes: {},
+      unlockedAchievements: [],
     },
     account: {
       anonUid: genUid(),
@@ -65,6 +66,7 @@ export function migrate(raw: unknown): SaveBlob {
       allocation: Allocation;
       activeEffects: RunState["activeEffects"];
       trainingPity: number;
+      sprintUpgradesUnlocked: string[];
     }>;
     const oldPersist = blob.persistent as PersistentState & Partial<{
       alignmentDebt: string;
@@ -73,6 +75,7 @@ export function migrate(raw: unknown): SaveBlob {
       unlockedVignettes: string[];
       unreadVignettes: string[];
       resolvedVignettes: Record<string, number>;
+      unlockedAchievements: string[];
     }>;
     return {
       schemaVersion: SCHEMA_VERSION,
@@ -83,6 +86,9 @@ export function migrate(raw: unknown): SaveBlob {
         allocation:     oldRun.allocation     ?? DEFAULT_ALLOCATION,
         activeEffects:  oldRun.activeEffects  ?? [],
         trainingPity:   oldRun.trainingPity   ?? 0,
+        // v7 → v8: per-run sprint upgrades. Empty array = no boosts
+        // carried over; the player can buy them this round with RP.
+        sprintUpgradesUnlocked: oldRun.sprintUpgradesUnlocked ?? [],
       },
       persistent: {
         ...oldPersist,
@@ -98,6 +104,10 @@ export function migrate(raw: unknown): SaveBlob {
         // — when the player re-opens an unlocked Slack DM with replyEffects,
         // they get a fresh chance to pick a reply.
         resolvedVignettes:   oldPersist.resolvedVignettes   ?? {},
+        // v8 → v9: achievements grid. Empty on migrate — the tick re-checks
+        // every condition, so already-earned ones re-fire on the next tick
+        // (with the audio cue + unread badge, briefly).
+        unlockedAchievements: oldPersist.unlockedAchievements ?? [],
       },
       account: blob.account as AccountState,
     };

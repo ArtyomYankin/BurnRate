@@ -34,8 +34,13 @@ describe("vignettes data layer", () => {
     }
   });
 
-  it("ships 15 starter vignettes (Appendix E V01-V15)", () => {
-    expect(VIGNETTES.length).toBe(15);
+  it("ships at least the V01–V30 batch (GDD §10 targets ~50 at v1.0)", () => {
+    expect(VIGNETTES.length).toBeGreaterThanOrEqual(30);
+  });
+
+  it("every vignette has a unique id (save-state keys collide otherwise)", () => {
+    const ids = VIGNETTES.map((v) => v.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   it("when replyEffects is defined it is index-aligned with replies (Beat 3)", () => {

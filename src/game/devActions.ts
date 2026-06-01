@@ -113,6 +113,18 @@ export function __devUnlockAllResearch() {
   });
 }
 
+// ─── Onboarding ──────────────────────────────────────────────────────────
+/**
+ * Replay the first-launch flow: IntroModal + the 3 tooltips. Useful for
+ * tweaking copy without wiping the whole save.
+ */
+export function __devReplayIntro() {
+  const s = useGame.getState();
+  useGame.setState({
+    account: { ...s.account, onboardingStep: 0 },
+  });
+}
+
 // ─── Save ────────────────────────────────────────────────────────────────
 /**
  * Nuclear option — clear local save and rehydrate a fresh one. Used for

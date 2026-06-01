@@ -23,6 +23,7 @@ import {
   unlockRoundForTier,
 } from "../core/producers";
 import { getRound } from "../core/rounds";
+import * as audio from "../audio";
 import { ChainId, ProducerDef } from "../core/types";
 import {
   selectCapitalStr,
@@ -95,6 +96,7 @@ export function ProducersScreen({ onBack, defaultChain }: Props) {
     producersOwned: owned,
     activeEffects: [],
     trainingPity: 0,
+    sprintUpgradesUnlocked: [],
   };
   const totalTps = tokensPerSec(runForCalc);
   const bottleneck = bottleneckChain(runForCalc);
@@ -210,7 +212,10 @@ export function ProducersScreen({ onBack, defaultChain }: Props) {
               mult={agentMult}
               cost={agentCost}
               affordable={agentAffordable}
-              onBuy={() => buy(AUTONOMOUS_AGENT.id, 1)}
+              onBuy={() => {
+                const r = buy(AUTONOMOUS_AGENT.id, 1);
+                if (r.bought > 0) audio.play("producer_buy");
+              }}
             />
           </ScrollView>
 
@@ -248,7 +253,10 @@ export function ProducersScreen({ onBack, defaultChain }: Props) {
                 currentRound={fundingRoundIdx}
                 color={meta.color}
                 fresh={tier.tierIdx === newTierIdx}
-                onBuy={() => buy(tier.id, 1)}
+                onBuy={() => {
+                  const r = buy(tier.id, 1);
+                  if (r.bought > 0) audio.play("producer_buy");
+                }}
               />
             ))}
           </ScrollView>

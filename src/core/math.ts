@@ -11,6 +11,7 @@ import {
   COST_DEF_BY_ID,
   producersForChain,
 } from "./producers";
+import { aggregateSprintEffects } from "./sprintUpgrades";
 import { NO_RESEARCH_EFFECTS, ResearchEffects } from "./research";
 import { getRound } from "./rounds";
 
@@ -216,10 +217,13 @@ export function tokensPerSec(
   if (s.engineers.lte(0)) return ZERO;
   const bottleneck = Decimal.min(s.gpu, Decimal.min(s.data, s.energy));
   if (bottleneck.lte(0)) return ZERO;
+  // Per-run RP-bought sprint upgrades stack on top of research multipliers.
+  const sprintTokensMult = aggregateSprintEffects(run.sprintUpgradesUnlocked).tokensMult;
   return bottleneck
     .mul(engineerMultiplier(s.engineers))
     .mul(effects.tokensMult)
-    .mul(autonomousAgentMult(run));
+    .mul(autonomousAgentMult(run))
+    .mul(sprintTokensMult);
 }
 
 /**
@@ -334,6 +338,10 @@ export function tickRun(
   // per GDD §7 — sub-1 multipliers on the debt side compound downward too.
   const activeEffects = aggregateActiveEffects(run.activeEffects, now);
   const effects = mergeEffects(researchEffects, activeEffects);
+  // Per-run RP-bought sprint upgrades (GDD §4 Beat 2): stack multiplicatively
+  // alongside research + active. Already folded into tokensPerSec; here we
+  // apply the capital/hype/rp mults on the derivative-currency seeding step.
+  const sprintFx = aggregateSprintEffects(run.sprintUpgradesUnlocked);
 
   const alloc = run.allocation;
   const rate = tokensPerSec(run, effects);
@@ -341,13 +349,16 @@ export function tickRun(
 
   const nextTokens   = D(run.tokens).add(produced);
   const nextCapital  = D(run.capital).add(
-    produced.mul(alloc.product).mul(CAPITAL_PER_TOKEN).mul(effects.capitalMult)
+    produced.mul(alloc.product).mul(CAPITAL_PER_TOKEN)
+      .mul(effects.capitalMult).mul(sprintFx.capitalMult)
   );
   const nextHype     = D(run.hype).add(
-    produced.mul(alloc.marketing).mul(HYPE_PER_TOKEN).mul(effects.hypeMult)
+    produced.mul(alloc.marketing).mul(HYPE_PER_TOKEN)
+      .mul(effects.hypeMult).mul(sprintFx.hypeMult)
   );
   const nextRP       = D(run.researchPoints).add(
-    produced.mul(alloc.rd).mul(RP_PER_TOKEN).mul(effects.rpMult)
+    produced.mul(alloc.rd).mul(RP_PER_TOKEN)
+      .mul(effects.rpMult).mul(sprintFx.rpMult)
   );
 
   // Alignment debt: accrues whenever Safety < 10%. Capped at zero.
@@ -436,16 +447,53 @@ export function roundThreshold(idx: number): Decimal {
   return D(10).pow(r.tokenThresholdLog10);
 }
 
+// ─── Hype → prestige discount (GDD §4 Beat 2 + §7 currency sink) ────────
+// Marketing → Hype → "easier funding rounds": Hype shortens the next
+// prestige by reducing the EFFECTIVE token threshold. Diminishing-returns
+// curve so dumping Hype never trivializes a round; capped at 50% off.
+//
+//   discount = min(0.5, hype / (hype + 0.05 × baseThreshold))
+//
+// At default play (Marketing 15%) you'll see a small single-digit discount.
+// Going Marketing-heavy (40-50%) pushes it toward 30-50%. Hype itself
+// resets on prestige (GDD §5 prestige table), so the credit can't carry over.
+const HYPE_PIVOT_FRACTION = 0.05;
+const HYPE_MAX_DISCOUNT = 0.5;
+
+export function hypeThresholdDiscount(
+  roundIdx: number,
+  hype: Decimal | string | number,
+): number {
+  const h = D(hype);
+  if (h.lte(0)) return 0;
+  const base = roundThreshold(roundIdx);
+  const pivot = base.mul(HYPE_PIVOT_FRACTION);
+  const raw = h.div(h.add(pivot)).toNumber();
+  return Math.min(HYPE_MAX_DISCOUNT, raw);
+}
+
+export function effectiveRoundThreshold(
+  roundIdx: number,
+  hype: Decimal | string | number,
+): Decimal {
+  const base = roundThreshold(roundIdx);
+  const discount = hypeThresholdDiscount(roundIdx, hype);
+  return base.mul(1 - discount);
+}
+
 export function canPrestige(run: RunState): boolean {
-  return D(run.tokens).gte(roundThreshold(run.fundingRoundIdx));
+  return D(run.tokens).gte(effectiveRoundThreshold(run.fundingRoundIdx, run.hype));
 }
 
 /**
  * GDD §8: Equity_gained = floor(150 * sqrt(tokens_total / threshold) * round_mult).
+ * The "threshold" here is the EFFECTIVE one (Hype-discounted) — so a Hype-heavy
+ * close still gets full base Equity, and over-grinding past the discounted
+ * threshold gives the same sqrt overshoot bonus as before.
  */
 export function equityFromPrestige(run: RunState): Decimal {
-  const threshold = roundThreshold(run.fundingRoundIdx);
-  const ratio = D(run.tokens).div(threshold);
+  const eff = effectiveRoundThreshold(run.fundingRoundIdx, run.hype);
+  const ratio = D(run.tokens).div(eff);
   if (ratio.lt(1)) return ZERO;
   const mult = getRound(run.fundingRoundIdx).equityMult;
   return ratio.sqrt().mul(150).mul(mult).floor();
@@ -482,7 +530,10 @@ export const STARTER_FLOW = 3;
 // every prestige (freshRunState runs on round close) so each round opens with
 // a little buying power rather than a dead trickle. Negligible against
 // late-game capital magnitudes.
-export const STARTER_CAPITAL = 30;
+//
+// 90 covers: Intern (15) + 4th GPU (~61) + small change. Tuned so the
+// guided tutorial (hire engineer → buy GPU) flows without a capital wait.
+export const STARTER_CAPITAL = 90;
 
 export function freshRunState(): RunState {
   return {
@@ -500,5 +551,6 @@ export function freshRunState(): RunState {
     },
     activeEffects: [],
     trainingPity: 0,
+    sprintUpgradesUnlocked: [],
   };
 }

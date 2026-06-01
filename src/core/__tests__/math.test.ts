@@ -10,10 +10,12 @@ import {
   chainSupply,
   debtRatePerSec,
   DEFAULT_ALLOCATION,
+  effectiveRoundThreshold,
   engineerMultiplier,
   ENGINEER_SCALING_EXPONENT,
   equityFromPrestige,
   freshRunState,
+  hypeThresholdDiscount,
   nextProducerCost,
   normalizeAllocation,
   producerBatchCost,
@@ -46,6 +48,7 @@ function withOwned(
     producersOwned: owned,
     activeEffects: [],
     trainingPity: 0,
+    sprintUpgradesUnlocked: [],
   };
 }
 const balanced1 = (): RunState =>
@@ -60,6 +63,7 @@ const freshPersistent = (debt = 0): PersistentState => ({
   unlockedVignettes: [],
   unreadVignettes: [],
   resolvedVignettes: {},
+  unlockedAchievements: [],
 });
 
 describe("producer cost math", () => {
@@ -446,6 +450,41 @@ describe("AGI-arc debt escalation (GDD §5)", () => {
       D(rPre.persistent.alignmentDebt).toNumber() * 3.5,
       6
     );
+  });
+});
+
+describe("Hype → prestige discount (GDD §4 Beat 2 + §7)", () => {
+  it("no hype ⇒ no discount, effective threshold == base", () => {
+    expect(hypeThresholdDiscount(0, 0)).toBe(0);
+    const base = D(10).pow(3); // Seed = 1e3
+    expect(effectiveRoundThreshold(0, 0).toNumber()).toBe(base.toNumber());
+  });
+
+  it("hype gives diminishing-returns discount up to a 50% cap", () => {
+    // Seed threshold = 1e3, pivot = 5% = 50.
+    // hype = 50 → discount = 50 / (50 + 50) = 0.5 → at the cap.
+    expect(hypeThresholdDiscount(0, 50)).toBeCloseTo(0.5, 6);
+    // hype = 1e9 → raw = ~1.0, capped to 0.5.
+    expect(hypeThresholdDiscount(0, 1e9)).toBe(0.5);
+    // hype = 10 (well below pivot) → discount = 10/60 ≈ 0.167.
+    expect(hypeThresholdDiscount(0, 10)).toBeCloseTo(10 / 60, 6);
+  });
+
+  it("canPrestige uses the EFFECTIVE threshold (hype shortens the round)", () => {
+    // Seed: base=1e3, hype=50 → effective=500. Tokens=600 should prestige.
+    const r: RunState = { ...freshRunState(), tokens: "600", hype: "50" };
+    expect(canPrestige(r)).toBe(true);
+    // Without hype, 600 tokens isn't enough for 1e3 threshold.
+    const r2: RunState = { ...freshRunState(), tokens: "600", hype: "0" };
+    expect(canPrestige(r2)).toBe(false);
+  });
+
+  it("equityFromPrestige uses the effective threshold (full base equity at the discounted bar)", () => {
+    // At hype=50 (discount=0.5), effective threshold=500.
+    // Prestiging at tokens=500 gives ratio=1 → equity = floor(150 × 1 × mult).
+    const r: RunState = { ...freshRunState(), tokens: "500", hype: "50" };
+    const equity = equityFromPrestige(r).toNumber();
+    expect(equity).toBe(150); // round 0 mult = 1.00
   });
 });
 
