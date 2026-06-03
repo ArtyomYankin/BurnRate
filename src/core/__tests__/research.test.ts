@@ -54,19 +54,19 @@ describe("aggregateResearchEffects", () => {
     expect(e.capitalMult).toBe(1);
   });
 
-  it("Better LLM kernel applies +25% tokens", () => {
+  it("Better LLM kernel applies ×2 tokens (rebalanced)", () => {
     const e = aggregateResearchEffects(["rd_kernel"]);
-    expect(e.tokensMult).toBeCloseTo(1.25, 9);
+    expect(e.tokensMult).toBeCloseTo(2, 9);
   });
 
-  it("two R&D nodes stack multiplicatively (1.25 × 1.20 = 1.50)", () => {
+  it("two R&D nodes stack multiplicatively (2 × 2 = 4)", () => {
     const e = aggregateResearchEffects(["rd_kernel", "rd_specdecode"]);
-    expect(e.tokensMult).toBeCloseTo(1.5, 9);
+    expect(e.tokensMult).toBeCloseTo(4, 9);
   });
 
-  it("FP8 + NVLink stack on GPU chain (1.25 × 1.50 = 1.875)", () => {
+  it("FP8 + NVLink stack on GPU chain (2 × 4 = 8)", () => {
     const e = aggregateResearchEffects(["compute_fp8", "compute_nvlink"]);
-    expect(e.chainSupplyMult.gpu).toBeCloseTo(1.875, 9);
+    expect(e.chainSupplyMult.gpu).toBeCloseTo(8, 9);
     expect(e.chainSupplyMult.data).toBe(1);
   });
 
@@ -77,7 +77,7 @@ describe("aggregateResearchEffects", () => {
 
   it("unknown node IDs are ignored", () => {
     const e = aggregateResearchEffects(["bogus_id", "rd_kernel"]);
-    expect(e.tokensMult).toBeCloseTo(1.25, 9);
+    expect(e.tokensMult).toBeCloseTo(2, 9);
   });
 });
 
@@ -86,15 +86,15 @@ describe("research effects applied at the math layer", () => {
     const s = balanced1();
     const base = tokensPerSec(s).toNumber();
     const boosted = tokensPerSec(s, aggregateResearchEffects(["rd_kernel"])).toNumber();
-    expect(boosted).toBeCloseTo(base * 1.25, 9);
+    expect(boosted).toBeCloseTo(base * 2, 9);
   });
 
   it("chainSupply for GPU includes the chain_supply_mult", () => {
     const s = { ...balanced1(), producersOwned: { single_h100: 1 } };
     const effects = aggregateResearchEffects(["compute_fp8"]);
     const supplies = allChainSupplies(s, effects);
-    // Base GPU = 0.30, ×1.25 = 0.375
-    expect(supplies.gpu.toNumber()).toBeCloseTo(0.375, 9);
+    // Base GPU = 0.30, ×2 = 0.60
+    expect(supplies.gpu.toNumber()).toBeCloseTo(0.6, 9);
   });
 
   it("debtRatePerSec reduces accrual by safety research multiplier", () => {
@@ -118,7 +118,7 @@ describe("research effects applied at the math layer", () => {
     const s = { ...balanced1(), capital: "0" };
     const r1 = tickRun(s, freshPersistent(), 60);
     const r2 = tickRun(s, freshPersistent(), 60, aggregateResearchEffects(["cap_booking"]));
-    // Capital should be 1.20× higher with cap_booking owned.
+    // Capital should be 1.20× higher with cap_booking owned (reverted from overcorrected ×1.5).
     expect(D(r2.run.capital).toNumber()).toBeCloseTo(D(r1.run.capital).toNumber() * 1.20, 6);
   });
 });

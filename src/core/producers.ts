@@ -80,8 +80,15 @@ export const AUTONOMOUS_AGENT: AgentDef = {
   name: "Autonomous Agent",
   baseCostCapital: 1_000_000_000,
   costMult: 1.25,
-  multPerUnit: 1.10,
-  unlockRoundIdx: 7, // Acquisition — the AGI arc opens here.
+  // Boosted from ×1.10 to ×1.18 so the late-game AGI flywheel actually
+  // catches the late-round thresholds. At 100 agents: ×1.18^100 ≈ 1.1e7
+  // (was ×1.10^100 ≈ 1.4e4 — three orders of magnitude weaker).
+  multPerUnit: 1.18,
+  // Secondary (round 6) — unlocked one round earlier than the GDD §6 spec
+  // (Acquisition). The pre-AGI cliff (round 5→6) was unreachable in sim
+  // without the agent flywheel; moving the unlock back smooths the curve and
+  // matches the "IPO unlocks AI" beat in the narrative.
+  unlockRoundIdx: 6,
 };
 
 // Cost-only def lookup that includes the agent. buyProducer / cost helpers read

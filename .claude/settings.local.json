@@ -31,7 +31,11 @@
       "Bash(mkdir -p design_v4)",
       "Bash(tar -xzf webfetch-1780239270453-3aaswj.bin -C design_v4)",
       "Bash(sed -i '566,723d' d:/BurnRate/src/ui/PixelScene.tsx)",
-      "Bash(sed -n '560,572p' d:/BurnRate/src/ui/PixelScene.tsx)"
+      "Bash(sed -n '560,572p' d:/BurnRate/src/ui/PixelScene.tsx)",
+      "Bash(cp \"/c/Users/artem/.claude/projects/d--BurnRate/b93cd4b3-23d3-46ab-b802-53c2f0b46b98/tool-results/webfetch-1780312406300-sa1wfi.bin\" /tmp/v8.tar.gz)",
+      "Bash(mkdir -p /tmp/v8)",
+      "Bash(tar -xzf /tmp/v8.tar.gz -C /tmp/v8)",
+      "Read(//tmp/v8/burnrate/project/**)"
     ]
   }
 }

@@ -59,6 +59,7 @@ const HIT_TO_PRODUCER: Partial<Record<HitId, string>> = {
 const HIT_TO_CHAIN: Partial<Record<HitId, ChainId>> = {
   engineer: "engineers",
   gpu:      "gpu",
+  gpu2:     "gpu",
   books:    "data",
   energy:   "energy",
 };
@@ -106,7 +107,7 @@ export function HomeScreen({
     trainingPity: 0,
     sprintUpgradesUnlocked: [],
   };
-  const tps = tokensPerSec(runForCalc);
+  const tps = tokensPerSec(runForCalc, undefined, { equity: equityStr });
 
   const round = getRound(fundingRoundIdx);
   // Hype-discounted threshold: the progress bar fills against the effective
@@ -378,6 +379,63 @@ function buildPopup(id: HitId, owned: Record<string, number>): PopupContent {
         title: "Roomba",
         subtitle: "AUTONOMOUS AGENT v0.1",
         body: "It cleans the floor. Eventually it will do more.",
+      };
+    case "emptyseat":
+      return {
+        hit: id,
+        kind: "cosmetic",
+        title: "Vacated Workstation",
+        subtitle: "HEADCOUNT · AUTOMATED",
+        body: "A Distinguished Engineer occupied this pod. Their sabbatical became permanent the day the model passed their own code review. The succulent is thriving.",
+      };
+    case "courtyard":
+      return {
+        hit: id,
+        kind: "cosmetic",
+        title: "Outdoor Courtyard",
+        subtitle: "EMPLOYEE WELLNESS · TIER 4",
+        body: "Designed by the same firm that did Apple Park. The hammock has a 2-week waitlist. Nobody actually goes outside; the trees were a leasing-incentive line item.",
+      };
+    case "bar":
+      return {
+        hit: id,
+        kind: "cosmetic",
+        title: "Open Bar",
+        subtitle: "PERK · ALWAYS-ON",
+        body: "Top-shelf liquor, hand-pulled beer, signature cocktails — all free, all day. People used to celebrate shipping. Now they drink while the model ships for them.",
+      };
+    case "lake":
+      return {
+        hit: id,
+        kind: "cosmetic",
+        title: "Lakeside Deck",
+        subtitle: "FOCUS ZONE · OUTDOORS",
+        body: "Cedar planking, glass railing, a single Adirondack chair facing the water. The laptop on his lap is asleep. He has been reviewing the same Notion doc for forty minutes.",
+      };
+    case "agent_monitor":
+      return {
+        hit: id,
+        kind: "cosmetic",
+        title: "Autonomous Agent — Active",
+        subtitle: "STAFF ENGINEER · v4.2",
+        body: "Last week this seat held a Staff Engineer with twelve years of distributed-systems experience. Today his calendar reads \"sabbatical (open-ended)\" and the agent ships his JIRA tickets 4× faster. HR called it a \"win-win.\" His Slack still says \"on PTO, back Monday.\" It has said that for forty-one Mondays.",
+      };
+    case "gpu2":
+      return producerCard(
+        id,
+        "Buy GPU (Continent-Scale)",
+        "GPU · TIER 7",
+        owned,
+        def,
+        "Another row of mainframes, end to end. The facility footprint is now visible from orbit. Someone made it the desktop wallpaper.",
+      );
+    case "catwalk":
+      return {
+        hit: id,
+        kind: "cosmetic",
+        title: "The Inspector",
+        subtitle: "CATWALK ROUNDS · HI-VIS VEST",
+        body: "A single silhouette walks the catwalk above the mainframes with a scanner. Nobody is sure who employs them. They have a badge. The badge works.",
       };
   }
 }

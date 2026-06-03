@@ -163,9 +163,11 @@ describe("Liebig pipeline (GDD §7)", () => {
 
   it("balanced lowest-tier: engineer multiplier is FLOORED at 1.0 below eng_supply 1.0", () => {
     // 1 of each tier-0 → eng_supply 0.10 → raw 0.10^0.8 = 0.158, but the
-    // floor lifts it to 1.0. So tokens = min(0.30,0.20,0.15) × 1.0 = 0.15.
+    // floor lifts it to 1.0. Liebig was softened to 80% min + 20% avg, so:
+    //   gpu=0.30, data=0.20, energy=0.15 → min=0.15, avg=0.2167
+    //   effectiveFlow = 0.8*0.15 + 0.2*0.2167 = 0.12 + 0.04333 = 0.16333
     const s = balanced1();
-    expect(tokensPerSec(s).toNumber()).toBeCloseTo(0.15, 9);
+    expect(tokensPerSec(s).toNumber()).toBeCloseTo(0.16333, 4);
   });
 
   it("doubling all four chains while still under the engineer floor scales by min only", () => {
@@ -187,21 +189,24 @@ describe("Liebig pipeline (GDD §7)", () => {
     expect(ratio).toBeCloseTo(2 * Math.pow(2, ENGINEER_SCALING_EXPONENT), 6);
   });
 
-  it("Fig 7.1 — bottleneck on Data caps tokens at Data × engineerMultiplier(eng)", () => {
+  it("Fig 7.1 — bottleneck on Data still dominates after 80/20 Liebig softening", () => {
     // 100 of every chain EXCEPT data (only 1). At 100 owned the x64 upgrade
     // multiplier kicks in for the other three; Data has < 10 so x1.
     //   eng = 100 * 0.10 * 64 = 640
     //   gpu = 100 * 0.30 * 64 = 1920
     //   data = 1 * 0.20 * 1 = 0.20  <-- bottleneck
     //   energy = 100 * 0.15 * 64 = 960
+    // Softened Liebig: effective = 0.8*0.20 + 0.2*((1920+0.20+960)/3) = 0.16 + 192.01 = 192.17
     const s = withOwned({
       intern: 100,
       single_h100: 100,
       common_crawl: 1,
       office_grid: 100,
     });
-    const expected = 0.2 * engineerMultiplier(D(640)).toNumber();
-    expect(tokensPerSec(s).toNumber()).toBeCloseTo(expected, 4);
+    const avg = (1920 + 0.2 + 960) / 3;
+    const effectiveFlow = 0.8 * 0.2 + 0.2 * avg;
+    const expected = effectiveFlow * engineerMultiplier(D(640)).toNumber();
+    expect(tokensPerSec(s).toNumber()).toBeCloseTo(expected, 2);
   });
 
   it("engineerMultiplier follows ENGINEER_SCALING_EXPONENT above the 1.0 floor", () => {
@@ -500,8 +505,8 @@ describe("freshRunState", () => {
   it("starting tokens/sec is non-zero and playable (engineer floor lifts the opening rate)", () => {
     const s = freshRunState();
     // supplies: {eng: 0.10, gpu: 0.90, data: 0.60, energy: 0.45}
-    // engMult(0.10) is floored to 1.0, so rate = min(0.90, 0.60, 0.45) × 1.0.
-    expect(tokensPerSec(s).toNumber()).toBeCloseTo(0.45, 6);
+    // engMult(0.10) is floored to 1.0. Liebig softened: 0.8*0.45 + 0.2*(0.90+0.60+0.45)/3 = 0.36+0.13 = 0.49
+    expect(tokensPerSec(s).toNumber()).toBeCloseTo(0.49, 6);
   });
 
   it("at the start a flow buy (Office Grid) beats an engineer buy (engineers sit under the floor)", () => {

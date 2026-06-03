@@ -210,20 +210,66 @@ export function engineerMultiplier(engSupply: Decimal): Decimal {
  */
 export function tokensPerSec(
   run: RunState,
-  effects: ResearchEffects = NO_RESEARCH_EFFECTS
+  effects: ResearchEffects = NO_RESEARCH_EFFECTS,
+  persistent?: Pick<PersistentState, "equity">
 ): Decimal {
   const s = allChainSupplies(run, effects);
   // We want "no engineers => no tokens" per GDD §7.
   if (s.engineers.lte(0)) return ZERO;
   const bottleneck = Decimal.min(s.gpu, Decimal.min(s.data, s.energy));
   if (bottleneck.lte(0)) return ZERO;
+  // GDD §7 specifies strict Liebig (pure min). In practice that produced a
+  // "buying a non-bottleneck producer changes nothing" UX which felt broken.
+  // Soften it: 80% min + 20% arithmetic mean. The bottleneck still dominates
+  // (strategy preserved — balanced builds beat unbalanced), but every buy
+  // gives some visible movement so the loop reads as "numbers go up".
+  const avg = s.gpu.add(s.data).add(s.energy).div(3);
+  const effectiveFlow = bottleneck.mul(0.8).add(avg.mul(0.2));
   // Per-run RP-bought sprint upgrades stack on top of research multipliers.
   const sprintTokensMult = aggregateSprintEffects(run.sprintUpgradesUnlocked).tokensMult;
-  return bottleneck
+  return effectiveFlow
     .mul(engineerMultiplier(s.engineers))
     .mul(effects.tokensMult)
     .mul(autonomousAgentMult(run))
-    .mul(sprintTokensMult);
+    .mul(sprintTokensMult)
+    .mul(prestigeBonusMult(run.fundingRoundIdx))
+    .mul(equityFlywheelMult(persistent));
+}
+
+/**
+ * Persistent permanent multiplier from closed funding rounds. Each round
+ * closed grants an `equityMult` (from the round def — 1.0 at Seed, 86.7 at
+ * AGI Singularity). We compound the multipliers of all PREVIOUSLY closed
+ * rounds — i.e., reaching round N means rounds 0..N-1 were closed.
+ *
+ * Why this exists: stops the "bar visibly fills" Pillar-4 violation at
+ * round 4+. Without it, producer-base outputs scale ~×5/tier but round
+ * thresholds scale ×1e10/round; players bought every top-tier producer
+ * and saw zero bar movement. With this, each prestige permanently buffs
+ * production, so the *next* round's bar moves visibly during each session.
+ */
+export function prestigeBonusMult(currentRoundIdx: number): Decimal {
+  let m = D(1);
+  for (let i = 0; i < currentRoundIdx; i++) {
+    m = m.mul(getRound(i).equityMult);
+  }
+  return m;
+}
+
+/**
+ * Equity-based flywheel. The more lifetime equity the player has banked,
+ * the bigger this multiplier — log-scale so it never breaks late-game
+ * (1k equity = ×4, 1M = ×7, 1B = ×10, etc.). Encourages overshoot before
+ * prestige (sqrt-equity formula already rewards that, this amplifies it).
+ */
+export function equityFlywheelMult(persistent?: Pick<PersistentState, "equity">): Decimal {
+  if (!persistent) return D(1);
+  const eq = D(persistent.equity);
+  if (eq.lte(1)) return D(1);
+  // Halved from the first cut: eq=1k → ×2.5, eq=1M → ×4, eq=1e12 → ×7.
+  // Capital was racing too far ahead of producer costs; this slows it.
+  const e = eq.toNumber ? eq.toNumber() : Number(eq.toString());
+  return D(1 + Math.log10(Math.max(1, e) + 1) / 2);
 }
 
 /**
@@ -344,7 +390,7 @@ export function tickRun(
   const sprintFx = aggregateSprintEffects(run.sprintUpgradesUnlocked);
 
   const alloc = run.allocation;
-  const rate = tokensPerSec(run, effects);
+  const rate = tokensPerSec(run, effects, persistent);
   const produced = rate.mul(dtSeconds);
 
   const nextTokens   = D(run.tokens).add(produced);

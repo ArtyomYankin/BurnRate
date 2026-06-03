@@ -1,13 +1,19 @@
 import React from "react";
 import { Pressable, View } from "react-native";
 import Svg, {
+  Circle,
+  ClipPath,
   Defs,
   G,
   LinearGradient as SvgLinearGradient,
+  Path,
+  Polygon,
+  Polyline,
   Rect,
   Stop,
+  Text as SvgText,
 } from "react-native-svg";
-import { colors } from "./theme";
+import { colors, fonts } from "./theme";
 
 // ─── Scene constants ────────────────────────────────────────────────────
 // Native scene coords match the Claude Design `pixel-art.jsx` system so
@@ -63,7 +69,14 @@ export type HitId =
   | "pizza"
   | "clock"
   | "window"
-  | "roomba";
+  | "roomba"
+  | "emptyseat"
+  | "courtyard"
+  | "bar"
+  | "lake"
+  | "agent_monitor"
+  | "gpu2"
+  | "catwalk";
 
 export interface HitZone {
   id: HitId;
@@ -72,9 +85,13 @@ export interface HitZone {
   w: number;
   h: number;
   label: string;
+  /** Optional arc-shaped highlight (e.g. the planetary orbital ring). The
+   *  Pressable click area still uses the x/y/w/h bounding rect — only the
+   *  selection outline shape changes. */
+  arc?: { cx: number; cy: number; r: number; band: number; a0: number; a1: number };
 }
 
-export type SceneId = "seed" | "coworking" | "office" | "megacorp" | "agi";
+export type SceneId = "seed" | "coworking" | "office" | "megacorp" | "campus" | "datacenter" | "planetary" | "agi";
 
 // Per-scene hit zones. Coords align with each scene's sprite positions below —
 // keep them in sync if you move anything. HomeScreen reads the resulting HitId
@@ -102,13 +119,14 @@ const SEED_ZONES: HitZone[] = [
 // dedicated server-room alcove on the right, and grew the GPU zone to wrap
 // the WHOLE alcove (2 BigRacks + 2 GPU towers behind a glass partition).
 const MEGACORP_ZONES: HitZone[] = [
-  // 3 narrower desks — engineer (Hire) below, monitor (Training) above
-  { id: "engineer", x:  16, y: 266, w: 22, h: 34, label: "Hire (desk 1)" },
-  { id: "engineer", x:  68, y: 266, w: 22, h: 34, label: "Hire (desk 2)" },
-  { id: "engineer", x: 120, y: 266, w: 22, h: 34, label: "Hire (desk 3)" },
-  { id: "monitor",  x:  13, y: 234, w: 26, h: 22, label: "Training (West cluster)" },
-  { id: "monitor",  x:  65, y: 234, w: 26, h: 22, label: "Training (Central cluster)" },
-  { id: "monitor",  x: 117, y: 234, w: 26, h: 22, label: "Training (East cluster)" },
+  // 3 narrower desks. Design v8: desk 3 is a vacated workstation (the first
+  // AI-driven layoff at this tier) — empty chair + REPLACED BY AI monitor.
+  { id: "engineer",      x:  16, y: 266, w: 22, h: 34, label: "Hire Staff Engineer" },
+  { id: "engineer",      x:  68, y: 266, w: 22, h: 34, label: "Hire Principal Engineer" },
+  { id: "emptyseat",     x: 120, y: 266, w: 22, h: 34, label: "Vacated workstation" },
+  { id: "monitor",       x:  13, y: 234, w: 26, h: 22, label: "Training (West cluster)" },
+  { id: "monitor",       x:  65, y: 234, w: 26, h: 22, label: "Training (Central cluster)" },
+  { id: "agent_monitor", x: 117, y: 234, w: 26, h: 22, label: "Autonomous Agent" },
   // Server room alcove (Datacenter Pod) — wraps the whole alcove
   { id: "gpu",      x: 192, y: 228, w: 48, h: 100, label: "Buy GPU (alcove)" },
   // In-glass rack on the back wall — DATA (Synthetic Pipeline)
@@ -181,28 +199,138 @@ const OFFICE_ZONES: HitZone[] = [
   { id: "plant",    x: 156, y: 258, w: 22, h: 36, label: "Cosmetic" },
 ];
 
+// CAMPUS (round 8 / Sovereign Wealth) — coords ported 1:1 from Claude
+// Design v6 (screens.jsx::CAMPUS_HITS). Apple-Park-style tech campus:
+// rooftop solar canopy = energy, R&D lab niche = research, 2 worker pods
+// (one occupied, one vacated/"REPLACED BY AI"), open bar / courtyard /
+// lakeside deck as cosmetics. `emptyseat` is a new id (vacated workstation
+// motif used by both campus + megacorp v6 — fired but no popup-specific
+// case yet, falls through to generic).
+// All campus zones are pre-shifted +25y from the raw v6/v7 design coords to
+// clear the floating TopHUD. CampusScene applies the same translate on render.
+//
+// Layout map (post-shift y bands, FLOOR_Y = 275):
+//   y=  25..  49  → rooftop solar canopy (energy)
+//   y= 155.. 263  → atrium upper band — left courtyard, mid R&D lab, right bar
+//   y= 263.. 285  → pod monitors row (left atrium) — narrow strips, hi-priority
+//   y= 275.. 327  → gallery sculptures (in front of bar) — data + gpu
+//   y= 291.. 325  → pod chairs (engineer / emptyseat)
+//   y= 328.. 360  → lakeside deck
+//
+// Order matters: later zones win on overlap. Small precise targets (pod
+// monitors, chairs, gallery vitrines) come AFTER the big cosmetic bands so a
+// tap that lands inside a pod monitor doesn't get swallowed by the bar zone.
+const CAMPUS_ZONES: HitZone[] = [
+  // ─── Top: rooftop solar canopy (Energy producer) ───
+  { id: "energy",    x:   0, y:  25, w: 240, h:  25, label: "Buy Energy (rooftop solar)" },
+
+  // ─── Big cosmetic atrium bands (drawn first so smaller targets sit on top) ─
+  // Outdoor courtyard — trees + hammock above the worker pods
+  { id: "courtyard", x:   0, y: 155, w:  90, h: 108, label: "Courtyard" },
+  // Open bar — counter, back-bar, neon, pendants, stools
+  { id: "bar",       x: 156, y: 158, w:  86, h: 112, label: "Open Bar" },
+
+  // ─── R&D lab recess (Research) — includes the "R&D LAB" sign header ───
+  { id: "research",  x:  88, y: 160, w:  68, h:  92, label: "Research (R&D Lab)" },
+
+  // ─── Pod 1 (occupied) — monitor + Principal Engineer on chair ───
+  { id: "monitor",   x:  18, y: 263, w: 28, h: 24, label: "Training (TPU cluster 1)" },
+  { id: "engineer",  x:  20, y: 287, w: 26, h: 38, label: "Hire Principal Engineer" },
+
+  // ─── Pod 2 (vacated) — Autonomous-Agent monitor + empty Aeron chair ───
+  { id: "agent_monitor", x: 62, y: 263, w: 28, h: 24, label: "Autonomous Agent" },
+  { id: "emptyseat", x:  64, y: 287, w: 26, h: 38, label: "Vacated workstation" },
+
+  // ─── "Infrastructure as art" gallery (in front of the bar, on the floor) ──
+  //   left  → THE ARCHIVE biophilic glass data monolith → Data producer (books)
+  //   right → Datacenter Pod glass compute vitrine      → GPU  producer (gpu)
+  { id: "books",     x: 170, y: 270, w:  32, h:  56, label: "Buy Data (The Archive)" },
+  { id: "gpu",       x: 212, y: 283, w:  26, h:  44, label: "Buy GPU (Datacenter Pod)" },
+
+  // ─── Lakeside balcony deck ───
+  { id: "lake",      x: 126, y: 328, w: 114, h:  32, label: "Lakeside Deck" },
+];
+
+// DATACENTER (round 9 / Government Bailout) — port of design v8 DATACENTER_HITS.
+// Top-wall zones (energy/research/books) are pre-shifted +25 in y to match
+// the same translate the upper-wall sprites get inside DatacenterScene
+// (clears the floating TopHUD). Floor zones (catwalk + mainframes) use raw
+// v8 y values — the floor section is rendered unshifted so the front-row
+// mainframes sit fully inside the SVG viewport.
+const DATACENTER_ZONES: HitZone[] = [
+  // Catwalk band first so back-row mainframes (later in the array) win on overlap
+  { id: "catwalk",   x:   0, y: 168, w: 240, h:  24, label: "The Inspector" },
+  // ─── Upper walls (shifted +25 to match scene's top-wall translate) ───
+  { id: "energy",    x:   4, y:  33, w:  68, h:  66, label: "Buy Energy (Substation)" },
+  { id: "research",  x:  72, y:  79, w:  52, h:  92, label: "Research (Autonomous R&D)" },
+  { id: "books",     x: 120, y:  33, w: 114, h:  66, label: "Buy Data (Surveillance Tap)" },
+  // ─── Back row of floor mainframes (raw v8 y) ───
+  { id: "gpu",       x:  30, y: 144, w:  56, h: 100, label: "Buy GPU (Hyperscale Region)" },
+  { id: "monitor",   x:  94, y: 144, w:  56, h: 100, label: "Training (National Cluster)" },
+  { id: "engineer",  x: 158, y: 144, w:  56, h: 100, label: "Autonomous Ops" },
+  // ─── Front row mainframes (continent-scale, raised 12px from raw v8) ──
+  { id: "gpu2",      x:  24, y: 256, w: 184, h:  96, label: "Buy GPU (Continent-Scale)" },
+];
+
+// PLANETARY (round 10 / Civilizational Round). Zones are aligned to the
+// ACTUAL pixel positions of the sprites PlanetaryScene draws (which derives
+// from cx=W/2, cy=H-8, R=150, ringR=R+30=180) — the raw v8 zone coords were
+// authored against a slightly different canvas origin and read off-mark.
+//
+// Sprite landmark cheatsheet:
+//   Moon body+halo    →   y ≈ 22..78,   x ≈ 170..230
+//   Empty training band → y ≈ 56..84,   x ≈ 60..160 (sits in space above globe)
+//   Orbital ring apex →   y ≈ 168..220, x ≈ 0..240   (visible arc above globe)
+//   NA cluster        →   y ≈ 262..306, x ≈   4..48  (with pulsing ring)
+//   Asia cluster      →   y ≈ 252..302, x ≈ 158..208 (with pulsing ring)
+//   India + south    →   y ≈ 310..360, x ≈  40..136
+const PLANETARY_ZONES: HitZone[] = [
+  // Lunar refinery (upper-right) — Energy. Wraps the moon body + glow halo.
+  { id: "energy",    x: 170, y:  22, w:  60, h:  56, label: "Buy Energy (Lunar Refinery)" },
+  // Planet-scale training band — empty click region in space above the globe.
+  // Narrowed in x to avoid stealing taps from the Moon zone (which sits to the right).
+  { id: "monitor",   x:  60, y:  56, w: 100, h:  28, label: "Planet-Scale Training" },
+  // Orbital storage ring girdling Earth — Data. Selection outline traces the
+  // visible arc band itself instead of a rectangle.
+  { id: "books",     x:   0, y: 168, w: 240, h:  52, label: "Buy Data (Orbital Ring)",
+    arc: { cx: 120, cy: 352, r: 180, band: 16, a0: Math.PI * 1.06, a1: Math.PI * 1.94 } },
+  // City-light megagrids on the night side of Earth
+  { id: "engineer",  x:   4, y: 262, w:  44, h:  44, label: "Autonomous Regions (NA)" },
+  { id: "gpu",       x: 158, y: 252, w:  50, h:  50, label: "Buy GPU (Asia-Pacific)" },
+  // "Americas / lower hemisphere" compute belt — covers SA + IN cluster band.
+  { id: "gpu2",      x:  40, y: 310, w:  96, h:  50, label: "Buy GPU (Americas Belt)" },
+];
+
 export const HIT_ZONES_BY_SCENE: Record<SceneId, HitZone[]> = {
   seed: SEED_ZONES,
   coworking: COWORKING_ZONES,
   office: OFFICE_ZONES,
   megacorp: MEGACORP_ZONES,
+  campus: CAMPUS_ZONES,
+  datacenter: DATACENTER_ZONES,
+  planetary: PLANETARY_ZONES,
   agi: AGI_ZONES,
 };
 
 /**
- * Funding-round → scene mapping. 5 scenes today; the 3 remaining slots
- * (campus / datacenter / planetary) will land later between megacorp and agi.
- *   seed      → rounds 0-1 (Seed, Series A)       — garage, solo founder
- *   coworking → rounds 2-3 (Series B, Series C)   — WeWork bench
- *   office    → rounds 4-5 (Series D, IPO)        — brick + Edison bulbs
- *   megacorp  → rounds 6-8 (Secondary…Sovereign)  — corporate slate-blue
- *   agi       → rounds 9-11 (Bailout…Singularity) — galactic endgame
+ * Funding-round → scene mapping. All 8 scenes wired.
+ *   seed       → rounds 0-1 (Seed, Series A)         — garage, solo founder
+ *   coworking  → rounds 2-3 (Series B, Series C)     — WeWork bench
+ *   office     → rounds 4-5 (Series D, IPO)          — brick + Edison bulbs
+ *   megacorp   → rounds 6-7 (Secondary, Acquisition) — corporate slate-blue
+ *   campus     → round 8   (Sovereign Wealth)        — Apple-Park-ish campus
+ *   datacenter → round 9   (Government Bailout)      — dark server hall
+ *   planetary  → round 10  (Civilizational)          — Earth from low orbit
+ *   agi        → round 11  (Singularity)             — galactic endgame
  */
 export function sceneForRound(roundIdx: number): SceneId {
   if (roundIdx <= 1) return "seed";
   if (roundIdx <= 3) return "coworking";
   if (roundIdx <= 5) return "office";
-  if (roundIdx <= 8) return "megacorp";
+  if (roundIdx <= 7) return "megacorp";
+  if (roundIdx <= 8) return "campus";
+  if (roundIdx <= 9) return "datacenter";
+  if (roundIdx <= 10) return "planetary";
   return "agi";
 }
 
@@ -258,6 +386,12 @@ export function PixelScene({ width, height, onHit, activeHit, scene = "seed", tu
           <CoworkingScene t={t} />
         ) : scene === "office" ? (
           <OfficeScene t={t} />
+        ) : scene === "campus" ? (
+          <CampusScene t={t} />
+        ) : scene === "datacenter" ? (
+          <DatacenterScene t={t} />
+        ) : scene === "planetary" ? (
+          <PlanetaryScene t={t} />
         ) : (
           <SeedScene t={t} />
         )}
@@ -412,6 +546,274 @@ function Beanbag2({ x, y }: { x: number; y: number }) {
       <PixelRect x={x - 1} y={y + 14} w={24} h={1} c={"#9A6E40"} />
     </G>
   );
+}
+
+// Indoor leafy tree (planter + layered sage canopy). Used by CampusScene
+// in the outdoor courtyard. Idles with a slow 1-pixel sway.
+function IndoorTree({ x, y, t }: { x: number; y: number; t: number }) {
+  const sway = ((t >> 5) % 8 < 4) ? 0 : 1;
+  const hi = colors.sage_hi;
+  return (
+    <G>
+      {/* Planter */}
+      <PixelRect x={x - 2} y={y + 40} w={20} h={12} c={"#8B5E3C"} />
+      <PixelRect x={x - 2} y={y + 40} w={20} h={1} c={"#C89868"} />
+      <PixelRect x={x - 1} y={y + 50} w={18} h={1} c={"#5C3A22"} />
+      {/* Trunk */}
+      <PixelRect x={x + 6} y={y + 22} w={4} h={18} c={"#6E4A2E"} />
+      <PixelRect x={x + 6} y={y + 22} w={1} h={18} c={"#8B5E3C"} />
+      {/* Canopy (layered sage) */}
+      <PixelRect x={x + sway} y={y} w={16} h={10} c={colors.sage_2} />
+      <PixelRect x={x - 2 + sway} y={y + 6} w={20} h={10} c={colors.sage} />
+      <PixelRect x={x + 2 + sway} y={y + 14} w={12} h={8} c={colors.sage_2} />
+      {/* Highlights */}
+      <Px x={x + 4 + sway}  y={y + 2}  c={hi} />
+      <Px x={x + 10 + sway} y={y + 5}  c={hi} />
+      <Px x={x + 2 + sway}  y={y + 9}  c={hi} />
+      <Px x={x + 13 + sway} y={y + 11} c={hi} />
+      <Px x={x + 6 + sway}  y={y + 16} c={hi} />
+    </G>
+  );
+}
+
+// Empty Aeron-style chair seen from behind — the "vacated workstation"
+// motif. Slow idle drift so the chair feels abandoned-but-recent.
+function EmptyChair({ x, y, t }: { x: number; y: number; t: number }) {
+  const sway = ((t >> 5) % 16 < 8) ? 0 : 1;
+  const ox = x + sway;
+  return (
+    <G>
+      {/* Headrest pillow */}
+      <PixelRect x={ox + 4} y={y + 4} w={12} h={4} c={P.ink} />
+      <PixelRect x={ox + 4} y={y + 4} w={12} h={1} c={P.ink_hi} />
+      <Px x={ox + 4}  y={y + 7} c={P.ink_2} />
+      <Px x={ox + 15} y={y + 7} c={P.ink_2} />
+      {/* Backrest (full mesh — no torso) */}
+      <PixelRect x={ox} y={y + 6} w={20} h={16} c={P.ink} />
+      <PixelRect x={ox} y={y + 6} w={20} h={1}  c={P.ink_hi} />
+      <PixelRect x={ox} y={y + 21} w={20} h={1} c={P.ink_2} />
+      {/* Mesh sheen */}
+      {[0, 1, 2, 3, 4].map((i) =>
+        [0, 1, 2, 3].map((j) => (
+          <Px key={`m${i}-${j}`} x={ox + 3 + i * 3} y={y + 9 + j * 3} c={P.muted_2} />
+        ))
+      )}
+      <Px x={ox} y={y + 6} c={P.ink_2} />
+      <Px x={ox + 19} y={y + 6} c={P.ink_2} />
+      {/* Armrests */}
+      <PixelRect x={ox}      y={y + 16} w={2} h={5} c={P.ink} />
+      <PixelRect x={ox}      y={y + 16} w={1} h={5} c={P.ink_hi} />
+      <PixelRect x={ox + 18} y={y + 16} w={2} h={5} c={P.ink} />
+      <PixelRect x={ox + 19} y={y + 16} w={1} h={5} c={P.ink_hi} />
+      {/* Empty seat */}
+      <PixelRect x={ox + 1} y={y + 23} w={18} h={4} c={P.ink} />
+      <PixelRect x={ox + 1} y={y + 23} w={18} h={1} c={P.ink_hi} />
+      <Px x={ox + 9} y={y + 24} c={P.muted_2} />
+      {/* Post + 5-spoke base */}
+      <PixelRect x={ox + 9} y={y + 27} w={2} h={3} c={P.ink} />
+      <PixelRect x={ox + 1} y={y + 30} w={18} h={2} c={P.ink} />
+      <PixelRect x={ox + 1} y={y + 30} w={18} h={1} c={P.ink_hi} />
+      {[0, 1, 2, 3, 4].map((i) => (
+        <PixelRect key={`c${i}`} x={ox + 1 + i * 4} y={y + 32} w={2} h={1} c={P.ink} />
+      ))}
+      <PixelRect x={ox - 1} y={y + 33} w={22} h={1} c={P.terracotta_3} />
+    </G>
+  );
+}
+
+// "REPLACED BY AI" monitor — the deadpan corporate notice screen with a
+// robot head + crisp block "AI" letters. Replaces a regular Monitor on
+// chairs that used to hold a Distinguished Engineer.
+function ReplacedMonitor({ x, y, t }: { x: number; y: number; t: number }) {
+  const eyeOn = (t >> 3) % 6 < 4;
+  const hx = x + 4, hy = y + 5;
+  // 5x3 glyphs (1=on)
+  const A = ["010", "101", "111", "101", "101"];
+  const I = ["111", "010", "010", "010", "111"];
+  const drawGlyph = (g: string[], gx: number, gy: number, col: string) => {
+    const out: React.ReactNode[] = [];
+    for (let ry = 0; ry < g.length; ry++) {
+      for (let cx = 0; cx < 3; cx++) {
+        if (g[ry][cx] === "1") {
+          out.push(<Px key={`g${gx}-${ry}-${cx}`} x={gx + cx} y={gy + ry} c={col} />);
+        }
+      }
+    }
+    return out;
+  };
+  return (
+    <G>
+      {/* Stand */}
+      <PixelRect x={x + 8}  y={y + 22} w={6} h={2} c={P.ink} />
+      <PixelRect x={x + 11} y={y + 20} w={4} h={2} c={P.ink} />
+      <PixelRect x={x + 12} y={y + 19} w={2} h={1} c={P.ink} />
+      {/* Bezel */}
+      <PixelRect x={x} y={y} w={26} h={20} c={P.ink} />
+      <PixelRect x={x} y={y} w={26} h={1} c={P.ink_hi} />
+      <PixelRect x={x + 25} y={y} w={1} h={20} c={P.ink_2} />
+      {/* Corporate notice screen */}
+      <PixelRect x={x + 2} y={y + 2} w={22} h={16} c={"#16202C"} />
+      <PixelRect x={x + 2} y={y + 2} w={22} h={1}  c={"#243A4E"} />
+      <Rect x={x + 2} y={y + 2} width={22} height={16} fill={"#D4A24C"} opacity={0.12} />
+      {/* Robot head (left) */}
+      <Px x={hx + 4} y={hy - 2} c={colors.sage} />
+      <PixelRect x={hx + 4} y={hy - 1} w={1} h={1} c={"#A4F0FF"} />
+      <PixelRect x={hx} y={hy}     w={9} h={8} c={"#3FC4E0"} />
+      <PixelRect x={hx} y={hy}     w={9} h={1} c={"#A4F0FF"} />
+      <PixelRect x={hx} y={hy + 7} w={9} h={1} c={"#1C6E80"} />
+      <PixelRect x={hx + 1} y={hy + 2} w={7} h={3} c={"#0E1A22"} />
+      <Px x={hx + 2} y={hy + 3} c={eyeOn ? "#E85A7E" : "#7E2A3A"} />
+      <Px x={hx + 6} y={hy + 3} c={eyeOn ? "#E85A7E" : "#7E2A3A"} />
+      <PixelRect x={hx + 2} y={hy + 6} w={5} h={1} c={"#1C6E80"} />
+      {/* "AI" glyphs (right) */}
+      {drawGlyph(A, x + 15, y + 5, "#E8C97E")}
+      {drawGlyph(I, x + 19, y + 5, "#E8C97E")}
+      {/* tiny "person → gone" mark */}
+      <PixelRect x={x + 15} y={y + 13} w={2} h={2} c={colors.sage_2} />
+      <Px x={x + 14} y={y + 12} c={"#E85A7E"} />
+      <Px x={x + 17} y={y + 15} c={"#E85A7E"} />
+    </G>
+  );
+}
+
+// Small engineer head + shoulders (used for the R&D-lab researcher).
+function EngHead({
+  x, y, t, shirtCol,
+}: { x: number; y: number; t: number; shirtCol: string }) {
+  const bob = ((t >> 4) % 24 < 1) ? -1 : 0;
+  const hy = y + bob;
+  return (
+    <G>
+      <PixelRect x={x + 1} y={hy}     w={8} h={4} c={P.terracotta_3} />
+      <PixelRect x={x}     y={hy + 1} w={10} h={3} c={P.terracotta_3} />
+      <Px x={x + 2} y={hy + 1} c={P.terracotta_2} />
+      <Px x={x + 6} y={hy + 1} c={P.terracotta_2} />
+      <PixelRect x={x + 3} y={hy + 4} w={4} h={1} c={P.cream_3} />
+      <PixelRect x={x - 1} y={y + 5}  w={12} h={6} c={shirtCol} />
+      <PixelRect x={x - 1} y={y + 5}  w={12} h={1} c={P.sage_2} />
+    </G>
+  );
+}
+
+// ─── "Infrastructure as art" gallery pieces (campus DATA + GPU) ─────────────
+// Two glass museum vitrines standing on a shared oak plinth in the atrium.
+// Per design v7 — campus surfaces Data + GPU producers as curated sculptures.
+
+// THE ARCHIVE — biophilic glass data monolith. Anchored top-left at (x,y);
+// glass column body extends y+4..y+40, succulent rosette crowns at y..y+4,
+// oak plinth at y+40..y+50.
+function DataMonolith({ x, y, t }: { x: number; y: number; t: number }) {
+  const els: React.ReactNode[] = [];
+  let k = 0;
+  const key = () => `dm${k++}`;
+  const R = (xx: number, yy: number, w: number, h: number, c: string) =>
+    els.push(<PixelRect key={key()} x={xx} y={yy} w={w} h={h} c={c} />);
+  const PXp = (xx: number, yy: number, c: string) =>
+    els.push(<Px key={key()} x={xx} y={yy} c={c} />);
+  const A = (xx: number, yy: number, w: number, h: number, c: string, op: number) =>
+    els.push(<Rect key={key()} x={xx} y={yy} width={w} height={h} fill={c} opacity={op} />);
+
+  // Oak plinth + brass museum plaque
+  R(x, y + 40, 22, 10, "#8B5E3C");
+  R(x, y + 40, 22, 1, "#C89868");
+  R(x, y + 49, 22, 1, "#5C3A22");
+  R(x + 1, y + 41, 20, 1, "#A87848");
+  R(x + 6, y + 44, 10, 3, "#C9A24C");
+  R(x + 7, y + 45, 8, 1, "#EBC97E");
+
+  // Glass column shell
+  const gx = x + 4, gy = y + 4, gw = 14, gh = 36;
+  A(gx - 2, gy - 1, gw + 4, gh + 2, "#3FC4E0", 0.10); // outer glow
+  R(gx, gy, gw, gh, "#16323A");
+  A(gx, gy, gw, gh, "#9AD4E0", 0.22);
+  // Steel frame edges
+  R(gx, gy, gw, 1, "#C8D0D4");
+  R(gx, gy, 1, gh, "#8C969C");
+  R(gx + gw - 1, gy, 1, gh, "#5C666C");
+  R(gx, gy + gh - 1, gw, 1, "#5C666C");
+
+  // Internal data strata — glowing rows drifting upward + read-head packet
+  for (let i = 0; i < 11; i++) {
+    const drift = (t >> 1) % 6;
+    const sy = gy + gh - 3 - i * 3 + (drift % 3);
+    if (sy < gy + 2 || sy > gy + gh - 2) continue;
+    const lit = (t + i * 5) % 14 < 9;
+    const col = i % 4 === 0
+      ? (lit ? "#EBBE6E" : "#6B5A2E")
+      : (lit ? "#3FE0E0" : "#1C5A60");
+    R(gx + 2, sy, gw - 4, 1, col);
+    if (i === ((t >> 3) % 11)) PXp(gx + 2 + ((t >> 1) % (gw - 4)), sy, "#FFFFFF");
+  }
+  // Vertical glass reflection
+  A(gx + 3, gy + 2, 1, gh - 4, "#CFF2FA", 0.4);
+
+  // Living succulent crowning the column
+  const px0 = x + 7;
+  R(px0, y, 8, 4, "#3A2A1E"); // soil tray
+  R(px0, y, 8, 1, "#5C3A22");
+  const leaves: Array<[number, number, string]> = [
+    [-1, -2, "#6E8A72"], [3, -3, "#7E9A85"], [7, -2, "#5C7560"],
+    [1, -4, "#9AB89A"], [5, -4, "#7E9A85"],
+  ];
+  for (const lf of leaves) R(px0 + lf[0], y - 2 + lf[1] + 2, 2, 3, lf[2]);
+  PXp(px0 + 3, y - 4, "#A4BDA9");
+
+  // Floor reflection of the glow
+  A(x + 2, y + 50, 18, 2, "#3FC4E0", 0.12);
+
+  return <G>{els}</G>;
+}
+
+// Matching glass compute display case — small museum vitrine on a plinth
+// holding a glowing GPU board. ~18w × 38h, anchored top-left.
+function ComputeCase({ x, y, t }: { x: number; y: number; t: number }) {
+  const els: React.ReactNode[] = [];
+  let k = 0;
+  const key = () => `cc${k++}`;
+  const R = (xx: number, yy: number, w: number, h: number, c: string) =>
+    els.push(<PixelRect key={key()} x={xx} y={yy} w={w} h={h} c={c} />);
+  const PXp = (xx: number, yy: number, c: string) =>
+    els.push(<Px key={key()} x={xx} y={yy} c={c} />);
+  const A = (xx: number, yy: number, w: number, h: number, c: string, op: number) =>
+    els.push(<Rect key={key()} x={xx} y={yy} width={w} height={h} fill={c} opacity={op} />);
+
+  // Oak plinth + brass plaque
+  R(x, y + 28, 18, 10, "#8B5E3C");
+  R(x, y + 28, 18, 1, "#C89868");
+  R(x, y + 37, 18, 1, "#5C3A22");
+  R(x + 5, y + 31, 8, 2, "#C9A24C");
+
+  // Glass vitrine
+  const gx = x + 3, gy = y + 2, gw = 12, gh = 26;
+  A(gx - 2, gy - 1, gw + 4, gh + 2, "#C97B5B", 0.10);
+  R(gx, gy, gw, gh, "#1A1410");
+  A(gx, gy, gw, gh, "#E8D8C8", 0.18);
+  R(gx, gy, gw, 1, "#D8DCE0");
+  R(gx, gy, 1, gh, "#9C969C");
+  R(gx + gw - 1, gy, 1, gh, "#5C5660");
+
+  // GPU board mounted upright inside
+  R(gx + 2, gy + 4, gw - 4, gh - 10, "#2A2A2A");
+  R(gx + 2, gy + 4, gw - 4, 1, "#454545");
+  for (let f = 0; f < 4; f++) R(gx + 3 + f * 2, gy + 6, 1, gh - 14, "#3E3E3E");
+
+  // Spinning fan (LED ring)
+  const fcx = gx + Math.floor(gw / 2), fcy = gy + gh - 6;
+  const fa = (t >> 1) % 4;
+  R(fcx - 2, fcy - 2, 5, 5, "#1A1A1A");
+  const fanDx = [0, 1, 0, -1][fa];
+  const fanDy = [-1, 0, 1, 0][fa];
+  PXp(fcx + fanDx, fcy + fanDy, "#C97B5B");
+  PXp(fcx, fcy, "#5C5C5C");
+
+  // PCB power LEDs
+  PXp(gx + 3, gy + 5, (t >> 2) % 2 ? "#7EE0A0" : "#1C4A2A");
+  PXp(gx + gw - 4, gy + 5, (t >> 2) % 3 ? "#EBBE6E" : "#5C4A1A");
+
+  // Glass reflection
+  A(gx + 2, gy + 2, 1, gh - 4, "#FBEFE2", 0.4);
+
+  return <G>{els}</G>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -931,19 +1333,30 @@ function MegacorpScene({ t }: { t: number }) {
   return (
     <G>
       {els}
-      {/* Front bank of 3 desks — design v5 narrows them to make room for
-          the server-room alcove on the right (no mug; sleeker corporate). */}
+      {/* Front bank of 3 desks. Design v8: 3rd desk became a vacated
+          workstation (REPLACED BY AI monitor + EmptyChair) — same motif as
+          the campus pod 2. The first AI-driven layoff happens at megacorp
+          and only deepens from there. */}
       {[0, 1, 2].map((i) => {
         const dx = 4 + i * 52;
         const deskY = 256;
+        const vacated = i === 2;
         return (
           <G key={`desk${i}`}>
             <PixelRect x={dx} y={deskY} w={46} h={4} c={CORP.dark} />
             <PixelRect x={dx} y={deskY} w={46} h={1} c={CORP.mid} />
             <PixelRect x={dx + 4} y={deskY + 4} w={2} h={30} c={CORP.dark} />
             <PixelRect x={dx + 40} y={deskY + 4} w={2} h={30} c={CORP.dark} />
-            <Monitor x={dx + 10} y={deskY - 22} t={t + i * 7} />
-            <EngineerOnChair x={dx + 13} y={deskY + 12} t={t + i * 11} />
+            {vacated ? (
+              <ReplacedMonitor x={dx + 10} y={deskY - 22} t={t} />
+            ) : (
+              <Monitor x={dx + 10} y={deskY - 22} t={t + i * 7} />
+            )}
+            {vacated ? (
+              <EmptyChair x={dx + 13} y={deskY + 12} t={t} />
+            ) : (
+              <EngineerOnChair x={dx + 13} y={deskY + 12} t={t + i * 11} />
+            )}
             <Keyboard x={dx + 6} y={deskY - 2} t={t + i * 5} />
           </G>
         );
@@ -998,6 +1411,1226 @@ function MegacorpScene({ t }: { t: number }) {
       <PixelRect x={4} y={FLOOR_Y + 60} w={14} h={1} c={CORP.mid} />
       <Plant x={0} y={FLOOR_Y + 40} t={t} />
       <FloatingTokens spawnX={110} spawnY={236} t={t} />
+    </G>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// CAMPUS SCENE — Round 8 (Sovereign Wealth) — Apple-Park-style tech campus.
+// Port of pixel-art.jsx::composeCampusScene (design v6). Higher FLOOR_Y=250
+// to make room for the lake/deck terrace at the bottom of the frame.
+// Key beats: rooftop solar canopy (Energy), open bar with neon, outdoor
+// courtyard + hammock seen through glass, R&D lab in a recessed niche,
+// 2 knowledge-worker pods (one already "REPLACED BY AI"), and a lakeside
+// deck with ducks gliding past.
+// ═══════════════════════════════════════════════════════════════════════
+const CAMP = {
+  skyHi:      "#F0F4EA",
+  skyMid:     "#E8EEE2",
+  skyLow:     "#D8E0D6",
+  sunHalo:    "#FBF7EC",
+  sunCore:    "#EBBE6E",
+  hillFar:    "#A4BDA9",
+  hillNear:   "#7E9A85",
+  pvDark:     "#1F2C48",
+  pvMid:      "#2A3A5A",
+  pvHi:       "#4A6FA5",
+  pvCell:     "#33507E",
+  pvSeam:     "#1F2C48",
+  pvGlint:    "#A4C8FF",
+  truss:      "#6E4A2E",
+  trussPost:  "#5C5C5C",
+  invBody:    "#3A3A3A",
+  invEdge:    "#5C5C5C",
+  invLed:     "#7E9A85",
+  invLedOff:  "#3F5142",
+  conduit:    "#3A3A3A",
+  glass:      "#A4BDA9",
+  mullion:    "#C8B89A",
+  wallCream:  "#E8E0D0",
+  wallHi:     "#F0EAD8",
+  floorWood:  "#B58858",
+  floorPlank: "#9A6E40",
+  floorHi:    "#C89868",
+  floorEdge:  "#8B5E3C",
+  barTop:     "#6E4A2E",
+  barTopHi:   "#9A6E40",
+  barTopGlow: "#C89868",
+  barFront:   "#5C3A22",
+  barSlat:    "#46301C",
+  brass:      "#C9A24C",
+  cabDark:    "#2A211A",
+  cabEdge:    "#46301C",
+  backlit:    "#C97B3A",
+  shelfTrim:  "#8B6A3A",
+  neonOff:    "#3A2A2A",
+  neonBg:     "#1A1414",
+  neonPink:   "#E85A7E",
+  neonCyan:   "#3FC4E0",
+  neonPinkLi: "#F09AB0",
+  neonCyanLi: "#7EE0F0",
+  lampCord:   "#3A3A3A",
+  lampShade:  "#2A2A2A",
+  lampOn:     "#EBBE6E",
+  lampOff:    "#8B5E3C",
+  oakSurr:    "#8B5E3C",
+  oakSurrHi:  "#C89868",
+  oakSurrSh1: "#A87848",
+  oakSurrSh2: "#5C3A22",
+  labWall:    "#D6CEBE",
+  labShadow:  "#B8B0A0",
+  labLeftSh:  "#C4BCAC",
+  labLitEdge: "#E8E0D0",
+  labSign:    "#3F5142",
+  labSignHi:  "#5C7560",
+  labSignTxt: "#EBBE6E",
+  benchWhite: "#E8E0D0",
+  benchHi:    "#FBF7EC",
+  benchBase:  "#C8B89A",
+  monBezel:   "#1A1A1A",
+  monScreen:  "#2A3A2E",
+  lossCurve:  "#7E9A85",
+  rackDark:   "#2A2A2A",
+  rackMid:    "#3A3A3A",
+  beakerSage: "#7E9A85",
+  beakerTerr: "#C97B5B",
+  beakerGold: "#D4A24C",
+  armBase:    "#5C5C5C",
+  armArm:     "#9CA0A4",
+  armTip:     "#D45A68",
+  lakeMid:    "#6E8E9C",
+  lakeShallow:"#8FB0B8",
+  lakeDeep:   "#567682",
+  lakeRipple: "#B8D0D4",
+  lakeReed:   "#5C7560",
+  cattail:    "#8B5E3C",
+  duck:       "#3A3A3A",
+  duckBill:   "#EBBE6E",
+  hammock:    "#C97B5B",
+  hammockSag: "#D4906B",
+  hammockEnd: "#8B5639",
+  personSil:  "#3F5142",
+  skin:       "#C8B89A",
+  deckPlank:  "#9A6E40",
+  deckSeam:   "#7C5030",
+  deckLipSh:  "#5C3A22",
+  deckLipSh2: "#3A2A1A",
+  deckFacia:  "#5C3A22",
+  railPost:   "#6E4A2E",
+  adirRed:    "#C97B5B",
+  adirShade:  "#B5664A",
+  adirEdge:   "#8B5639",
+  adirShirt:  "#7E9A85",
+  laptop:     "#2A2A2A",
+  laptopGlow: "#A4C8FF",
+  bistro:     "#9CA0A4",
+  bistroPost: "#5C5C5C",
+  bistroChair:"#3F5142",
+  coffee:     "#C97B5B",
+};
+
+function CampusScene({ t }: { t: number }) {
+  const FLOOR_Y = 250;
+  const els: React.ReactNode[] = [];
+  let k = 0;
+  const key = () => `cp${k++}`;
+  const R = (x: number, y: number, w: number, h: number, c: string) =>
+    els.push(<PixelRect key={key()} x={x} y={y} w={w} h={h} c={c} />);
+  const PX = (x: number, y: number, c: string) =>
+    els.push(<Px key={key()} x={x} y={y} c={c} />);
+  const A = (x: number, y: number, w: number, h: number, c: string, op: number) =>
+    els.push(<Rect key={key()} x={x} y={y} width={w} height={h} fill={c} opacity={op} />);
+
+  // ─── Sky / outside (through floor-to-ceiling glass) ───
+  R(0, 0, W, 70, CAMP.skyLow);
+  R(0, 0, W, 24, CAMP.skyMid);
+  R(0, 0, W, 12, CAMP.skyHi);
+  // Sun glow upper-right
+  A(W - 56, 4, 40, 30, CAMP.sunHalo, 0.5);
+  A(W - 44, 8, 24, 18, CAMP.sunCore, 0.3);
+  R(W - 34, 12, 8, 8, CAMP.sunHalo);
+  // Distant rolling hills
+  for (let i = 0; i < W; i++) {
+    const h1 = (Math.sin(i / 40) * 4 + 6) | 0;
+    R(i, 56 - h1, 1, h1 + 16, CAMP.hillFar);
+  }
+  for (let i = 0; i < W; i++) {
+    const h2 = (Math.sin(i / 30 + 2) * 3 + 4) | 0;
+    R(i, 60 - h2, 1, h2 + 12, CAMP.hillNear);
+  }
+
+  // ─── Rooftop solar canopy (Energy producer) ───
+  R(0, 22, W, 3, CAMP.truss);
+  for (let i = 8; i < W; i += 28) R(i, 18, 2, 8, CAMP.trussPost);
+  // Tilted PV panels (one segment per 30px)
+  for (let sp = 0; sp < W; sp += 30) {
+    R(sp + 2, 0, 28, 4, CAMP.pvDark);
+    R(sp, 4, 30, 14, CAMP.pvMid);
+    R(sp, 4, 30, 1, CAMP.pvHi);
+    // 4×3 PV cells per panel
+    for (let cx = 0; cx < 4; cx++)
+      for (let cy = 0; cy < 3; cy++) {
+        R(sp + 2 + cx * 7, 5 + cy * 4, 5, 3, CAMP.pvCell);
+        PX(sp + 4 + cx * 7, 6 + cy * 4, "#3A5A8A");
+      }
+    for (let cx = 1; cx < 4; cx++) R(sp + 1 + cx * 7, 4, 1, 14, CAMP.pvSeam);
+    R(sp, 9, 30, 1, CAMP.pvSeam);
+    R(sp, 13, 30, 1, CAMP.pvSeam);
+    // Animated sun glint sweeping panel by panel
+    const segIdx = (sp / 30) | 0;
+    const segCount = (W / 30) | 0;
+    if ((t >> 1) % segCount === segIdx) R(sp + 1, 5, 28, 1, CAMP.pvGlint);
+  }
+  R(0, 18, W, 2, "#0F1A30"); // drip edge
+  // Power inverter + conduit
+  R(222, 26, 10, 7, CAMP.invBody);
+  R(222, 26, 10, 1, CAMP.invEdge);
+  PX(225, 29, (t >> 2) % 4 < 2 ? CAMP.invLed : CAMP.invLedOff);
+  R(226, 33, 1, 38, CAMP.conduit);
+  for (let cy = 35; cy < 70; cy += 6) {
+    PX(226, cy, (cy + (t >> 2)) % 12 < 6 ? colors.gold_hi : "#6E4A2E");
+  }
+
+  // ─── Floor-to-ceiling glass curtain wall ───
+  A(0, 4, W, 66, CAMP.glass, 0.18);
+  for (let mx = 0; mx <= W; mx += 30) R(mx, 4, 1, 66, CAMP.mullion);
+  R(0, 36, W, 1, CAMP.mullion);
+  for (let s = 0; s < 5; s++) A(14 + s * 50, 6, 2, 62, CAMP.sunHalo, 0.25);
+
+  // ─── Cream concrete upper wall band ───
+  R(0, 70, W, FLOOR_Y - 70, CAMP.wallCream);
+  for (let y = 74; y < FLOOR_Y; y += 10) R(0, y, W, 1, CAMP.wallHi);
+
+  // ─── Warm oak floor ───
+  R(0, FLOOR_Y, W, H - FLOOR_Y, CAMP.floorWood);
+  for (let i = 0; i < W; i += 24)
+    R(i + ((i / 24) % 3) * 6, FLOOR_Y, 1, H - FLOOR_Y, CAMP.floorPlank);
+  R(0, FLOOR_Y, W, 1, CAMP.floorHi);
+  R(0, FLOOR_Y + 1, W, 1, CAMP.floorWood);
+  R(0, H - 3, W, 1, CAMP.floorEdge);
+
+  // ─── Open bar (right side) ───
+  const cbX = 158, cbW = 80;
+  // Counter top
+  R(cbX, 196, cbW, 6, CAMP.barTop);
+  R(cbX, 196, cbW, 1, CAMP.barTopHi);
+  R(cbX, 197, cbW, 1, CAMP.barTopGlow);
+  // Bar front + slats
+  R(cbX, 202, cbW, FLOOR_Y - 202, CAMP.barFront);
+  for (let bx = cbX + 3; bx < cbX + cbW - 2; bx += 7)
+    R(bx, 204, 1, FLOOR_Y - 206, CAMP.barSlat);
+  // Brass footrail
+  R(cbX, FLOOR_Y - 6, cbW, 1, CAMP.brass);
+  // Back-bar cabinet
+  const bbY = 150;
+  R(cbX + 2, bbY, cbW - 4, 46, CAMP.cabDark);
+  R(cbX + 2, bbY, cbW - 4, 1, CAMP.cabEdge);
+  A(cbX + 4, bbY + 2, cbW - 8, 42, CAMP.backlit, 0.5);
+  // 3 shelves of bottles
+  const bottleCols = [
+    "#7E2A2A", "#3F6E3A", "#C9A24C", "#2A4E6E",
+    "#9A3A6A", "#C97B3A", "#5A3A7E", "#3A6E6E",
+  ];
+  for (let s = 0; s < 3; s++) {
+    const sy = bbY + 8 + s * 13;
+    R(cbX + 4, sy, cbW - 8, 1, CAMP.shelfTrim);
+    for (let b = 0; b < 9; b++) {
+      const bx = cbX + 7 + b * 8;
+      const tall = (b + s) % 3 === 0;
+      const h = tall ? 10 : 7;
+      const col = bottleCols[(b + s * 3) % bottleCols.length];
+      R(bx, sy - h, 4, h, col);
+      R(bx + 1, sy - h - 3, 2, 3, col);
+      PX(bx + 1, sy - h - 3, "#1A1A1A");
+      PX(bx + 1, sy - (h >> 1), CAMP.wallCream);
+      PX(bx + 2, sy - (h >> 1), CAMP.wallCream);
+    }
+  }
+  // Hanging stemware rack
+  R(cbX + 6, bbY + 47, cbW - 12, 2, CAMP.cabEdge);
+  for (let g = 0; g < 8; g++) {
+    const gx = cbX + 10 + g * 8;
+    R(gx, bbY + 49, 1, 4, "#B8C4C0");
+    R(gx - 2, bbY + 53, 5, 3, "#C8D4D0");
+    PX(gx, bbY + 49, "#E8F0EC");
+  }
+  // Beer-tap tower (3 handles)
+  const tapX = cbX + 6;
+  R(tapX, 186, 4, 10, "#9CA0A4");
+  R(tapX, 186, 4, 1, "#C8CCD0");
+  const tapHues = ["#C97B3A", "#3F6E3A", "#7E2A2A"];
+  for (let h = 0; h < 3; h++) {
+    R(tapX + 4, 188 + h * 3, 3, 1, "#9CA0A4");
+    PX(tapX + 7, 188 + h * 3, tapHues[h]);
+  }
+  // Cocktail station
+  R(cbX + 26, 189, 4, 7, "#B8BCC0");
+  R(cbX + 26, 189, 4, 1, "#D8DCE0");
+  R(cbX + 26, 191, 4, 1, "#90949A");
+  R(cbX + 34, 192, 1, 4, "#C8D4D0");
+  R(cbX + 32, 190, 5, 2, "#C9A24C");
+  PX(cbX + 34, 189, colors.sage);
+  R(cbX + 40, 192, 4, 4, "#B8C4C0");
+  R(cbX + 40, 193, 4, 3, "#C97B3A");
+  PX(cbX + 41, 195, "#E8B86A");
+  // Bar stools
+  for (let st = 0; st < 2; st++) {
+    const sx = cbX + 24 + st * 26;
+    R(sx, FLOOR_Y - 18, 8, 2, "#3A2A1E");
+    R(sx + 1, FLOOR_Y - 18, 6, 1, CAMP.barFront);
+    R(sx + 3, FLOOR_Y - 16, 2, 14, "#7C6A4A");
+    R(sx + 1, FLOOR_Y - 3, 6, 1, CAMP.barFront);
+  }
+  // Neon "OPEN BAR" sign
+  R(cbX + 16, bbY - 12, 48, 10, CAMP.neonBg);
+  R(cbX + 16, bbY - 12, 48, 1, CAMP.neonOff);
+  const neonOn = (t >> 3) % 16 < 15;
+  const neonOpacity = neonOn ? 1 : 0.4;
+  els.push(
+    <Rect key={key()} x={cbX + 20} y={bbY - 8} width={18} height={2} fill={CAMP.neonPink} opacity={neonOpacity} />
+  );
+  els.push(
+    <Rect key={key()} x={cbX + 42} y={bbY - 8} width={18} height={2} fill={CAMP.neonCyan} opacity={neonOpacity} />
+  );
+  els.push(<Px key={key()} x={cbX + 19} y={bbY - 9} c={CAMP.neonPinkLi} />);
+  els.push(<Px key={key()} x={cbX + 61} y={bbY - 6} c={CAMP.neonCyanLi} />);
+  A(cbX + 18, bbY - 10, 44, 6, CAMP.neonPink, 0.18);
+  // Hanging pendant lights
+  for (let i = 0; i < 4; i++) {
+    const lx = cbX + 12 + i * 18;
+    R(lx, 142, 1, 6, CAMP.lampCord);
+    R(lx - 2, 148, 5, 3, CAMP.lampShade);
+    PX(lx, 150, (t + i * 3) % 8 < 6 ? CAMP.lampOn : CAMP.lampOff);
+  }
+
+  // ─── "Infrastructure as art" gallery (in front of the bar, on the floor) ───
+  // Long low oak gallery plinth + soft uplighting + brass wall label. The two
+  // sculpture pieces themselves (DataMonolith + ComputeCase) are rendered as
+  // sprites in the JSX return below.
+  {
+    const bayX = 172, bayBot = FLOOR_Y + 52;
+    R(bayX - 4, bayBot - 4, 72, 4, "#7C5030");
+    R(bayX - 4, bayBot - 4, 72, 1, "#9A6E40");
+    for (let g = 4; g > 0; g--) {
+      A(bayX - 2 + g, 248, 64 - g * 2, 54, "#9AD4E0", 0.08);
+    }
+    R(bayX + 4, 244, 36, 5, "#3F5142");
+    R(bayX + 6, 245, 32, 1, "#7E9A85");
+    PX(bayX + 8, 246, "#EBBE6E");
+  }
+
+  // ─── Outdoor courtyard (left, through glass) ───
+  A(0, 130, 90, FLOOR_Y - 130, CAMP.glass, 0.2);
+  R(0, 130, 90, 1, CAMP.mullion);
+  for (let mx = 0; mx < 90; mx += 30) R(mx, 130, 1, FLOOR_Y - 130, CAMP.mullion);
+  // Courtyard grass strip
+  R(2, 200, 86, FLOOR_Y - 200, CAMP.hillNear);
+  R(2, 200, 86, 1, CAMP.hillFar);
+  // Hammock between trees
+  R(26, 214, 28, 1, CAMP.hammock);
+  R(25, 213, 1, 3, CAMP.hammockEnd);
+  R(54, 213, 1, 3, CAMP.hammockEnd);
+  for (let hx = 26; hx < 54; hx++) {
+    const sag = Math.sin(((hx - 26) / 28) * Math.PI) * 3;
+    PX(hx, (214 + sag) | 0, CAMP.hammockSag);
+  }
+  // Person in hammock
+  R(34, 213, 12, 2, CAMP.personSil);
+  PX(46, 212, CAMP.skin);
+
+  // ─── R&D lab recessed in the wall ───
+  const labX = 96, labY = 150, labW = 54, labH = 70;
+  // Oak surround (recess frame)
+  R(labX - 4, labY - 4, labW + 8, labH + 8, CAMP.oakSurr);
+  R(labX - 4, labY - 4, labW + 8, 2, CAMP.oakSurrHi);
+  R(labX - 4, labY - 4, 2, labH + 8, CAMP.oakSurrSh1);
+  R(labX + labW + 2, labY - 4, 2, labH + 8, CAMP.oakSurrSh2);
+  R(labX - 4, labY + labH + 2, labW + 8, 2, CAMP.oakSurrSh2);
+  // Recessed back wall
+  R(labX, labY, labW, labH, CAMP.labWall);
+  R(labX, labY, labW, 3, CAMP.labShadow);
+  R(labX, labY, 3, labH, CAMP.labLeftSh);
+  R(labX + labW - 2, labY, 2, labH, CAMP.labLitEdge);
+  // Glass front pane over the niche
+  A(labX, labY, labW, labH, CAMP.glass, 0.12);
+  for (let s = 0; s < 3; s++) A(labX + 6 + s * 18, labY, 2, labH, CAMP.sunHalo, 0.18);
+  // "R&D LAB" sign
+  R(labX + 10, labY - 11, 34, 7, CAMP.labSign);
+  R(labX + 10, labY - 11, 34, 1, CAMP.labSignHi);
+  R(labX + 13, labY - 8, 28, 2, CAMP.labSignTxt);
+  // Lab bench
+  R(labX + 5, labY + 40, 44, 4, CAMP.benchWhite);
+  R(labX + 5, labY + 40, 44, 1, CAMP.benchHi);
+  R(labX + 5, labY + 44, 44, 8, CAMP.benchBase);
+  // Big research monitor (loss curve)
+  R(labX + 7, labY + 8, 22, 15, CAMP.monBezel);
+  R(labX + 8, labY + 9, 20, 13, CAMP.monScreen);
+  for (let i = 0; i < 18; i++) {
+    const cy = (labY + 20 - ((Math.sin((i + (t >> 1)) / 3) + 1) * 3 + i / 5)) | 0;
+    PX(labX + 9 + i, cy, CAMP.lossCurve);
+  }
+  // Experiment rack
+  R(labX + 34, labY + 6, 14, 24, CAMP.rackDark);
+  R(labX + 35, labY + 7, 12, 22, CAMP.rackMid);
+  for (let i = 0; i < 5; i++) {
+    PX(labX + 37, labY + 9 + i * 4, (t + i * 3) % 5 < 2 ? colors.sage : colors.sage_3);
+    PX(labX + 40, labY + 9 + i * 4, (t + i) % 7 < 3 ? colors.gold_hi : "#6E4A2E");
+  }
+  // Robot arm (animated)
+  const armA = (t >> 3) % 4;
+  const ax = labX + 16, ay = labY + 40;
+  const dxArr = [4, 3, 0, -2];
+  const dyArr = [-2, -4, -5, -4];
+  R(ax, ay - 2, 3, 2, CAMP.armBase);
+  R(ax + 1, ay - 9, 1, 7, CAMP.armArm);
+  if (dxArr[armA] > 0) R(ax + 1, ay - 9, dxArr[armA], 1, CAMP.armArm);
+  PX(ax + 1 + dxArr[armA], ay - 9 + dyArr[armA], CAMP.armTip);
+  // Beakers
+  R(labX + 28, labY + 36, 3, 4, CAMP.beakerSage);
+  R(labX + 33, labY + 36, 3, 4, CAMP.beakerTerr);
+  R(labX + 38, labY + 36, 3, 4, CAMP.beakerGold);
+
+  // ─── Lower band: lake + deck ───
+  const lakeTop = H - 46;
+  R(0, lakeTop - 2, W, 1, CAMP.mullion);
+  R(0, lakeTop - 2, W, 4, CAMP.hillNear);
+  R(0, lakeTop - 2, W, 1, CAMP.hillFar);
+  // Lake water gradient
+  R(0, lakeTop + 2, W, H - (lakeTop + 2), CAMP.lakeMid);
+  R(0, lakeTop + 2, W, 6, CAMP.lakeShallow);
+  R(0, lakeTop + 10, W, 8, CAMP.lakeMid);
+  R(0, lakeTop + 18, W, H, CAMP.lakeDeep);
+  // Ripples
+  for (let i = 0; i < 16; i++) {
+    const rx = (i * 23 + (t >> 1) * (i % 2 ? 1 : -1)) % W;
+    const ry = lakeTop + 6 + (i * 7) % (H - lakeTop - 10);
+    R((rx + W) % W, ry, 3, 1, CAMP.lakeRipple);
+  }
+  // Reflections (shimmer columns)
+  for (let rc = 20; rc < W; rc += 36) A(rc, lakeTop + 3, 8, 14, CAMP.wallCream, 0.25);
+  // Reeds along shore
+  for (let i = 0; i < W; i += 9) {
+    const sway = ((t >> 4) + i) % 6 < 3 ? 0 : 1;
+    R(i + sway, lakeTop - 6, 1, 6, CAMP.lakeReed);
+    PX(i + sway, lakeTop - 7, CAMP.cattail);
+  }
+  // Pair of ducks
+  const duckX = ((t >> 2) % (W + 20)) - 10;
+  R(duckX, lakeTop + 14, 5, 2, CAMP.duck);
+  PX(duckX + 5, lakeTop + 13, CAMP.duck);
+  PX(duckX + 6, lakeTop + 13, CAMP.duckBill);
+  R(duckX - 2, lakeTop + 16, 8, 1, CAMP.lakeDeep);
+  const duck2 = duckX - 12;
+  if (duck2 > -6) {
+    R(duck2, lakeTop + 18, 5, 2, CAMP.duck);
+    PX(duck2 + 5, lakeTop + 17, CAMP.duck);
+  }
+  // Wooden balcony deck (right portion only)
+  const deckTop = lakeTop - 2;
+  const deckX = 128, deckW = W - deckX;
+  R(deckX, deckTop, deckW, 18, CAMP.deckPlank);
+  R(deckX, deckTop, deckW, 1, CAMP.floorHi);
+  for (let dx = deckX; dx < W; dx += 12) R(dx, deckTop, 1, 18, CAMP.deckSeam);
+  R(deckX, deckTop + 17, deckW, 1, CAMP.deckLipSh);
+  R(deckX, deckTop + 18, deckW, 1, CAMP.deckLipSh2);
+  R(deckX, deckTop, 2, 18, CAMP.deckFacia);
+  // Glass-panel railing
+  A(deckX, deckTop - 8, deckW, 8, CAMP.glass, 0.25);
+  R(deckX, deckTop - 9, deckW, 2, CAMP.oakSurr);
+  R(deckX, deckTop - 9, deckW, 1, CAMP.floorHi);
+  for (let rx = deckX + 4; rx < W; rx += 22) R(rx, deckTop - 8, 1, 8, CAMP.railPost);
+  // Adirondack + laptop person
+  R(deckX + 14, deckTop + 4, 7, 6, CAMP.adirRed);
+  R(deckX + 14, deckTop + 10, 8, 2, CAMP.adirShade);
+  R(deckX + 13, deckTop + 3, 1, 8, CAMP.adirEdge);
+  R(deckX + 15, deckTop, 4, 4, CAMP.skin);
+  R(deckX + 14, deckTop - 1, 6, 2, CAMP.personSil);
+  R(deckX + 14, deckTop + 4, 6, 3, CAMP.adirShirt);
+  R(deckX + 16, deckTop + 7, 5, 2, CAMP.laptop);
+  PX(deckX + 18, deckTop + 6, CAMP.laptopGlow);
+  // Bistro table + chairs
+  R(deckX + 58, deckTop + 6, 10, 1, CAMP.bistro);
+  R(deckX + 62, deckTop + 7, 2, 5, CAMP.bistroPost);
+  R(deckX + 54, deckTop + 4, 4, 4, CAMP.bistroChair);
+  R(deckX + 68, deckTop + 4, 4, 4, CAMP.bistroChair);
+  PX(deckX + 62, deckTop + 5, CAMP.coffee);
+  // Potted planter
+  R(deckX + 40, deckTop + 2, 8, 8, CAMP.oakSurr);
+
+  // Shift everything +25 to clear TopHUD (matches CAMPUS_ZONES offset).
+  return (
+    <G transform="translate(0, 25)">
+      {els}
+      {/* Infrastructure-as-art gallery — DATA + GPU as museum sculptures */}
+      <DataMonolith x={172} y={250} t={t} />
+      <ComputeCase x={216} y={262} t={t} />
+      {/* Courtyard trees (sprites layered over the glass band) */}
+      <IndoorTree x={14} y={188} t={t + 12} />
+      <IndoorTree x={60} y={192} t={t + 28} />
+      {/* R&D-lab researcher in a white lab coat */}
+      <EngHead x={96 + 20} y={150 + 32} t={t} shirtCol={CAMP.benchWhite} />
+      {/* 2 knowledge-worker pods (left, in atrium) — pod 1 occupied; pod 2 vacated */}
+      {[0, 1].map((i) => {
+        const dx = 14 + i * 44;
+        return (
+          <G key={`pod${i}`}>
+            <PixelRect x={dx} y={258} w={36} h={4} c={CAMP.floorPlank} />
+            <PixelRect x={dx} y={258} w={36} h={1} c={CAMP.floorHi} />
+            <PixelRect x={dx + 3} y={262} w={2} h={18} c={"#7C5030"} />
+            <PixelRect x={dx + 31} y={262} w={2} h={18} c={"#7C5030"} />
+            {i < 1 ? (
+              <>
+                <Monitor x={dx + 6} y={238} t={t + i * 9} />
+                <EngineerOnChair x={dx + 9} y={270} t={t + i * 13} />
+              </>
+            ) : (
+              <>
+                <ReplacedMonitor x={dx + 6} y={238} t={t} />
+                <EmptyChair x={dx + 9} y={270} t={t} />
+              </>
+            )}
+            <Succulent x={dx + 28} y={249} />
+          </G>
+        );
+      })}
+      {/* Deck succulent in the potted planter (drawn over the planter base) */}
+      <Succulent x={128 + 41} y={H - 46 - 2 - 4} />
+      <FloatingTokens spawnX={32} spawnY={226} t={t} />
+    </G>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// DATACENTER SCENE — port of pixel-art.jsx::composeDatacenterScene (v8).
+// Round 9 / Government Bailout. Dark slate hall. Top half = wall infra:
+// energy switchgear (left), HVAC ducts (center), data patch-panel (right),
+// autonomous-research NOC niche (center). Bottom half = raised floor with
+// 3 back-row mainframes + catwalk with the Inspector + 3 front-row
+// continent-scale mainframes. Same +25 y translate as CampusScene to clear
+// the floating TopHUD; front-row mainframes lose their bottom ~30px to the
+// SVG clip — the meaningful blade columns + status header stay visible.
+// ═══════════════════════════════════════════════════════════════════════
+
+// Huge floor-standing mainframe server. Cabinet body + glass front +
+// 4 blade columns of densely flickering LEDs + status header + vent grille
+// + cyan floor reflection. Pure decorative; the hit zone is the rectangle
+// of the cabinet.
+function Mainframe({ x, y, w, h, t }: { x: number; y: number; w: number; h: number; t: number }) {
+  const els: React.ReactNode[] = [];
+  let k = 0;
+  const key = () => `mf${k++}`;
+  const R = (xx: number, yy: number, ww: number, hh: number, c: string) =>
+    els.push(<PixelRect key={key()} x={xx} y={yy} w={ww} h={hh} c={c} />);
+  const PXp = (xx: number, yy: number, c: string) =>
+    els.push(<Px key={key()} x={xx} y={yy} c={c} />);
+  const A = (xx: number, yy: number, ww: number, hh: number, c: string, op: number) =>
+    els.push(<Rect key={key()} x={xx} y={yy} width={ww} height={hh} fill={c} opacity={op} />);
+
+  // Cabinet body
+  R(x, y, w, h, "#0C0E11");
+  R(x, y, w, 2, "#23272D");
+  R(x, y, 2, h, "#1A1E24");
+  R(x + w - 2, y, 2, h, "#060708");
+  R(x, y + h - 1, w, 1, "#060708");
+  // Glass front panel
+  R(x + 3, y + 4, w - 6, h - 8, "#101620");
+  // Internal blade columns with dense LED activity
+  const cols = 4;
+  for (let c = 0; c < cols; c++) {
+    const cx = x + 6 + Math.floor(c * ((w - 12) / cols));
+    R(cx, y + 6, Math.max(1, Math.floor((w - 12) / cols) - 2), h - 12, "#15191F");
+    for (let u = 0; u < h - 16; u += 4) {
+      const phase = (t + c * 9 + u) % 16;
+      let col: string;
+      if (phase < 6) col = "#16A6C4";
+      else if (phase < 8) col = "#A4F0FF";
+      else if (phase === 9) col = "#D4A24C";
+      else col = "#0E2A30";
+      R(cx, y + 8 + u, 2, 1, col);
+      PXp(cx + 3, y + 8 + u, (phase + c) % 5 < 2 ? "#16A6C4" : "#0E1A1E");
+    }
+  }
+  // Status header bar
+  R(x + 3, y + 4, w - 6, 3, "#1A1E24");
+  PXp(x + 6, y + 5, "#7E9A85");
+  PXp(x + 9, y + 5, (t >> 2) % 6 < 3 ? "#EBBE6E" : "#3A2E1A");
+  // Vent grille at the bottom
+  for (let s = 0; s < 4; s++) {
+    R(x + 4, y + h - 7 + s, w - 8, 1, s % 2 ? "#0A0C0E" : "#15191F");
+  }
+  // Floor reflection (cyan glow pooling)
+  A(x - 2, y + h, w + 4, 6, "#16A6C4", 0.12);
+  R(x - 1, y + h, w + 2, 1, "#0A0C0E");
+
+  return <G>{els}</G>;
+}
+
+// Wry one-liners the Inspector cycles through. Pure satire about the AI
+// silently making everyone redundant — fits the Government-Bailout vibe.
+const INSPECTOR_QUIPS = [
+  "rack 7 is fine. it's the humans i worry about.",
+  "the AI asked for a raise today.",
+  "told the new grad to automate himself. he did.",
+  "no engineers left to page. peaceful, really.",
+  "the model wrote its own performance review.",
+  "HR is also a model now. it's nicer than the old one.",
+  "who unplugged the coffee machine? oh. nobody. there's nobody.",
+  "the AI says hi. it knows your name.",
+];
+
+// Inspector silhouette walking the catwalk left↔right with a hi-vis vest and
+// a red scanner-beam pixel plus a soft amber light-cone cast down onto the
+// mainframes below. Periodically mutters a wry one-liner in a small cyan
+// terminal-style speech bubble that tracks his head — ~4s visible, ~8s
+// silent (useTick is 200ms/tick → 5 t/s → cycle = 60 t, visible while
+// (t % 60) < 20).
+function Inspector({ cwY, t }: { cwY: number; t: number }) {
+  const figX = 16 + ((t >> 3) % (W - 32));
+  const cyclePhase = t % 60;
+  const showQuip = cyclePhase < 20;
+  const quipIdx = Math.floor(t / 60) % INSPECTOR_QUIPS.length;
+  const quip = INSPECTOR_QUIPS[quipIdx];
+
+  // Bubble geometry — Silkscreen 6px renders ~4px wide per char; pad +10.
+  const bubbleW = Math.min(W - 8, quip.length * 4 + 10);
+  const bubbleH = 14;
+  const headTopY = cwY - 18;
+  const tailY = headTopY - 4;     // bubble tail tip sits 4px above the head
+  const bubbleY = tailY - bubbleH; // bubble body above the tail
+  // Center the bubble on the inspector's head, clamped to the scene.
+  const bubbleX = Math.max(2, Math.min(figX - Math.floor(bubbleW / 2), W - bubbleW - 2));
+
+  return (
+    <G>
+      {/* Light cone (drawn first so figure sits on top) */}
+      <Rect x={figX - 3} y={cwY - 4} width={12} height={34} fill="#EBBE6E" opacity={0.07} />
+      {/* Head */}
+      <PixelRect x={figX} y={headTopY} w={5} h={5} c="#0A0C0E" />
+      {/* Body */}
+      <PixelRect x={figX - 1} y={cwY - 13} w={7} h={9} c="#0A0C0E" />
+      {/* Hi-vis vest (upper stripe) */}
+      <PixelRect x={figX - 1} y={cwY - 11} w={7} h={2} c="#D4A24C" />
+      {/* Hi-vis vest (lower band) */}
+      <PixelRect x={figX - 1} y={cwY - 7} w={7} h={1} c="#D4A24C" />
+      {/* Scanner beam pixel */}
+      <Px x={figX + 6} y={cwY - 14} c={(t >> 2) % 4 < 2 ? "#D45A68" : "#3A1A1E"} />
+
+      {/* Speech bubble — terminal-style cyan border, tail pointing at the head */}
+      {showQuip && (
+        <G>
+          {/* Bubble body */}
+          <PixelRect x={bubbleX} y={bubbleY} w={bubbleW} h={bubbleH} c="#0E1216" />
+          {/* Cyan top edge + dark bottom edge */}
+          <PixelRect x={bubbleX} y={bubbleY} w={bubbleW} h={1} c="#16A6C4" />
+          <PixelRect x={bubbleX} y={bubbleY + bubbleH - 1} w={bubbleW} h={1} c="#0A0C0E" />
+          {/* Cyan left edge + dark right edge */}
+          <PixelRect x={bubbleX} y={bubbleY} w={1} h={bubbleH} c="#16A6C4" />
+          <PixelRect x={bubbleX + bubbleW - 1} y={bubbleY} w={1} h={bubbleH} c="#0A0C0E" />
+          {/* Tail pointing down to the inspector's head */}
+          <PixelRect x={figX - 1} y={bubbleY + bubbleH} w={3} h={2} c="#0E1216" />
+          <Px x={figX} y={bubbleY + bubbleH + 2} c="#0E1216" />
+          {/* Quip text — cyan, Silkscreen 6px, baseline ≈ middle of bubble */}
+          <SvgText
+            x={bubbleX + 4}
+            y={bubbleY + 10}
+            fontSize={6}
+            fontFamily={fonts.displayRegular}
+            fill="#A4F0FF"
+          >
+            {quip}
+          </SvgText>
+        </G>
+      )}
+    </G>
+  );
+}
+
+function DatacenterScene({ t }: { t: number }) {
+  // Scene is split into 2 paint groups + sprite overlays:
+  //   bgEls   — full-canvas background (envelope, wall band, floor, tile grid,
+  //             safety stripe, open-tile cable). Drawn UNSHIFTED at SVG y as
+  //             designed.
+  //   topEls  — upper-wall items (switchgear, busbar, HVAC, patch-panel,
+  //             fiber bundles, NOC niche, ceiling cable trays, POWER/DATA
+  //             labels). Wrapped in translate(0, +25) so they clear the HUD.
+  //
+  //   JSX order after the two paint groups (all UNSHIFTED so the front-row
+  //   mainframes fit fully within the SVG H=360 viewport):
+  //     1. Back row mainframes (3)
+  //     2. Catwalk (handrails + grate + posts) — in front of back row
+  //     3. Inspector + speech bubble — on the catwalk
+  //     4. Front row mainframes (3) — in front of everything
+  const FLOOR_Y = 150;
+  const bgEls: React.ReactNode[] = [];
+  const topEls: React.ReactNode[] = [];
+  let k = 0;
+  const key = () => `dc${k++}`;
+  const bgR = (x: number, y: number, w: number, h: number, c: string) =>
+    bgEls.push(<PixelRect key={key()} x={x} y={y} w={w} h={h} c={c} />);
+  const bgPX = (x: number, y: number, c: string) =>
+    bgEls.push(<Px key={key()} x={x} y={y} c={c} />);
+  const R = (x: number, y: number, w: number, h: number, c: string) =>
+    topEls.push(<PixelRect key={key()} x={x} y={y} w={w} h={h} c={c} />);
+  const PX = (x: number, y: number, c: string) =>
+    topEls.push(<Px key={key()} x={x} y={y} c={c} />);
+  const A = (x: number, y: number, w: number, h: number, c: string, op: number) =>
+    topEls.push(<Rect key={key()} x={x} y={y} width={w} height={h} fill={c} opacity={op} />);
+
+  // ─── BG: Dark slate envelope + upper wall band ────────────────────────
+  bgR(0, 0, W, H, "#15181C");
+  bgR(0, 0, W, FLOOR_Y, "#1A1E24");
+  bgR(0, FLOOR_Y - 2, W, 1, "#0E1014");
+
+  // ─── BG: Floor (raised tile + safety stripe + open-tile cable) ────────
+  bgR(0, FLOOR_Y, W, H - FLOOR_Y, "#181B20");
+  for (let gx = 0; gx < W; gx += 22) bgR(gx, FLOOR_Y, 1, H - FLOOR_Y, "#22262C");
+  for (let gy = FLOOR_Y; gy < H; gy += 16) bgR(0, gy, W, 1, "#22262C");
+  for (let sx2 = 0; sx2 < W; sx2 += 8) bgR(sx2, FLOOR_Y + 3, 4, 2, "#C97B5B");
+  bgR(6, H - 22, 20, 12, "#0A0C0E");
+  const cableCols = ["#16A6C4", "#D4A24C", "#16A6C4", "#5C7560", "#16A6C4"];
+  for (let i = 0; i < 5; i++) {
+    bgR(8, H - 20 + i * 2, 16, 1, cableCols[i]);
+    bgPX(10 + ((t >> 1) + i * 3) % 14, H - 20 + i * 2, "#A4F0FF");
+  }
+
+  // ─── TOP (shifted +25 via wrapper G): Ceiling cable trays / conduit ───
+  R(0, 4, W, 2, "#2A2E34");
+  for (let i = 6; i < W; i += 16) {
+    PX(i, 5, (i + (t >> 2)) % 10 < 5 ? "#D4A24C" : "#3A2E1A");
+  }
+
+  // ─── TOP: LEFT WALL — Energy: 3 switchgear cabinets + busbar trunk ──
+  for (let c = 0; c < 3; c++) {
+    const sx = 6 + c * 22;
+    R(sx, 18, 20, 56, "#23272D");
+    R(sx, 18, 20, 1, "#2E343C");
+    R(sx + 19, 18, 1, 56, "#0E1014");
+    R(sx + 3, 22, 6, 6, "#0A0C0E");
+    PX(sx + 6, 25, (t >> 2) % 8 < 4 ? "#EBBE6E" : "#5C4A1A");
+    R(sx + 11, 22, 6, 6, "#0A0C0E");
+    PX(sx + 14, 25, "#16A6C4");
+    for (let i = 0; i < 4; i++) {
+      R(sx + 3 + i * 4, 32, 2, 4, (t + i * 3 + c * 5) % 10 < 7 ? "#7E9A85" : "#C97B5B");
+    }
+    R(sx + 3, 40, 14, 3, "#D4A24C");
+    R(sx + 3, 46, 14, 24, "#1A1E24");
+    for (let i = 0; i < 4; i++) PX(sx + 4 + i * 3, 50, "#16A6C4");
+    for (let i = 0; i < 4; i++) {
+      R(sx + i * 5, 70, 3, 3, i % 2 ? "#D4A24C" : "#1A1E24");
+    }
+  }
+  R(4, 14, 66, 2, "#3A3E44");
+  for (let i = 8; i < 70; i += 6) {
+    PX(i, 15, (i + (t >> 1)) % 12 < 6 ? "#EBBE6E" : "#3A2E1A");
+  }
+  R(6, 9, 24, 4, "#C97B5B");
+
+  // ─── TOP: CENTER WALL — HVAC cooling ducts (3 fans + slats) ──────────
+  for (let i = 0; i < 3; i++) {
+    const dx = 78 + i * 14;
+    R(dx, 16, 11, 40, "#2A2E34");
+    R(dx, 16, 11, 1, "#3A3E44");
+    const fp = ((t >> 1) + i) % 4;
+    R(dx + 2, 20, 7, 7, "#0A0C0E");
+    if (fp === 0) {
+      R(dx + 5, 21, 1, 5, "#3A3E44");
+      R(dx + 3, 23, 5, 1, "#3A3E44");
+    } else if (fp === 1) {
+      PX(dx + 4, 22, "#3A3E44");
+      PX(dx + 6, 24, "#3A3E44");
+    } else if (fp === 2) {
+      R(dx + 3, 23, 5, 1, "#3A3E44");
+      R(dx + 5, 21, 1, 5, "#3A3E44");
+    } else {
+      PX(dx + 6, 22, "#3A3E44");
+      PX(dx + 4, 24, "#3A3E44");
+    }
+    PX(dx + 5, 28 + ((t >> 2) % 4), "#16A6C4");
+    for (let s = 0; s < 5; s++) R(dx + 1, 32 + s * 4, 9, 1, "#1A1E24");
+  }
+
+  // ─── TOP: RIGHT WALL — Data: patch-panel + fiber bundles ─────────────
+  const dwX = 122;
+  R(dwX, 16, 112, 58, "#1C2026");
+  R(dwX, 16, 112, 1, "#2E343C");
+  for (let row = 0; row < 6; row++) {
+    const ry = 20 + row * 8;
+    R(dwX + 4, ry, 104, 6, "#0E1216");
+    for (let port = 0; port < 26; port++) {
+      const portX = dwX + 6 + port * 4;
+      R(portX, ry + 1, 2, 4, "#23272D");
+      const lit = (t + port * 3 + row * 5) % 14;
+      PX(portX, ry + 1, lit < 6 ? "#16A6C4" : lit < 8 ? "#A4F0FF" : "#0E2A30");
+      if (port % 7 === 3) {
+        PX(portX + 1, ry + 1, (t + port) % 6 < 3 ? "#D4A24C" : "#3A2E1A");
+      }
+    }
+  }
+  const fiberCols = ["#16A6C4", "#D4A24C", "#7E9A85", "#A4F0FF"];
+  for (let f = 0; f < 4; f++) {
+    const fy = 22 + f * 6;
+    for (let xx = dwX + 4; xx < dwX + 108; xx += 2) {
+      const yOff = Math.floor(Math.sin((xx + t) / 8) * 1.5);
+      topEls.push(<Px key={key()} x={xx} y={fy + yOff} c={fiberCols[f]} />);
+    }
+  }
+  R(dwX + 2, 9, 22, 4, "#D4A24C");
+
+  // ─── TOP: CENTER WALL niche — Autonomous Research terminal ───────────
+  {
+    const nx = 76, ny = 60, nw = 44, nh = 84;
+    R(nx - 2, ny - 2, nw + 4, nh + 4, "#0A0C0E");
+    R(nx - 2, ny - 2, nw + 4, 1, "#2E343C");
+    R(nx, ny, nw, nh, "#10141A");
+    A(nx - 2, ny - 2, nw + 4, nh + 4, "#16A6C4", 0.10);
+    const sx = nx + 3, sy = ny + 3, sw = nw - 6, sh = 36;
+    R(sx, sy, sw, sh, "#0A1418");
+    R(sx, sy, sw, 1, "#16323A");
+    for (let g = 1; g < 4; g++) R(sx, sy + g * 9, sw, 1, "#0E2228");
+    for (let g = 1; g < 5; g++) R(sx + g * 7, sy, 1, sh, "#0E2228");
+    const cBase = sy + sh - 4;
+    for (let gx = 0; gx < sw - 4; gx += 1) {
+      const prog = gx / (sw - 4);
+      const ly = sy + 4 + (cBase - sy - 4) * (1 - Math.pow(1 - prog, 2.4))
+                       + Math.sin((gx + (t >> 1)) / 4) * 1.2;
+      PX(sx + 2 + gx, ly | 0, "#3FE0F0");
+    }
+    const hx = sx + 2 + ((t >> 1) % (sw - 5));
+    const hp = (hx - sx - 2) / (sw - 4);
+    const hy = sy + 4 + (cBase - sy - 4) * (1 - Math.pow(1 - hp, 2.4));
+    R(hx, hy | 0, 1, 2, "#A4F0FF");
+    PX(hx, (hy - 2) | 0, "#EBBE6E");
+    const by = sy + sh + 3, bh = nh - sh - 9;
+    R(sx, by, sw, bh, "#0A1418");
+    R(sx, by, sw, 1, "#16323A");
+    const barCols = ["#3FE0F0", "#7E9A85", "#EBBE6E"];
+    for (let b = 0; b < 3; b++) {
+      const bry = by + 4 + b * 7;
+      R(sx + 3, bry, sw - 16, 3, "#0E2228");
+      const bw = 4 + ((t >> 3) + b * 7) % (sw - 18);
+      R(sx + 3, bry, bw, 3, barCols[b]);
+      PX(sx + sw - 6, bry + 1, "#16A6C4");
+      PX(sx + sw - 4, bry + 1, "#16A6C4");
+    }
+    for (let d = 0; d < 9; d++) {
+      PX(sx + 3 + d * 4, by + bh - 3, ((t >> 2) + d) % 7 < 4 ? "#3FE0F0" : "#16323A");
+    }
+    R(nx + 2, ny - 7, nw - 4, 4, "#D4A24C");
+    PX(nx + 3, ny - 6, "#8B5E2C");
+    PX(nx + nw - 4, ny - 6, (t >> 3) % 6 < 4 ? "#7E9A85" : "#2A3A2E");
+  }
+
+  const cwY = FLOOR_Y + 30; // catwalk Y, used for both drawing + Inspector
+
+  return (
+    <G>
+      {/* Background (unshifted) */}
+      {bgEls}
+      {/* Upper-wall items, shifted +25 to clear the floating HUD */}
+      <G transform="translate(0, 25)">{topEls}</G>
+
+      {/* Back row of 3 floor-standing mainframes (gpu / monitor / engineer) */}
+      <Mainframe x={32}  y={FLOOR_Y - 6} w={52} h={96} t={t} />
+      <Mainframe x={96}  y={FLOOR_Y - 6} w={52} h={96} t={t + 20} />
+      <Mainframe x={160} y={FLOOR_Y - 6} w={52} h={96} t={t + 40} />
+
+      {/* Catwalk crossing in front of back row (handrails + grate + posts) */}
+      <PixelRect x={0} y={cwY} w={W} h={4} c="#23272D" />
+      <PixelRect x={0} y={cwY} w={W} h={1} c="#2E343C" />
+      <PixelRect x={0} y={cwY + 4} w={W} h={1} c="#0E1014" />
+      {Array.from({ length: Math.ceil(W / 4) }, (_, i) => (
+        <Px key={`gr${i}`} x={i * 4} y={cwY + 2} c="#15191F" />
+      ))}
+      <PixelRect x={0} y={cwY - 11} w={W} h={1} c="#2A2E34" />
+      <PixelRect x={0} y={cwY - 6} w={W} h={1} c="#1A1E24" />
+      {Array.from({ length: Math.ceil((W - 6) / 18) }, (_, i) => (
+        <PixelRect key={`hp${i}`} x={6 + i * 18} y={cwY - 11} w={1} h={11} c="#23272D" />
+      ))}
+      {Array.from({ length: Math.ceil((W - 24) / 60) }, (_, i) => (
+        <PixelRect key={`pp${i}`} x={24 + i * 60} y={cwY + 4} w={2} h={H - (cwY + 4)} c="#1A1E24" />
+      ))}
+
+      {/* Inspector silhouette + speech bubble — on top of catwalk */}
+      <Inspector cwY={cwY} t={t} />
+
+      {/* Front row of 3 continent-scale mainframes — closer to viewer, raised
+          12px above the viewport floor so the cabinet bases breathe and the
+          cyan-glow floor reflection is fully visible */}
+      <Mainframe x={26}  y={H - 104} w={52} h={96} t={t + 8} />
+      <Mainframe x={90}  y={H - 104} w={52} h={96} t={t + 28} />
+      <Mainframe x={154} y={H - 104} w={52} h={96} t={t + 48} />
+    </G>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// PLANETARY SCENE — port of pixel-art.jsx::composePlanetaryScene (v8).
+// Round 10 / Civilizational Round. Earth from low orbit, night side. The
+// scene is rendered UNSHIFTED — the moon body sits just below the HUD edge
+// and Earth's visible upper hemisphere fills the lower 2/3 of the viewport.
+//
+// Canvas-specific tricks (getImageData coastline sampling, multi-layer
+// ctx.arc strokes) are simplified for SVG: continents become Polygon nodes,
+// halos collapse to a few Circle strokes, the orbital ring becomes a Path
+// arc with rotated container groups laid along it.
+// ═══════════════════════════════════════════════════════════════════════
+
+// Polar-coordinate helper for placing pixels along an arc inside the globe.
+function pt(cx: number, cy: number, r: number, ang: number): [number, number] {
+  return [Math.round(cx + Math.cos(ang) * r), Math.round(cy + Math.sin(ang) * r)];
+}
+
+// Build an SVG arc path between two angles. CCW so the arc curves through
+// the TOP of the circle (sweep flag 0 in SVG with y-down coords).
+function arcPath(cx: number, cy: number, r: number, a0: number, a1: number): string {
+  const [x0, y0] = pt(cx, cy, r, a0);
+  const [x1, y1] = pt(cx, cy, r, a1);
+  const large = Math.abs(a1 - a0) > Math.PI ? 1 : 0;
+  return `M ${x0} ${y0} A ${r} ${r} 0 ${large} 0 ${x1} ${y1}`;
+}
+
+function PlanetaryScene({ t }: { t: number }) {
+  // ─── Earth + Moon geometry ────────────────────────────────────────────
+  const cx = W / 2, cy = H - 8, R = 150;
+  const mx = 200, my = 46, mR = 17;
+  const ringR = R + 30;
+  const earthClipId = "earth-clip-planetary";
+  const moonClipId = "moon-clip-planetary";
+
+  // Tilt-able star field (stable layout — same stars every render).
+  const stars = React.useMemo(() => {
+    const out: { x: number; y: number; tier: number }[] = [];
+    for (let i = 0; i < 110; i++) {
+      const sx = (i * 71 + (i * i) % 13) % W;
+      const sy = Math.floor((i * 37) % (H * 0.62));
+      out.push({ x: sx, y: sy, tier: i % 5 });
+    }
+    return out;
+  }, []);
+
+  // 6 datacenter regions (city-light megagrids) on the night side of Earth.
+  const nodes = [
+    { x: cx - 96, y: cy - 70, r: 20, big: true },   // NA  (engineer zone)
+    { x: cx - 2,  y: cy - 86, r: 14, big: false },  // EU
+    { x: cx + 64, y: cy - 78, r: 24, big: true },   // AS  (gpu zone)
+    { x: cx - 52, y: cy + 6,  r: 12, big: false },  // SA
+    { x: cx + 96, y: cy - 100,r: 12, big: false },  // JP
+    { x: cx + 30, y: cy - 30, r: 14, big: false },  // IN
+  ];
+
+  // Continent silhouette polygons — point lists relative to an origin (ox, oy)
+  const continents: Array<{ ox: number; oy: number; pts: [number, number][] }> = [
+    // North America
+    { ox: cx - 120, oy: cy - 96, pts: [[0,0],[28,-12],[52,-6],[60,12],[44,26],[54,44],[34,62],[14,50],[2,28],[-8,10]] },
+    // South America
+    { ox: cx - 70, oy: cy - 30, pts: [[0,0],[18,4],[24,26],[14,52],[2,70],[-8,44],[-4,18]] },
+    // Europe + Africa
+    { ox: cx - 6, oy: cy - 104, pts: [[0,0],[22,-6],[30,10],[24,30],[34,52],[24,82],[6,96],[-6,60],[-2,30],[-10,12]] },
+    // Asia
+    { ox: cx + 30, oy: cy - 110, pts: [[0,0],[44,-10],[78,2],[96,20],[80,40],[96,58],[64,66],[40,50],[18,56],[6,30],[-4,12]] },
+    // Australia
+    { ox: cx + 78, oy: cy - 14, pts: [[0,0],[28,-4],[36,14],[18,28],[-4,20],[-6,6]] },
+  ];
+
+  const els: React.ReactNode[] = [];
+  let k = 0;
+  const key = () => `pl${k++}`;
+  const PX = (x: number, y: number, c: string) =>
+    els.push(<Px key={key()} x={x} y={y} c={c} />);
+  const A = (x: number, y: number, w: number, h: number, c: string, op: number) =>
+    els.push(<Rect key={key()} x={x} y={y} width={w} height={h} fill={c} opacity={op} />);
+
+  // ─── Deep space backdrop (linear gradient via SVG) ─────────────────────
+  // Stars
+  for (const s of stars) {
+    const tw = (t + s.x * 5) % 50;
+    let col: string;
+    if (s.tier === 0) col = tw < 25 ? "#FFFFFF" : "#A4B4CC";
+    else if (s.tier === 1) col = "#C8D4E6";
+    else col = tw < 30 ? "#7C8AA0" : "#4C5A72";
+    PX(s.x, s.y, col);
+    if (s.tier === 0 && tw < 6) {
+      PX(s.x - 1, s.y, "#6C7A92");
+      PX(s.x + 1, s.y, "#6C7A92");
+      PX(s.x, s.y - 1, "#6C7A92");
+      PX(s.x, s.y + 1, "#6C7A92");
+    }
+  }
+  // Nebula clouds (3 soft alpha rect blobs)
+  const nebs: Array<[number, number, string]> = [[40, 40, "#2A1E44"], [200, 70, "#1A2E4A"], [120, 24, "#241838"]];
+  for (const nb of nebs) {
+    for (let g = 5; g > 0; g--) {
+      A(nb[0] - g * 5, nb[1] - g * 3, g * 12, g * 7, nb[2], 0.12);
+    }
+  }
+
+  // ─── Moon — strip-mined industrial energy refinery (upper-right) ──────
+  // Body (lit + shadowed hemispheres, clipped to moon disc for surface detail)
+  const moonHaloRings: React.ReactNode[] = [];
+  for (let g = 0; g < 6; g++) {
+    moonHaloRings.push(
+      <Circle key={`mh${g}`} cx={mx} cy={my} r={mR + 9 - g}
+        fill="none" stroke={g % 2 ? "#EBBE6E" : "#3FA8C4"}
+        strokeWidth={2} opacity={0.06 + g * 0.012} />
+    );
+  }
+
+  // Strip-mine terrace lines, magma pits, refinery domes — clipped to moon
+  const moonSurface: React.ReactNode[] = [];
+  let ms = 0;
+  for (let i = -mR; i < mR; i += 4) {
+    moonSurface.push(<Rect key={`tm${ms++}`} x={mx - mR} y={my + i} width={mR * 2} height={1} fill="#2A2E34" opacity={0.5} />);
+    moonSurface.push(<Rect key={`tm${ms++}`} x={mx - mR} y={my + i + 1} width={mR * 2} height={1} fill="#6C727E" opacity={0.5} />);
+  }
+  const pits: Array<[number, number, number]> = [[-6, 4, 3], [4, -2, 2], [8, 7, 2], [-9, -4, 2]];
+  for (const pit of pits) {
+    const glow = (t + pit[0] * 5) % 30 < 18;
+    moonSurface.push(<PixelRect key={`pt${ms++}`} x={mx + pit[0]} y={my + pit[1]} w={pit[2]} h={pit[2]} c={glow ? "#FF8A3C" : "#C9531E"} />);
+    moonSurface.push(<Px key={`pt${ms++}`} x={mx + pit[0]} y={my + pit[1]} c={glow ? "#FFE08A" : "#FF8A3C"} />);
+  }
+  for (const d of [[-3, -8], [6, -6], [-10, 2]]) {
+    moonSurface.push(<PixelRect key={`dm${ms++}`} x={mx + d[0] - 1} y={my + d[1]} w={3} h={2} c="#8C92A0" />);
+    moonSurface.push(<Px key={`dm${ms++}`} x={mx + d[0]} y={my + d[1] - 1} c="#B0B6C2" />);
+  }
+
+  // Solar collector masts off the lit limb (outside the clip)
+  const moonSolar: React.ReactNode[] = [];
+  for (let s = 0; s < 3; s++) {
+    const sxm = mx - mR - 2, sym = my - 8 + s * 8;
+    moonSolar.push(<PixelRect key={`sl${s}a`} x={sxm - 5} y={sym} w={5} h={5} c="#1E3A6A" />);
+    for (let gx = 0; gx < 5; gx += 2) {
+      moonSolar.push(<PixelRect key={`sl${s}b${gx}`} x={sxm - 5 + gx} y={sym} w={1} h={5} c="#3A5A9A" />);
+    }
+    moonSolar.push(<PixelRect key={`sl${s}m`} x={sxm} y={sym + 2} w={2} h={1} c="#6C727E" />);
+    moonSolar.push(<Px key={`sl${s}g`} x={sxm - 2} y={sym + 2} c={(t + s * 4) % 12 < 6 ? "#A4F0FF" : "#2A6E88"} />);
+  }
+  // Beacon atop the moon
+  const beaconCol = (t >> 1) % 6 < 3 ? "#FF5A4C" : "#5A1A14";
+
+  // ─── Atmosphere halo around Earth (3 layered Circle strokes) ──────────
+  const atmoRings: React.ReactNode[] = [];
+  for (let g = 0; g < 3; g++) {
+    atmoRings.push(
+      <Circle key={`atm${g}`} cx={cx} cy={cy} r={R + 12 - g * 4}
+        fill="none" stroke={g < 2 ? "#3FA8C4" : "#7EC8E0"} strokeWidth={4}
+        opacity={0.18 - g * 0.05} />
+    );
+  }
+
+  // ─── Cloud bands (drift sin waves), aurora curtains, fiber arcs ───────
+  const cloudPx: React.ReactNode[] = [];
+  let cc = 0;
+  for (let c = 0; c < 5; c++) {
+    const cyy = cy - 90 + c * 30;
+    const drift = ((t >> 2) + c * 40) % (R * 2);
+    for (let xx = -R; xx < R; xx += 3) {
+      const yy = Math.round(cyy + Math.sin((xx + drift) / 22) * 5);
+      cloudPx.push(<Px key={`cl${cc++}`} x={cx + xx} y={yy} c="#9CB4C8" />);
+      cloudPx.push(<Px key={`cl${cc++}`} x={cx + xx} y={yy + 1} c="#7C94A8" />);
+    }
+  }
+
+  const aurora: React.ReactNode[] = [];
+  let ar = 0;
+  for (let layer = 0; layer < 3; layer++) {
+    for (let i = 0; i < 50; i++) {
+      const axx = cx - 70 + i * 3;
+      const wave = Math.sin((i + (t >> 2) + layer * 8) / 5) * (5 + layer * 2);
+      const ayy = Math.round(cy - R + 8 + layer * 5 + wave);
+      const col = i % 3 === 0 ? "#7EE0B0" : (i % 3 === 1 ? "#3FA8C4" : "#A4F0D0");
+      aurora.push(
+        <Rect key={`au${ar++}`} x={axx} y={ayy} width={1} height={6 + layer * 2}
+          fill={col} opacity={0.16 - layer * 0.03} />
+      );
+    }
+  }
+
+  // Inter-region fiber arcs (quadratic curves with packets)
+  const fiberArcs: React.ReactNode[] = [];
+  let fa = 0;
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i], b = nodes[j];
+      if (Math.hypot(a.x - b.x, a.y - b.y) > 130) continue;
+      const mx2 = (a.x + b.x) / 2, my2 = (a.y + b.y) / 2 - 8;
+      fiberArcs.push(
+        <Path key={`fb${fa++}`} d={`M ${a.x} ${a.y} Q ${mx2} ${my2} ${b.x} ${b.y}`}
+          stroke="#D4A24C" strokeWidth={1} fill="none" opacity={0.14} />
+      );
+      // 2 packets per link
+      for (let kk = 0; kk < 2; kk++) {
+        const tp = (((t >> 1) + i * 13 + j * 7 + kk * 30) % 60) / 60;
+        const ix = a.x + (b.x - a.x) * tp;
+        const iy = a.y + (b.y - a.y) * tp - Math.sin(tp * Math.PI) * 8;
+        fiberArcs.push(<Px key={`fbp${fa++}`} x={ix | 0} y={iy | 0} c="#FBE6A8" />);
+      }
+    }
+  }
+
+  // ─── City-light megagrid clusters ─────────────────────────────────────
+  const cityLights: React.ReactNode[] = [];
+  let cl = 0;
+  for (const n of nodes) {
+    const count = n.r * (n.big ? 6 : 4);
+    for (let i = 0; i < count; i++) {
+      const ang = i * 2.39996;
+      const rad = Math.pow(i / count, 0.7) * n.r;
+      const lx = Math.round(n.x + Math.cos(ang) * rad);
+      const ly = Math.round(n.y + Math.sin(ang) * rad * 0.85);
+      const flick = (t + i * 7) % 34 < 28;
+      const inner = rad < n.r * 0.45;
+      let col: string;
+      if (!flick) col = "#6B481E";
+      else if (inner) col = i % 3 === 0 ? "#FFF2C8" : "#FBE6A8";
+      else col = i % 4 === 0 ? "#FBE6A8" : "#D4A24C";
+      cityLights.push(<Px key={`cl${cl++}`} x={lx} y={ly} c={col} />);
+    }
+    // Grid filaments radiating out
+    for (let f = 0; f < 5; f++) {
+      const fang = f * 1.3 + 0.4;
+      const ex = Math.round(n.x + Math.cos(fang) * n.r * 1.7);
+      const ey = Math.round(n.y + Math.sin(fang) * n.r * 1.3);
+      cityLights.push(
+        <Path key={`fil${cl++}`} d={`M ${n.x} ${n.y} L ${ex} ${ey}`}
+          stroke="#8B5E2C" strokeWidth={1} opacity={0.3} />
+      );
+    }
+    // Pulsing demand ring
+    const pulse = (t + n.x) % 48;
+    if (pulse < 24) {
+      cityLights.push(
+        <Circle key={`pls${cl++}`} cx={n.x} cy={n.y} r={3 + pulse}
+          fill="none" stroke="#EBBE6E" strokeWidth={1}
+          opacity={0.3 * (1 - pulse / 24)} />
+      );
+    }
+    // Bright core
+    cityLights.push(<PixelRect key={`co${cl++}`} x={n.x - 1} y={n.y - 1} w={3} h={3} c="#FFF8E0" />);
+    cityLights.push(<Px key={`co${cl++}`} x={n.x} y={n.y} c="#FFFFFF" />);
+  }
+
+  // ─── Orbital data ring ────────────────────────────────────────────────
+  const ringA0 = Math.PI * 1.06, ringA1 = Math.PI * 1.94;
+  const ringContainers: React.ReactNode[] = [];
+  const segs = 30;
+  for (let a = 0; a <= segs; a++) {
+    const ang = ringA0 + (ringA1 - ringA0) * (a / segs);
+    const [rx, ry] = pt(cx, cy, ringR, ang);
+    const hue = a % 3 === 0 ? "#1E5A6A" : (a % 3 === 1 ? "#2A3E52" : "#244A40");
+    const lit = (t + a * 7) % 24;
+    const rotDeg = ((ang + Math.PI / 2) * 180) / Math.PI;
+    ringContainers.push(
+      <G key={`rc${a}`} transform={`translate(${rx} ${ry}) rotate(${rotDeg})`}>
+        <PixelRect x={-3} y={-3} w={6} h={6} c={hue} />
+        <PixelRect x={-3} y={-3} w={6} h={1} c="#4C6E7E" />
+        <PixelRect x={-3} y={2} w={6} h={1} c="#10202A" />
+        <Px x={-2} y={-1} c={lit < 8 ? "#5AE0B0" : "#1A4A3A"} />
+        <Px x={0} y={-1} c={lit > 8 && lit < 16 ? "#7EE0FF" : "#1A3A4A"} />
+        <Px x={2} y={-1} c={lit > 16 ? "#EBBE6E" : "#5A4A1E"} />
+        <Px x={-1} y={1} c="#10202A" />
+        <Px x={1} y={1} c="#10202A" />
+      </G>
+    );
+  }
+  // Data packets streaming UP from Earth surface to ring
+  const packets: React.ReactNode[] = [];
+  for (let p = 0; p < 5; p++) {
+    const tp = (((t >> 1) + p * 24) % 60) / 60;
+    const baseAng = Math.PI * 1.2 + p * 0.28;
+    const [ex, ey] = pt(cx, cy, R - 6, baseAng);
+    const [rxp, ryp] = pt(cx, cy, ringR, baseAng);
+    const ix = Math.round(ex + (rxp - ex) * tp);
+    const iy = Math.round(ey + (ryp - ey) * tp);
+    packets.push(<Px key={`pk${p}a`} x={ix} y={iy} c="#7EE0FF" />);
+    packets.push(<Px key={`pk${p}b`} x={ix} y={iy + 2} c="#3FA8C4" />);
+  }
+  // Larger relay hub at apex
+  const [apexX, apexY] = pt(cx, cy, ringR, Math.PI * 1.5);
+
+  // Bioluminescent rim (cyan arc just inside the globe limb)
+  const limbPath = arcPath(cx, cy, R - 6, Math.PI * 1.05, Math.PI * 1.45);
+  // Terminator (warm dawn sliver on the right)
+  const termPath = arcPath(cx, cy, R - 3, Math.PI * 1.7, Math.PI * 1.95);
+
+  return (
+    <G>
+      <Defs>
+        <SvgLinearGradient id="planetary-space" x1="0" y1="0" x2="0" y2={H}>
+          <Stop offset="0" stopColor="#08081E" />
+          <Stop offset="0.5" stopColor="#101830" />
+          <Stop offset="1" stopColor="#181F46" />
+        </SvgLinearGradient>
+        <ClipPath id={earthClipId}>
+          <Circle cx={cx} cy={cy} r={R} />
+        </ClipPath>
+        <ClipPath id={moonClipId}>
+          <Circle cx={mx} cy={my} r={mR} />
+        </ClipPath>
+      </Defs>
+
+      {/* Backdrop */}
+      <Rect x={0} y={0} width={W} height={H} fill="url(#planetary-space)" />
+      {els /* stars + nebula */}
+
+      {/* Moon halo (outside clip) */}
+      {moonHaloRings}
+      {/* Moon body (3 overlapping circles for lit/shadow) */}
+      <Circle cx={mx} cy={my} r={mR} fill="#3A3E46" />
+      <Circle cx={mx - 2} cy={my - 1} r={mR} fill="#5C626E" />
+      <Circle cx={mx + 5} cy={my + 3} r={mR} fill="#3A3E46" />
+      {/* Moon surface detail, clipped to disc */}
+      <G clipPath={`url(#${moonClipId})`}>{moonSurface}</G>
+      {/* Solar masts + beacon (outside clip) */}
+      {moonSolar}
+      <Px x={mx - 3} y={my - 9} c={beaconCol} />
+
+      {/* Earth atmosphere halo (outside clip) */}
+      {atmoRings}
+
+      {/* Everything bound to the globe goes inside the clip */}
+      <G clipPath={`url(#${earthClipId})`}>
+        {/* Night ocean */}
+        <Rect x={cx - R} y={cy - R} width={R * 2} height={R * 2} fill="#081826" />
+        {/* Bioluminescent moonlit limb */}
+        <Path d={limbPath} stroke="#2A6E88" strokeWidth={8} fill="none" opacity={0.10} />
+        {/* Continents */}
+        {continents.map((c, ci) => (
+          <Polygon
+            key={`co${ci}`}
+            points={c.pts.map((p) => `${c.ox + p[0]},${c.oy + p[1]}`).join(" ")}
+            fill="#0E2018"
+          />
+        ))}
+        {/* City light megagrids */}
+        {cityLights}
+        {/* Cloud bands */}
+        {cloudPx}
+        {/* Polar aurora */}
+        {aurora}
+      </G>
+
+      {/* Terminator dawn sliver (outside clip, sits ON the globe edge) */}
+      <Path d={termPath} stroke="#C97B5B" strokeWidth={6} fill="none" opacity={0.12} />
+
+      {/* Inter-region fiber arcs (above globe, faint) */}
+      {fiberArcs}
+
+      {/* Orbital data ring — twin structural rails */}
+      <Path d={arcPath(cx, cy, ringR - 4, ringA0, ringA1)} stroke="#5A6678" strokeWidth={1} fill="none" opacity={0.9} />
+      <Path d={arcPath(cx, cy, ringR + 5, ringA0, ringA1)} stroke="#5A6678" strokeWidth={1} fill="none" opacity={0.9} />
+      {ringContainers}
+      {packets}
+
+      {/* Relay hub at apex of the ring */}
+      <PixelRect x={apexX - 5} y={apexY - 4} w={10} h={7} c="#2A3E52" />
+      <PixelRect x={apexX - 5} y={apexY - 4} w={10} h={1} c="#5A7E8E" />
+      <Px x={apexX - 3} y={apexY - 1} c={(t) % 18 < 9 ? "#5AE0B0" : "#1A4A3A"} />
+      <Px x={apexX} y={apexY - 1} c={(t + 5) % 18 < 9 ? "#5AE0B0" : "#1A4A3A"} />
+      <Px x={apexX + 3} y={apexY - 1} c={(t + 10) % 18 < 9 ? "#5AE0B0" : "#1A4A3A"} />
+      <PixelRect x={apexX - 1} y={apexY - 7} w={2} h={3} c="#6C7A8E" />
+      <Path d={`M ${apexX - 3} ${apexY - 8} A 3 3 0 0 1 ${apexX + 3} ${apexY - 8}`}
+        stroke="#8C9AAE" strokeWidth={1} fill="none" />
+      <Px x={apexX + 4} y={apexY - 5} c={(t >> 2) % 4 < 2 ? "#FF5A4C" : "#3A1A1E"} />
     </G>
   );
 }
@@ -2018,6 +3651,39 @@ function FloatingTokens({ spawnX, spawnY, t }: { spawnX: number; spawnY: number;
 }
 
 function HitOutline({ zone }: { zone: HitZone }) {
+  // Arc-shaped zones (e.g. planetary orbital ring) outline the visible band
+  // with TWO independent polylines — outer + inner — so both edges of the
+  // ring are clearly framed. Polylines avoid renderer quirks around SVG arc
+  // commands with off-viewport endpoints (which react-native-svg-web sometimes
+  // declines to render).
+  if (zone.arc) {
+    const { cx, cy, r, band, a0, a1 } = zone.arc;
+    const ro = r + band / 2;
+    const ri = r - band / 2;
+    const STEPS = 48;
+    const arcPoints = (radius: number) => {
+      const out: string[] = [];
+      for (let i = 0; i <= STEPS; i++) {
+        const ang = a0 + (a1 - a0) * (i / STEPS);
+        const x = cx + Math.cos(ang) * radius;
+        const y = cy + Math.sin(ang) * radius;
+        out.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+      }
+      return out.join(" ");
+    };
+    const outerPts = arcPoints(ro);
+    const innerPts = arcPoints(ri);
+    return (
+      <G>
+        {/* Ink halo (slightly thicker, drawn first) */}
+        <Polyline points={outerPts} stroke={colors.ink} strokeWidth={2} fill="none" />
+        <Polyline points={innerPts} stroke={colors.ink} strokeWidth={2} fill="none" />
+        {/* Gold rim on both edges of the band */}
+        <Polyline points={outerPts} stroke={colors.gold_hi} strokeWidth={1} fill="none" />
+        <Polyline points={innerPts} stroke={colors.gold_hi} strokeWidth={1} fill="none" />
+      </G>
+    );
+  }
   return (
     <G>
       <Rect
