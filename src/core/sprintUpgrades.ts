@@ -64,6 +64,23 @@ export const SPRINT_UPGRADE_BY_ID: Record<string, SprintUpgradeDef> =
   Object.fromEntries(SPRINT_UPGRADES.map((u) => [u.id, u]));
 
 /**
+ * Effective RP cost for a sprint upgrade at the player's current funding
+ * round. The base cost (5/10/15/30/60) is tuned for round 0; by round 3 RP
+ * production scales 4-5 orders of magnitude higher, so flat costs are
+ * meaningless mid-game. We scale ×8^roundIdx — slightly under the typical
+ * round-to-round tokens/sec growth so RP stays a real sink without becoming
+ * unreachable.
+ *
+ *   round 0 → base (5/10/15/30/60)
+ *   round 3 → ×512  (≈ 2.5K / 5K / 7.7K / 15K / 30K RP)
+ *   round 6 → ×260K
+ *   round 11 → ×8.6e9
+ */
+export function sprintUpgradeCost(def: SprintUpgradeDef, roundIdx: number): number {
+  return def.costRP * Math.pow(8, Math.max(0, roundIdx));
+}
+
+/**
  * Effect bundle from this run's owned sprint upgrades, shaped the same as
  * ResearchEffects so it composes 1:1 with the research aggregator.
  *

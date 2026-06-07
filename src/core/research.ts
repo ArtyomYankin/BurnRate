@@ -26,38 +26,40 @@ export interface ResearchNode {
   effects: ResearchEffect[];
 }
 
-// GDD §8: node_cost(tier) = 5 × 3^tier.
-//   tier 1 = 15, tier 2 = 45, tier 3 = 135, tier 4 = 405, tier 5 = 1215.
+// Steeper than GDD §8's 5×3^tier — that curve trivialized the whole tree by
+// round 3 (player closed everything in 2-3 prestiges). Bumped to 8×5^tier so
+// tier 4-5 nodes (≈5K and ≈25K equity) are actual long-term goals.
+//   tier 1 = 40, tier 2 = 200, tier 3 = 1000, tier 4 = 5000, tier 5 = 25000.
 export function nodeCost(tier: ResearchNode["tier"]): number {
-  return 5 * Math.pow(3, tier);
+  return 8 * Math.pow(5, tier);
 }
 
 export const RESEARCH_NODES: ResearchNode[] = [
-  // ─── R&D — global token multipliers (the "bar visibly fills" stack) ───
-  { id: "rd_kernel",      branch: "rd",      name: "Better LLM kernel",      tier: 1, description: "Tokens ×2",     effects: [{ type: "tokens_mult", value: 2 }] },
-  { id: "rd_specdecode",  branch: "rd",      name: "Speculative decoding",   tier: 1, description: "Tokens ×2",     effects: [{ type: "tokens_mult", value: 2 }] },
-  { id: "rd_moe",         branch: "rd",      name: "Mixture-of-experts",     tier: 2, description: "Tokens ×4",     effects: [{ type: "tokens_mult", value: 4 }] },
-  { id: "rd_distill",     branch: "rd",      name: "Model distillation",     tier: 3, description: "Tokens ×8",     effects: [{ type: "tokens_mult", value: 8 }] },
-  { id: "rd_scaling",     branch: "rd",      name: "Scaling-law mastery",    tier: 4, description: "Tokens ×25",    effects: [{ type: "tokens_mult", value: 25 }] },
-  { id: "rd_emergent",    branch: "rd",      name: "Emergent capabilities",  tier: 5, description: "Tokens ×100",   effects: [{ type: "tokens_mult", value: 100 }] },
+  // ─── R&D — global token multipliers (geometric ~×1.5 per node) ───
+  { id: "rd_kernel",      branch: "rd",      name: "Better LLM kernel",      tier: 1, description: "Tokens ×1.5",   effects: [{ type: "tokens_mult", value: 1.5 }] },
+  { id: "rd_specdecode",  branch: "rd",      name: "Speculative decoding",   tier: 1, description: "Tokens ×1.5",   effects: [{ type: "tokens_mult", value: 1.5 }] },
+  { id: "rd_moe",         branch: "rd",      name: "Mixture-of-experts",     tier: 2, description: "Tokens ×2",     effects: [{ type: "tokens_mult", value: 2 }] },
+  { id: "rd_distill",     branch: "rd",      name: "Model distillation",     tier: 3, description: "Tokens ×3",     effects: [{ type: "tokens_mult", value: 3 }] },
+  { id: "rd_scaling",     branch: "rd",      name: "Scaling-law mastery",    tier: 4, description: "Tokens ×5",     effects: [{ type: "tokens_mult", value: 5 }] },
+  { id: "rd_emergent",    branch: "rd",      name: "Emergent capabilities",  tier: 5, description: "Tokens ×10",    effects: [{ type: "tokens_mult", value: 10 }] },
 
   // ─── Compute — GPU supply boost ───
-  { id: "compute_fp8",    branch: "compute", name: "FP8 training",           tier: 1, description: "GPU ×2",        effects: [{ type: "chain_supply_mult", chain: "gpu", value: 2 }] },
-  { id: "compute_nvlink", branch: "compute", name: "NVLink mesh",            tier: 2, description: "GPU ×4",        effects: [{ type: "chain_supply_mult", chain: "gpu", value: 4 }] },
-  { id: "compute_optical",branch: "compute", name: "Optical interconnect",   tier: 3, description: "GPU ×10",       effects: [{ type: "chain_supply_mult", chain: "gpu", value: 10 }] },
-  { id: "compute_quantum",branch: "compute", name: "Quantum co-processor",   tier: 4, description: "GPU ×40",       effects: [{ type: "chain_supply_mult", chain: "gpu", value: 40 }] },
+  { id: "compute_fp8",    branch: "compute", name: "FP8 training",           tier: 1, description: "GPU ×1.5",      effects: [{ type: "chain_supply_mult", chain: "gpu", value: 1.5 }] },
+  { id: "compute_nvlink", branch: "compute", name: "NVLink mesh",            tier: 2, description: "GPU ×2",        effects: [{ type: "chain_supply_mult", chain: "gpu", value: 2 }] },
+  { id: "compute_optical",branch: "compute", name: "Optical interconnect",   tier: 3, description: "GPU ×3",        effects: [{ type: "chain_supply_mult", chain: "gpu", value: 3 }] },
+  { id: "compute_quantum",branch: "compute", name: "Quantum co-processor",   tier: 4, description: "GPU ×5",        effects: [{ type: "chain_supply_mult", chain: "gpu", value: 5 }] },
 
   // ─── Data — Data supply boost ───
-  { id: "data_synth",     branch: "data",    name: "Synthetic pipeline",     tier: 1, description: "Data ×2",       effects: [{ type: "chain_supply_mult", chain: "data", value: 2 }] },
-  { id: "data_curate",    branch: "data",    name: "Curated corpora",        tier: 2, description: "Data ×4",       effects: [{ type: "chain_supply_mult", chain: "data", value: 4 }] },
-  { id: "data_self",      branch: "data",    name: "Self-generated data",    tier: 3, description: "Data ×10",      effects: [{ type: "chain_supply_mult", chain: "data", value: 10 }] },
-  { id: "data_ambient",   branch: "data",    name: "Ambient telemetry",      tier: 4, description: "Data ×40",      effects: [{ type: "chain_supply_mult", chain: "data", value: 40 }] },
+  { id: "data_synth",     branch: "data",    name: "Synthetic pipeline",     tier: 1, description: "Data ×1.5",     effects: [{ type: "chain_supply_mult", chain: "data", value: 1.5 }] },
+  { id: "data_curate",    branch: "data",    name: "Curated corpora",        tier: 2, description: "Data ×2",       effects: [{ type: "chain_supply_mult", chain: "data", value: 2 }] },
+  { id: "data_self",      branch: "data",    name: "Self-generated data",    tier: 3, description: "Data ×3",       effects: [{ type: "chain_supply_mult", chain: "data", value: 3 }] },
+  { id: "data_ambient",   branch: "data",    name: "Ambient telemetry",      tier: 4, description: "Data ×5",       effects: [{ type: "chain_supply_mult", chain: "data", value: 5 }] },
 
   // ─── Energy — Energy supply boost ───
-  { id: "energy_heat",    branch: "energy",  name: "Heat recovery",          tier: 1, description: "Energy ×2",     effects: [{ type: "chain_supply_mult", chain: "energy", value: 2 }] },
-  { id: "energy_grid",    branch: "energy",  name: "Grid-scale storage",     tier: 2, description: "Energy ×4",     effects: [{ type: "chain_supply_mult", chain: "energy", value: 4 }] },
-  { id: "energy_orbital", branch: "energy",  name: "Orbital solar arrays",   tier: 3, description: "Energy ×10",    effects: [{ type: "chain_supply_mult", chain: "energy", value: 10 }] },
-  { id: "energy_fusion",  branch: "energy",  name: "Net-positive fusion",    tier: 4, description: "Energy ×40",    effects: [{ type: "chain_supply_mult", chain: "energy", value: 40 }] },
+  { id: "energy_heat",    branch: "energy",  name: "Heat recovery",          tier: 1, description: "Energy ×1.5",   effects: [{ type: "chain_supply_mult", chain: "energy", value: 1.5 }] },
+  { id: "energy_grid",    branch: "energy",  name: "Grid-scale storage",     tier: 2, description: "Energy ×2",     effects: [{ type: "chain_supply_mult", chain: "energy", value: 2 }] },
+  { id: "energy_orbital", branch: "energy",  name: "Orbital solar arrays",   tier: 3, description: "Energy ×3",     effects: [{ type: "chain_supply_mult", chain: "energy", value: 3 }] },
+  { id: "energy_fusion",  branch: "energy",  name: "Net-positive fusion",    tier: 4, description: "Energy ×5",     effects: [{ type: "chain_supply_mult", chain: "energy", value: 5 }] },
 
   // ─── Safety — debt accrual reduction (debt economy from GDD §9) ───
   { id: "safety_const",   branch: "safety",  name: "Constitutional methods", tier: 1, description: "Debt accrual ×0.75",  effects: [{ type: "debt_accrual_mult", value: 0.75 }] },

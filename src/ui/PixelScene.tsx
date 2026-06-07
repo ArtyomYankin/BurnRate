@@ -261,7 +261,11 @@ const DATACENTER_ZONES: HitZone[] = [
   // Catwalk band first so back-row mainframes (later in the array) win on overlap
   { id: "catwalk",   x:   0, y: 168, w: 240, h:  24, label: "The Inspector" },
   // ─── Upper walls (shifted +25 to match scene's top-wall translate) ───
-  { id: "energy",    x:   4, y:  33, w:  68, h:  66, label: "Buy Energy (Substation)" },
+  // Energy tightened in design v9 from the full switchgear (y=8 h=66) to the
+  // LOWER cabinet panel (y=46 h=30 raw → +25 = y=71 h=30 here) so the
+  // floating Slack button on the left doesn't share airspace with the click
+  // target — "lower cabinets — clear of the Slack button" per v9 comment.
+  { id: "energy",    x:   4, y:  71, w:  68, h:  30, label: "Buy Energy (Substation)" },
   { id: "research",  x:  72, y:  79, w:  52, h:  92, label: "Research (Autonomous R&D)" },
   { id: "books",     x: 120, y:  33, w: 114, h:  66, label: "Buy Data (Surveillance Tap)" },
   // ─── Back row of floor mainframes (raw v8 y) ───
@@ -1985,7 +1989,14 @@ const INSPECTOR_QUIPS = [
 // silent (useTick is 200ms/tick → 5 t/s → cycle = 60 t, visible while
 // (t % 60) < 20).
 function Inspector({ cwY, t }: { cwY: number; t: number }) {
-  const figX = 16 + ((t >> 3) % (W - 32));
+  // Design v9 redrew the inspector as a full human silhouette (hard hat +
+  // hi-vis vest + clipboard + visible legs with a 2-frame walk cycle),
+  // up from the earlier 7×18 dark silhouette. Anchor point: feet land at
+  // cwY (deck top); top of helmet at iy + 5 (≈ 35 px tall figure).
+  const figX = 16 + ((t >> 3) % (W - 40));
+  const stride = (t >> 2) % 2;
+  const ix = figX, iy = cwY - 30;
+
   const cyclePhase = t % 60;
   const showQuip = cyclePhase < 20;
   const quipIdx = Math.floor(t / 60) % INSPECTOR_QUIPS.length;
@@ -1994,42 +2005,70 @@ function Inspector({ cwY, t }: { cwY: number; t: number }) {
   // Bubble geometry — Silkscreen 6px renders ~4px wide per char; pad +10.
   const bubbleW = Math.min(W - 8, quip.length * 4 + 10);
   const bubbleH = 14;
-  const headTopY = cwY - 18;
-  const tailY = headTopY - 4;     // bubble tail tip sits 4px above the head
-  const bubbleY = tailY - bubbleH; // bubble body above the tail
-  // Center the bubble on the inspector's head, clamped to the scene.
-  const bubbleX = Math.max(2, Math.min(figX - Math.floor(bubbleW / 2), W - bubbleW - 2));
+  // Top of helmet for tail anchor — bubble sits ABOVE the head.
+  const headTopY = iy + 5;
+  const tailY = headTopY - 4;
+  const bubbleY = tailY - bubbleH;
+  const bubbleAnchorX = ix + 4; // tail points at helmet crest
+  const bubbleX = Math.max(2, Math.min(bubbleAnchorX - Math.floor(bubbleW / 2), W - bubbleW - 2));
 
   return (
     <G>
-      {/* Light cone (drawn first so figure sits on top) */}
-      <Rect x={figX - 3} y={cwY - 4} width={12} height={34} fill="#EBBE6E" opacity={0.07} />
-      {/* Head */}
-      <PixelRect x={figX} y={headTopY} w={5} h={5} c="#0A0C0E" />
-      {/* Body */}
-      <PixelRect x={figX - 1} y={cwY - 13} w={7} h={9} c="#0A0C0E" />
-      {/* Hi-vis vest (upper stripe) */}
-      <PixelRect x={figX - 1} y={cwY - 11} w={7} h={2} c="#D4A24C" />
-      {/* Hi-vis vest (lower band) */}
-      <PixelRect x={figX - 1} y={cwY - 7} w={7} h={1} c="#D4A24C" />
-      {/* Scanner beam pixel */}
-      <Px x={figX + 6} y={cwY - 14} c={(t >> 2) % 4 < 2 ? "#D45A68" : "#3A1A1E"} />
+      {/* Soft amber light cone — cast down from the inspector onto the
+          mainframes. Drawn first so the figure sits on top. */}
+      <Rect x={ix + 2} y={iy + 30} width={16} height={H - (iy + 30)} fill="#EBBE6E" opacity={0.07} />
+
+      {/* Legs — dark trousers, alternating stride */}
+      <PixelRect x={ix + 2} y={iy + 22} w={3} h={8} c="#1A1F26" />
+      <PixelRect x={ix + 6} y={iy + 22} w={3} h={8} c="#1A1F26" />
+      <PixelRect x={ix + (stride ? 1 : 2)} y={iy + 29} w={4} h={1} c="#0A0C0E" />
+      <PixelRect x={ix + (stride ? 7 : 6)} y={iy + 29} w={4} h={1} c="#0A0C0E" />
+
+      {/* Hi-vis vest torso */}
+      <PixelRect x={ix + 1} y={iy + 12} w={9} h={11} c="#E8A024" />
+      <PixelRect x={ix + 1} y={iy + 12} w={9} h={1}  c="#F4C24C" />
+      <PixelRect x={ix + 2} y={iy + 13} w={2} h={9}  c="#3A4048" />
+      <PixelRect x={ix + 7} y={iy + 13} w={2} h={9}  c="#3A4048" />
+      <PixelRect x={ix + 1} y={iy + 16} w={9} h={1}  c="#F4F4F4" />
+      <PixelRect x={ix + 1} y={iy + 19} w={9} h={1}  c="#F4F4F4" />
+
+      {/* Arms — back arm + front upper arm + skin forearm */}
+      <PixelRect x={ix - 1}  y={iy + 13} w={2} h={7} c="#E8A024" />
+      <PixelRect x={ix + 10} y={iy + 13} w={2} h={5} c="#E8A024" />
+      <PixelRect x={ix + 11} y={iy + 17} w={3} h={2} c="#D8A878" />
+
+      {/* Clipboard the inspector studies */}
+      <PixelRect x={ix + 13} y={iy + 15} w={5} h={6} c="#C9B68A" />
+      <PixelRect x={ix + 13} y={iy + 15} w={5} h={1} c="#7C6A44" />
+      <Px x={ix + 14} y={iy + 17} c="#3A4048" />
+      <Px x={ix + 16} y={iy + 17} c="#3A4048" />
+      <Px x={ix + 14} y={iy + 19} c="#3A4048" />
+
+      {/* Neck + head (skin) */}
+      <PixelRect x={ix + 3} y={iy + 9}  w={5} h={4} c="#D8A878" />
+      <PixelRect x={ix + 4} y={iy + 11} w={3} h={1} c="#B98A5E" />
+      <PixelRect x={ix + 4} y={iy + 12} w={3} h={1} c="#C8986A" />
+
+      {/* Hardhat — dome + highlight + brim + crest */}
+      <PixelRect x={ix + 2} y={iy + 6} w={7} h={3} c="#F0C030" />
+      <PixelRect x={ix + 2} y={iy + 6} w={7} h={1} c="#FCE070" />
+      <PixelRect x={ix + 1} y={iy + 9} w={9} h={1} c="#D8A820" />
+      <Px x={ix + 5} y={iy + 5} c="#FCE070" />
+
+      {/* Scanner/flashlight pixel from the clipboard hand */}
+      <Px x={ix + 18} y={iy + 17} c={(t >> 2) % 4 < 2 ? "#D45A68" : "#3A1A1E"} />
 
       {/* Speech bubble — terminal-style cyan border, tail pointing at the head */}
       {showQuip && (
         <G>
-          {/* Bubble body */}
           <PixelRect x={bubbleX} y={bubbleY} w={bubbleW} h={bubbleH} c="#0E1216" />
-          {/* Cyan top edge + dark bottom edge */}
           <PixelRect x={bubbleX} y={bubbleY} w={bubbleW} h={1} c="#16A6C4" />
           <PixelRect x={bubbleX} y={bubbleY + bubbleH - 1} w={bubbleW} h={1} c="#0A0C0E" />
-          {/* Cyan left edge + dark right edge */}
           <PixelRect x={bubbleX} y={bubbleY} w={1} h={bubbleH} c="#16A6C4" />
           <PixelRect x={bubbleX + bubbleW - 1} y={bubbleY} w={1} h={bubbleH} c="#0A0C0E" />
-          {/* Tail pointing down to the inspector's head */}
-          <PixelRect x={figX - 1} y={bubbleY + bubbleH} w={3} h={2} c="#0E1216" />
-          <Px x={figX} y={bubbleY + bubbleH + 2} c="#0E1216" />
-          {/* Quip text — cyan, Silkscreen 6px, baseline ≈ middle of bubble */}
+          {/* Tail pointing down to the inspector's helmet */}
+          <PixelRect x={bubbleAnchorX - 1} y={bubbleY + bubbleH} w={3} h={2} c="#0E1216" />
+          <Px x={bubbleAnchorX} y={bubbleY + bubbleH + 2} c="#0E1216" />
           <SvgText
             x={bubbleX + 4}
             y={bubbleY + 10}

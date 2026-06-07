@@ -18,8 +18,10 @@ import { AchievementsScreen } from "./src/ui/AchievementsScreen";
 import { ResearchScreen } from "./src/ui/ResearchScreen";
 import { TrainingRunModal } from "./src/ui/TrainingRunModal";
 import { VignettesInbox } from "./src/ui/VignettesInbox";
+import { PushOptInModal } from "./src/ui/PushOptInModal";
 import { colors } from "./src/ui/theme";
 import { ChainId } from "./src/core/types";
+import { cancelScheduledReturn, scheduleReengagement } from "./src/game/notifications";
 
 type Screen = "home" | "producers" | "allocate" | "research" | "vignettes" | "achievements";
 
@@ -41,6 +43,7 @@ export default function App() {
   const hydrate = useGame((s) => s.hydrate);
   const applyOffline = useGame((s) => s.applyOfflineCatchup);
   const toSaveBlob = useGame((s) => s.toSaveBlob);
+  const incrementSessionsStarted = useGame((s) => s.incrementSessionsStarted);
   const appState = useRef<AppStateStatus>(AppState.currentState);
 
   // Boot: init storage, hydrate state, apply offline catchup, start ticker.
@@ -58,24 +61,31 @@ export default function App() {
         // Refused-load (e.g. newer schema) — start fresh rather than crash for M0.
         hydrate(freshSave());
       }
+      // GDD §12 — count this launch toward the session threshold and cancel
+      // any scheduled re-engagement ping (we're here, no need to nag).
+      incrementSessionsStarted();
+      cancelScheduledReturn().catch(() => {});
       stopTick = startTickEngine();
     })();
     return () => {
       cancelled = true;
       stopTick?.();
     };
-  }, [hydrate, applyOffline]);
+  }, [hydrate, applyOffline, incrementSessionsStarted]);
 
-  // Persist on backgrounding, refresh offline catchup on foregrounding.
+  // Persist on backgrounding, refresh offline catchup on foregrounding,
+  // and (re)schedule the personalized re-engagement notification.
   useEffect(() => {
     const sub = AppState.addEventListener("change", (next) => {
       const prev = appState.current;
       appState.current = next;
       if (next === "active" && prev !== "active") {
         applyOffline();
+        cancelScheduledReturn().catch(() => {});
       }
       if (next.match(/inactive|background/) && prev === "active") {
         saveSave(toSaveBlob()).catch(() => {});
+        scheduleReengagement(useGame.getState()).catch(() => {});
       }
     });
     return () => sub.remove();
@@ -142,6 +152,7 @@ export default function App() {
       />
       <DebtEventModal />
       <IntroModal />
+      <PushOptInModal />
     </SafeAreaView>
   );
 }

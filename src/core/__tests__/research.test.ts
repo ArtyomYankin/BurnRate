@@ -34,11 +34,13 @@ const freshPersistent = (overrides: Partial<PersistentState> = {}): PersistentSt
 
 describe("node cost formula (GDD §8)", () => {
   it("5 × 3^tier", () => {
-    expect(nodeCost(1)).toBe(15);
-    expect(nodeCost(2)).toBe(45);
-    expect(nodeCost(3)).toBe(135);
-    expect(nodeCost(4)).toBe(405);
-    expect(nodeCost(5)).toBe(1215);
+    // Steepened from 5×3^tier to 8×5^tier — tier 5 now ≈ 25K equity (was 1215),
+    // so the late tree stays a real long-term goal instead of "all bought by R3".
+    expect(nodeCost(1)).toBe(40);
+    expect(nodeCost(2)).toBe(200);
+    expect(nodeCost(3)).toBe(1000);
+    expect(nodeCost(4)).toBe(5000);
+    expect(nodeCost(5)).toBe(25000);
   });
 });
 
@@ -54,19 +56,19 @@ describe("aggregateResearchEffects", () => {
     expect(e.capitalMult).toBe(1);
   });
 
-  it("Better LLM kernel applies ×2 tokens (rebalanced)", () => {
+  it("Better LLM kernel applies ×1.5 tokens (toned-down rebalance)", () => {
     const e = aggregateResearchEffects(["rd_kernel"]);
-    expect(e.tokensMult).toBeCloseTo(2, 9);
+    expect(e.tokensMult).toBeCloseTo(1.5, 9);
   });
 
-  it("two R&D nodes stack multiplicatively (2 × 2 = 4)", () => {
+  it("two R&D nodes stack multiplicatively (1.5 × 1.5 = 2.25)", () => {
     const e = aggregateResearchEffects(["rd_kernel", "rd_specdecode"]);
-    expect(e.tokensMult).toBeCloseTo(4, 9);
+    expect(e.tokensMult).toBeCloseTo(2.25, 9);
   });
 
-  it("FP8 + NVLink stack on GPU chain (2 × 4 = 8)", () => {
+  it("FP8 + NVLink stack on GPU chain (1.5 × 2 = 3)", () => {
     const e = aggregateResearchEffects(["compute_fp8", "compute_nvlink"]);
-    expect(e.chainSupplyMult.gpu).toBeCloseTo(8, 9);
+    expect(e.chainSupplyMult.gpu).toBeCloseTo(3, 9);
     expect(e.chainSupplyMult.data).toBe(1);
   });
 
@@ -77,7 +79,7 @@ describe("aggregateResearchEffects", () => {
 
   it("unknown node IDs are ignored", () => {
     const e = aggregateResearchEffects(["bogus_id", "rd_kernel"]);
-    expect(e.tokensMult).toBeCloseTo(2, 9);
+    expect(e.tokensMult).toBeCloseTo(1.5, 9);
   });
 });
 
@@ -86,15 +88,15 @@ describe("research effects applied at the math layer", () => {
     const s = balanced1();
     const base = tokensPerSec(s).toNumber();
     const boosted = tokensPerSec(s, aggregateResearchEffects(["rd_kernel"])).toNumber();
-    expect(boosted).toBeCloseTo(base * 2, 9);
+    expect(boosted).toBeCloseTo(base * 1.5, 9);
   });
 
   it("chainSupply for GPU includes the chain_supply_mult", () => {
     const s = { ...balanced1(), producersOwned: { single_h100: 1 } };
     const effects = aggregateResearchEffects(["compute_fp8"]);
     const supplies = allChainSupplies(s, effects);
-    // Base GPU = 0.30, ×2 = 0.60
-    expect(supplies.gpu.toNumber()).toBeCloseTo(0.6, 9);
+    // Base GPU = 0.30, ×1.5 = 0.45
+    expect(supplies.gpu.toNumber()).toBeCloseTo(0.45, 9);
   });
 
   it("debtRatePerSec reduces accrual by safety research multiplier", () => {

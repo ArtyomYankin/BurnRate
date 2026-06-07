@@ -9,10 +9,10 @@ export const ENGINEERS: ProducerDef[] = [
   { id: "new_grad",          chain: "engineers", name: "New Grad",           tierIdx: 1, baseCostCapital:          100, costMult: 1.07, baseOutputPerSec:     1.00 },
   { id: "mid_eng",           chain: "engineers", name: "Mid Engineer",       tierIdx: 2, baseCostCapital:        1_100, costMult: 1.08, baseOutputPerSec:     8.00 },
   { id: "senior_eng",        chain: "engineers", name: "Senior Engineer",    tierIdx: 3, baseCostCapital:       12_000, costMult: 1.08, baseOutputPerSec:    47.00 },
-  { id: "staff_eng",         chain: "engineers", name: "Staff Engineer",     tierIdx: 4, baseCostCapital:      130_000, costMult: 1.09, baseOutputPerSec:   260.00 },
-  { id: "principal_eng",     chain: "engineers", name: "Principal Engineer", tierIdx: 5, baseCostCapital:    1_400_000, costMult: 1.10, baseOutputPerSec: 1_400.00 },
-  { id: "distinguished_eng", chain: "engineers", name: "Distinguished Eng.", tierIdx: 6, baseCostCapital:   20_000_000, costMult: 1.11, baseOutputPerSec: 7_800.00 },
-  { id: "fellow",            chain: "engineers", name: "Fellow",             tierIdx: 7, baseCostCapital:  330_000_000, costMult: 1.12, baseOutputPerSec: 44_000.00 },
+  { id: "staff_eng",         chain: "engineers", name: "Staff Engineer",     tierIdx: 4, baseCostCapital:      130_000, costMult: 1.12, baseOutputPerSec:   260.00 },
+  { id: "principal_eng",     chain: "engineers", name: "Principal Engineer", tierIdx: 5, baseCostCapital:    1_400_000, costMult: 1.16, baseOutputPerSec: 1_400.00 },
+  { id: "distinguished_eng", chain: "engineers", name: "Distinguished Eng.", tierIdx: 6, baseCostCapital:   20_000_000, costMult: 1.22, baseOutputPerSec: 7_800.00 },
+  { id: "fellow",            chain: "engineers", name: "Fellow",             tierIdx: 7, baseCostCapital:  330_000_000, costMult: 1.28, baseOutputPerSec: 44_000.00 },
 ];
 
 export const GPU: ProducerDef[] = [
@@ -20,9 +20,9 @@ export const GPU: ProducerDef[] = [
   { id: "dgx_box",           chain: "gpu", name: "DGX Box",           tierIdx: 1, baseCostCapital:         550, costMult: 1.08, baseOutputPerSec:     2.60 },
   { id: "server_rack",       chain: "gpu", name: "Server Rack",       tierIdx: 2, baseCostCapital:       6_600, costMult: 1.09, baseOutputPerSec:    20.00 },
   { id: "cluster",           chain: "gpu", name: "Cluster",           tierIdx: 3, baseCostCapital:      79_000, costMult: 1.10, baseOutputPerSec:   145.00 },
-  { id: "datacenter_pod",    chain: "gpu", name: "Datacenter Pod",    tierIdx: 4, baseCostCapital:     950_000, costMult: 1.11, baseOutputPerSec:   950.00 },
-  { id: "hyperscale_region", chain: "gpu", name: "Hyperscale Region", tierIdx: 5, baseCostCapital:  11_500_000, costMult: 1.12, baseOutputPerSec: 5_800.00 },
-  { id: "continent_scale",   chain: "gpu", name: "Continent-Scale",   tierIdx: 6, baseCostCapital: 140_000_000, costMult: 1.13, baseOutputPerSec: 33_000.00 },
+  { id: "datacenter_pod",    chain: "gpu", name: "Datacenter Pod",    tierIdx: 4, baseCostCapital:     950_000, costMult: 1.14, baseOutputPerSec:   950.00 },
+  { id: "hyperscale_region", chain: "gpu", name: "Hyperscale Region", tierIdx: 5, baseCostCapital:  11_500_000, costMult: 1.18, baseOutputPerSec: 5_800.00 },
+  { id: "continent_scale",   chain: "gpu", name: "Continent-Scale",   tierIdx: 6, baseCostCapital: 140_000_000, costMult: 1.24, baseOutputPerSec: 33_000.00 },
 ];
 
 export const DATA: ProducerDef[] = [
@@ -30,9 +30,9 @@ export const DATA: ProducerDef[] = [
   { id: "scraped_forums",    chain: "data", name: "Scraped Forums",       tierIdx: 1, baseCostCapital:         330, costMult: 1.08, baseOutputPerSec:     1.70 },
   { id: "licensed_books",    chain: "data", name: "Licensed Books",       tierIdx: 2, baseCostCapital:       3_900, costMult: 1.09, baseOutputPerSec:    13.00 },
   { id: "news_archive",      chain: "data", name: "News Archive Deal",    tierIdx: 3, baseCostCapital:      46_000, costMult: 1.10, baseOutputPerSec:    90.00 },
-  { id: "synthetic_pipe",    chain: "data", name: "Synthetic Pipeline",   tierIdx: 4, baseCostCapital:     550_000, costMult: 1.11, baseOutputPerSec:   590.00 },
-  { id: "proprietary_rlhf",  chain: "data", name: "Proprietary RLHF",     tierIdx: 5, baseCostCapital:   6_600_000, costMult: 1.12, baseOutputPerSec: 3_700.00 },
-  { id: "mass_surveillance", chain: "data", name: "Mass Surveillance Tap",tierIdx: 6, baseCostCapital:  79_000_000, costMult: 1.14, baseOutputPerSec: 21_000.00 },
+  { id: "synthetic_pipe",    chain: "data", name: "Synthetic Pipeline",   tierIdx: 4, baseCostCapital:     550_000, costMult: 1.14, baseOutputPerSec:   590.00 },
+  { id: "proprietary_rlhf",  chain: "data", name: "Proprietary RLHF",     tierIdx: 5, baseCostCapital:   6_600_000, costMult: 1.18, baseOutputPerSec: 3_700.00 },
+  { id: "mass_surveillance", chain: "data", name: "Mass Surveillance Tap",tierIdx: 6, baseCostCapital:  79_000_000, costMult: 1.24, baseOutputPerSec: 21_000.00 },
 ];
 
 export const ENERGY: ProducerDef[] = [
@@ -40,9 +40,9 @@ export const ENERGY: ProducerDef[] = [
   { id: "industrial_pwr",    chain: "energy", name: "Industrial Contract", tierIdx: 1, baseCostCapital:         220, costMult: 1.08, baseOutputPerSec:     1.30 },
   { id: "solar_farm",        chain: "energy", name: "Solar Farm",          tierIdx: 2, baseCostCapital:       2_600, costMult: 1.09, baseOutputPerSec:    10.00 },
   { id: "hydro_lease",       chain: "energy", name: "Hydro Lease",         tierIdx: 3, baseCostCapital:      31_000, costMult: 1.10, baseOutputPerSec:    70.00 },
-  { id: "nuclear_ppa",       chain: "energy", name: "Nuclear PPA",         tierIdx: 4, baseCostCapital:     380_000, costMult: 1.11, baseOutputPerSec:   460.00 },
-  { id: "geothermal_plant",  chain: "energy", name: "Geothermal Plant",    tierIdx: 5, baseCostCapital:   4_600_000, costMult: 1.12, baseOutputPerSec: 2_900.00 },
-  { id: "fusion_pilot",      chain: "energy", name: "Fusion Pilot",        tierIdx: 6, baseCostCapital:  55_000_000, costMult: 1.13, baseOutputPerSec: 17_000.00 },
+  { id: "nuclear_ppa",       chain: "energy", name: "Nuclear PPA",         tierIdx: 4, baseCostCapital:     380_000, costMult: 1.14, baseOutputPerSec:   460.00 },
+  { id: "geothermal_plant",  chain: "energy", name: "Geothermal Plant",    tierIdx: 5, baseCostCapital:   4_600_000, costMult: 1.18, baseOutputPerSec: 2_900.00 },
+  { id: "fusion_pilot",      chain: "energy", name: "Fusion Pilot",        tierIdx: 6, baseCostCapital:  55_000_000, costMult: 1.24, baseOutputPerSec: 17_000.00 },
 ];
 
 export const CHAINS: ReadonlyArray<{ id: ChainId; name: string; producers: ProducerDef[] }> = [
@@ -107,17 +107,16 @@ export function producersForChain(chain: ChainId): ProducerDef[] {
 }
 
 /**
- * Funding-round index at which a producer tier becomes available. Tiers 0–3
- * are unlocked from the start (Seed); each higher tier needs one more round
- * closed. Matches the rough cadence of Claude Design's hardcoded mock:
- * Engineers Staff → Series A, Principal → Series B, Distinguished → Series C,
- * Fellow → Series D, and so on across the four chains.
+ * Funding-round index at which a producer tier becomes available. GDD §6:
+ * "tier N needs round N closed". Tier 0 starts unlocked (the starter pack
+ * gives the player tier-0 producers); each higher tier requires the player
+ * to have reached that round.
  *
- * The actual game-loop ignores this for now — `buyProducer` will let any tier
- * through if Capital is enough. The UI uses this to gray out locked tiers so
- * the player doesn't burn cash early.
+ * ENFORCED in `buyProducer` (store.ts) — earlier this was just a UI hint
+ * and players could spam tier-6 continent_scale at round 3, which made the
+ * loop trivial mid-game. Now the gate is real.
  */
 export function unlockRoundForTier(tierIdx: number): number {
-  return Math.max(0, tierIdx - 3);
+  return Math.max(0, tierIdx);
 }
 

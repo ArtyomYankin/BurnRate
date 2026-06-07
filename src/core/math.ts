@@ -36,7 +36,10 @@ export const DEFAULT_ALLOCATION: Allocation = {
 //   - Product 60% ⇒ Capital flows at ~0.6× the token rate (close to prior 1:1 placeholder)
 //   - Marketing 15% ⇒ Hype gains a few units per minute early
 //   - R&D 10% ⇒ ~6 RP/min at 1 tok/s (tier-1 research nodes cost 15 RP — reachable)
-const CAPITAL_PER_TOKEN = 1.0;
+// Halved from 1.0 — capital was racing ahead of the producer-cost curve from
+// round 4+ even after the prestige-bonus cut, making top-tier producers
+// spammable. 0.5 keeps the spend-vs-earn tension that powers the loop.
+const CAPITAL_PER_TOKEN = 0.5;
 const HYPE_PER_TOKEN = 0.05;
 const RP_PER_TOKEN = 0.01;
 
@@ -249,11 +252,12 @@ export function tokensPerSec(
  * production, so the *next* round's bar moves visibly during each session.
  */
 export function prestigeBonusMult(currentRoundIdx: number): Decimal {
-  let m = D(1);
-  for (let i = 0; i < currentRoundIdx; i++) {
-    m = m.mul(getRound(i).equityMult);
-  }
-  return m;
+  // Tame geometric curve. The previous formula compounded the round-def
+  // `equityMult` of every closed round, which hit ×11 at round 4 and ×5000 by
+  // round 7 — well beyond what the cost curve could absorb (capital flooded,
+  // top-tier producers became spammable). 1.3^N keeps the prestige reward
+  // meaningful (round 4 ×2.9, round 11 ×18) without overwhelming the loop.
+  return D(1.3).pow(currentRoundIdx);
 }
 
 /**

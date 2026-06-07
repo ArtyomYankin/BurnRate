@@ -21,8 +21,8 @@ import {
   RESEARCH_NODES,
   ResearchEffects,
 } from "../core/research";
-import { AUTONOMOUS_AGENT, PRODUCER_BY_ID } from "../core/producers";
-import { SPRINT_UPGRADE_BY_ID } from "../core/sprintUpgrades";
+import { AUTONOMOUS_AGENT, PRODUCER_BY_ID, unlockRoundForTier } from "../core/producers";
+import { SPRINT_UPGRADE_BY_ID, sprintUpgradeCost } from "../core/sprintUpgrades";
 import {
   effectForTier,
   resolveTrainingRun,
@@ -48,7 +48,7 @@ import {
   SCHEMA_VERSION,
 } from "../core/types";
 
-interface GameState {
+export interface GameState {
   run: RunState;
   persistent: PersistentState;
   account: AccountState;
@@ -78,6 +78,11 @@ interface GameState {
   prestige(): { awarded: string } | null;
   setAllocation(a: Allocation): void;
   setOnboardingStep(step: number): void;
+  /** Increment the lifetime session counter (GDD §12 — defer push-permission
+   *  ask until session 3+). Called once per app launch from App.tsx. */
+  incrementSessionsStarted(): void;
+  /** Record that we've asked for push permission. `granted` flips pushOptedIn. */
+  recordPushPromptResult(granted: boolean): void;
   /** GDD §5 narrative spine: unlock a vignette by id. Idempotent — duplicate
    *  calls are silently dropped. Newly unlocked vignettes also land in the
    *  unread queue (drains via markVignetteRead). */
@@ -279,21 +284,30 @@ export const useGame = create<GameState>((set, get) => ({
 
   buyProducer(producerId, count = 1) {
     const s = get();
+    // GDD §6 tier-gate: tier N requires round N reached. Earlier this was a
+    // UI hint only; now it's enforced so the player can't spam tier-6
+    // continent-scale on round 3.
+    const def = PRODUCER_BY_ID[producerId];
+    if (def && s.run.fundingRoundIdx < unlockRoundForTier(def.tierIdx)) {
+      return { bought: 0 };
+    }
     const r = buyProducerCore(s.run, producerId, count);
     if (r.bought > 0) {
       // Immediate vignette check — "first_hire" should fire on the SAME tap
       // that crosses the starter floor, not on the next 1s tick.
       const persistent = processUnlocks(r.run, s.persistent);
-      // Guided-tutorial auto-advance: step 1 → 2 on any engineers-chain buy,
-      // step 2 → 3 on any gpu-chain buy. The Onboarding component knows
-      // about the resulting step and rotates its highlight / text.
+      // Guided-tutorial auto-advance: step 2 → 3 on any engineers-chain buy,
+      // step 3 → 4 on any gpu-chain buy. The Onboarding component knows
+      // about the resulting step and rotates its highlight / text. (Step
+      // numbering bumped after the tutorial gained an explainer card at
+      // step 1 — "How tokens are made".)
       const chain = PRODUCER_BY_ID[producerId]?.chain;
       const step = s.account.onboardingStep;
       let account = s.account;
-      if (step === 1 && chain === "engineers") {
-        account = { ...account, onboardingStep: 2 };
-      } else if (step === 2 && chain === "gpu") {
+      if (step === 2 && chain === "engineers") {
         account = { ...account, onboardingStep: 3 };
+      } else if (step === 3 && chain === "gpu") {
+        account = { ...account, onboardingStep: 4 };
       }
       set({ run: r.run, persistent, account });
     }
@@ -323,10 +337,11 @@ export const useGame = create<GameState>((set, get) => ({
     if (!def) return { bought: false };
     if (s.run.sprintUpgradesUnlocked.includes(id)) return { bought: false };
     const rp = D(s.run.researchPoints);
-    if (rp.lt(def.costRP)) return { bought: false };
+    const cost = sprintUpgradeCost(def, s.run.fundingRoundIdx);
+    if (rp.lt(cost)) return { bought: false };
     const nextRun = {
       ...s.run,
-      researchPoints: rp.sub(def.costRP).toString(),
+      researchPoints: rp.sub(cost).toString(),
       sprintUpgradesUnlocked: [...s.run.sprintUpgradesUnlocked, id],
     };
     set({ run: nextRun, persistent: processUnlocks(nextRun, s.persistent) });
@@ -396,6 +411,22 @@ export const useGame = create<GameState>((set, get) => ({
 
   setOnboardingStep(step) {
     set((s) => ({ account: { ...s.account, onboardingStep: step } }));
+  },
+
+  incrementSessionsStarted() {
+    set((s) => ({
+      account: { ...s.account, sessionsStarted: (s.account.sessionsStarted ?? 0) + 1 },
+    }));
+  },
+
+  recordPushPromptResult(granted) {
+    set((s) => ({
+      account: {
+        ...s.account,
+        pushOptedIn: granted,
+        pushPromptedAt: Date.now(),
+      },
+    }));
   },
 
   unlockVignette(id) {

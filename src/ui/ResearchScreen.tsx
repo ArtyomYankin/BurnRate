@@ -13,7 +13,7 @@ import {
   ResearchBranch,
   ResearchNode,
 } from "../core/research";
-import { SPRINT_UPGRADES, SprintUpgradeDef } from "../core/sprintUpgrades";
+import { SPRINT_UPGRADES, SprintUpgradeDef, sprintUpgradeCost } from "../core/sprintUpgrades";
 import {
   selectEquityStr,
   selectResearchPointsStr,
@@ -56,6 +56,7 @@ export function ResearchScreen({ onBack }: Props) {
   const rpStr = useGame(selectResearchPointsStr);
   const unlocked = useGame(selectUnlockedResearch);
   const ownedSprints = useGame((s) => s.run.sprintUpgradesUnlocked);
+  const fundingRoundIdx = useGame((s) => s.run.fundingRoundIdx);
   const buy = useGame((s) => s.buyResearchNode);
   const buySprint = useGame((s) => s.buySprintUpgrade);
   const equity = D(equityStr);
@@ -103,15 +104,19 @@ export function ResearchScreen({ onBack }: Props) {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.sprintRow}
       >
-        {SPRINT_UPGRADES.map((u) => (
-          <SprintCard
-            key={u.id}
-            def={u}
-            owned={ownedSprints.includes(u.id)}
-            affordable={rp.gte(u.costRP)}
-            onBuy={() => buySprint(u.id)}
-          />
-        ))}
+        {SPRINT_UPGRADES.map((u) => {
+          const cost = sprintUpgradeCost(u, fundingRoundIdx);
+          return (
+            <SprintCard
+              key={u.id}
+              def={u}
+              cost={cost}
+              owned={ownedSprints.includes(u.id)}
+              affordable={rp.gte(cost)}
+              onBuy={() => buySprint(u.id)}
+            />
+          );
+        })}
       </ScrollView>
 
       {/* Equity card — gold accent, big number left, "next tier cost" right */}
@@ -258,11 +263,13 @@ function ResearchNodeCard({
 // ─── SprintCard — per-run RP-bought boost ────────────────────────────────
 function SprintCard({
   def,
+  cost,
   owned,
   affordable,
   onBuy,
 }: {
   def: SprintUpgradeDef;
+  cost: number;
   owned: boolean;
   affordable: boolean;
   onBuy(): void;
@@ -292,7 +299,7 @@ function SprintCard({
           <Text style={[styles.sprintCardCost, { color: colors.sage_2 }]}>OWNED</Text>
         ) : (
           <Text style={[styles.sprintCardCost, { color: affordable ? colors.ink : colors.muted }]}>
-            {def.costRP} RP
+            {formatNumber(D(cost))} RP
           </Text>
         )}
       </View>

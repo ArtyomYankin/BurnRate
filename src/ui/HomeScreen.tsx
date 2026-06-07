@@ -26,6 +26,8 @@ import * as audio from "../audio";
 import { useAudioStore } from "../audio";
 import { BottomAllocation } from "./BottomAllocation";
 import { BuffsModal } from "./BuffsModal";
+import { HelpModal } from "./HelpModal";
+import { SlackButton } from "./SlackButton";
 import { formatNumber, formatRate } from "./formatNumber";
 import { ItemPopup, PopupContent } from "./ItemPopup";
 import { HitId, PixelScene, sceneForRound } from "./PixelScene";
@@ -160,6 +162,7 @@ export function HomeScreen({
   // so the conditional render below stays simple.
   const [devOpen, setDevOpen] = React.useState(false);
   const [buffsOpen, setBuffsOpen] = React.useState(false);
+  const [helpOpen, setHelpOpen] = React.useState(false);
 
   const handleHit = (id: HitId) => {
     setActiveHit(id);
@@ -240,20 +243,13 @@ export function HomeScreen({
       {/* Bottom row of secondary buttons — keep prestige + producers/research
           reachable even when the player ignores hit zones. Sits above the
           allocation strip. */}
+      {/* Floating Slack-style inbox button (right edge, dark navy). Ported
+          from design v8 — replaces the old INBOX chip in the bottom row.
+          Stands out from the cream chrome on purpose: it's the player's
+          notification surface. */}
+      <SlackButton unread={unreadVignettes} onPress={onOpenVignettes} />
+
       <View style={styles.secondaryRow} pointerEvents="box-none">
-        {/* Inbox button — always visible so the player knows it exists.
-            Badge appears when unreadVignettes > 0; tap navigates to the
-            inbox screen, which also marks rows as read on open. */}
-        <Pressy onPress={onOpenVignettes}>
-          <View style={styles.inboxBtn}>
-            <Text style={styles.inboxText}>INBOX</Text>
-            {unreadVignettes > 0 && (
-              <View style={styles.inboxBadge}>
-                <Text style={styles.inboxBadgeText}>{unreadVignettes}</Text>
-              </View>
-            )}
-          </View>
-        </Pressy>
         <Pressy onPress={onOpenAchievements}>
           <View style={styles.inboxBtn}>
             <Text style={styles.inboxText}>ACH</Text>
@@ -262,6 +258,11 @@ export function HomeScreen({
                 <Text style={styles.inboxBadgeText}>{achievementCount}</Text>
               </View>
             )}
+          </View>
+        </Pressy>
+        <Pressy onPress={() => setHelpOpen(true)}>
+          <View style={styles.inboxBtn}>
+            <Text style={styles.inboxText}>?</Text>
           </View>
         </Pressy>
         {canPrestige && (
@@ -290,6 +291,7 @@ export function HomeScreen({
 
       <ItemPopup item={popup} onClose={closePopup} onAction={handlePopupAction} />
       <BuffsModal visible={buffsOpen} onClose={() => setBuffsOpen(false)} />
+      <HelpModal visible={helpOpen} onClose={() => setHelpOpen(false)} />
 
       {/* Guided tutorial card — hide while the item popup is open so its
           BUY button isn't covered. Lives in HomeScreen (not App) so it

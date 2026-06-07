@@ -264,9 +264,9 @@ describe("tickRun production", () => {
   it("Capital tracks Product allocation share of produced tokens", () => {
     const s0 = balanced1();
     const r = tickRun(s0, freshPersistent(), 60);
-    // Default allocation: product = 0.60; CAPITAL_PER_TOKEN = 1.0.
+    // Default allocation: product = 0.60; CAPITAL_PER_TOKEN = 0.5 (halved).
     expect(D(r.run.capital).toNumber()).toBeCloseTo(
-      D(r.run.tokens).toNumber() * 0.60,
+      D(r.run.tokens).toNumber() * 0.60 * 0.5,
       6
     );
   });
@@ -363,8 +363,8 @@ describe("Allocate beat (GDD §4 Beat 2 + §9)", () => {
     );
     const r = tickRun(s0, freshPersistent(), 60);
     const tokens = D(r.run.tokens).toNumber();
-    // CAPITAL_PER_TOKEN=1.0, HYPE_PER_TOKEN=0.05, RP_PER_TOKEN=0.01
-    expect(D(r.run.capital).toNumber()).toBeCloseTo(tokens * 0.60, 6);
+    // CAPITAL_PER_TOKEN=0.5, HYPE_PER_TOKEN=0.05, RP_PER_TOKEN=0.01
+    expect(D(r.run.capital).toNumber()).toBeCloseTo(tokens * 0.60 * 0.5, 6);
     expect(D(r.run.hype).toNumber()).toBeCloseTo(tokens * 0.15 * 0.05, 6);
     expect(D(r.run.researchPoints).toNumber()).toBeCloseTo(tokens * 0.10 * 0.01, 6);
   });
@@ -375,7 +375,8 @@ describe("Allocate beat (GDD §4 Beat 2 + §9)", () => {
       { rd: 0, product: 1, marketing: 0, safety: 0 }
     );
     const r = tickRun(s0, freshPersistent(), 60);
-    expect(D(r.run.capital).toNumber()).toBeCloseTo(D(r.run.tokens).toNumber(), 6);
+    // CAPITAL_PER_TOKEN=0.5, so 100% Product → half of tokens.
+    expect(D(r.run.capital).toNumber()).toBeCloseTo(D(r.run.tokens).toNumber() * 0.5, 6);
     expect(D(r.run.hype).toNumber()).toBe(0);
     expect(D(r.run.researchPoints).toNumber()).toBe(0);
   });

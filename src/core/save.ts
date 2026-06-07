@@ -38,6 +38,9 @@ export function freshSave(now: number = Date.now()): SaveBlob {
       createdAt: now,
       lastPlayAt: now,
       onboardingStep: 0,
+      sessionsStarted: 0,
+      pushOptedIn: false,
+      pushPromptedAt: 0,
     },
   };
 }
@@ -109,7 +112,15 @@ export function migrate(raw: unknown): SaveBlob {
         // (with the audio cue + unread badge, briefly).
         unlockedAchievements: oldPersist.unlockedAchievements ?? [],
       },
-      account: blob.account as AccountState,
+      account: {
+        // v9 → v10: push-notification opt-in fields. Conservative defaults —
+        // sessionsStarted starts at 1 (this counts as a session), pushOptedIn
+        // false, pushPromptedAt 0.
+        ...(blob.account as AccountState),
+        sessionsStarted: (blob.account as Partial<AccountState>).sessionsStarted ?? 1,
+        pushOptedIn:     (blob.account as Partial<AccountState>).pushOptedIn     ?? false,
+        pushPromptedAt:  (blob.account as Partial<AccountState>).pushPromptedAt  ?? 0,
+      },
     };
   }
   return freshSave();

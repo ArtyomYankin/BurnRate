@@ -34,8 +34,8 @@ describe("vignettes data layer", () => {
     }
   });
 
-  it("ships at least the V01–V30 batch (GDD §10 targets ~50 at v1.0)", () => {
-    expect(VIGNETTES.length).toBeGreaterThanOrEqual(30);
+  it("ships at least the V01–V50 batch (GDD §10 target ~50 at v1.0)", () => {
+    expect(VIGNETTES.length).toBeGreaterThanOrEqual(50);
   });
 
   it("every vignette has a unique id (save-state keys collide otherwise)", () => {

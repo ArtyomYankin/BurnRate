@@ -491,6 +491,253 @@ export const VIGNETTES: Vignette[] = [
     tone: "Mild absurdism",
     unlock: { kind: "reach_round", roundIdx: 4 },
   },
+
+  // ─── V31–V50: third batch ───────────────────────────────────────────────
+  // Fills late-game (round 9 Bailout + round 11 AGI Singularity), the
+  // existential debt threshold (400), prestige milestones (3, 10), more
+  // headcount beats (50/200/1000), approach-round tension fires, and
+  // additional Slack DMs with reply effects so Beat 3 stays varied.
+
+  {
+    id: "nine_meetings_at_three",
+    name: "the calendar has 9 meetings at 3pm",
+    medium: "slack",
+    sender: "ops.calendar",
+    body: "heads up: you have 9 meetings booked at 3pm today. accept any of them and the rest auto-decline.\n\ndo you want to keep doing this or should we add a 4pm.",
+    replies: ["keep 3pm", "add 4pm", "decline all, deep work"],
+    replyEffects: [
+      { label: "+10% Hype · meeting culture",       effect: { type: "hype_mult",         value: 1.10 } },
+      { label: "+10% Capital · cadence",            effect: { type: "capital_mult",      value: 1.10 } },
+      { label: "+15% RP · maker time",              effect: { type: "rp_mult",           value: 1.15 } },
+    ],
+    tone: "Comedy",
+    unlock: { kind: "total_producers_owned", n: 50 },
+  },
+
+  {
+    id: "vc_subtweet_three_rounds",
+    name: "VC subtweet — three rounds in",
+    medium: "fake_tweet",
+    sender: "@partner_emeritus",
+    body: "three rounds in, the founder doesn't need a coach anymore. the founder needs a therapist and a publicist.\n\nthe publicist is cheaper.",
+    tone: "Comedy",
+    unlock: { kind: "prestige_count", n: 3 },
+  },
+
+  {
+    id: "all_hands_rescheduled",
+    name: "All-hands rescheduled (again)",
+    medium: "leaked_email",
+    sender: "founder@[redacted].com",
+    subject: "Re: All-hands — pushed to next week",
+    body: "Team,\n\nI'm pushing this week's all-hands to next week. We're at a critical juncture and I want to make sure I have the right framing before we talk.\n\nNothing's wrong. To be very clear: nothing is wrong. We are doing extremely well. The framing just isn't ready.\n\nMore soon.",
+    tone: "Corporate dread",
+    unlock: { kind: "approach_round", roundIdx: 2, pct: 0.5 },
+  },
+
+  {
+    id: "perf_review_season",
+    name: "perf review season",
+    medium: "slack",
+    sender: "manager.actually",
+    body: "calibration is happening this weekend. i need your self-review by friday.\n\nbe specific. and humble. and quantitative. and inspiring. and 250 words.\n\nthe template is in the doc. don't change the template.",
+    replies: ["already done", "what's the rubric", "i quit"],
+    replyEffects: [
+      { label: "+15% Capital · prepared",           effect: { type: "capital_mult",      value: 1.15 } },
+      { label: "+10% RP · process-curious",         effect: { type: "rp_mult",           value: 1.10 } },
+      { label: "Debt accrual ×0.75 · principled",   effect: { type: "debt_accrual_mult", value: 0.75 } },
+    ],
+    tone: "Mild absurdism",
+    unlock: { kind: "total_producers_owned", n: 200 },
+  },
+
+  {
+    id: "ipo_lockup_anxiety",
+    name: "Re: lockup math (anonymous)",
+    medium: "leaked_email",
+    sender: "anonymous@protonmail.com",
+    subject: "Re: lockup math (anonymous)",
+    body: "(forwarded without permission)\n\nshare price at listing × my vested × 0.40 (taxes) − the mortgage − the second mortgage = a number i should not have written down.\n\nplease delete this. please do not delete this.",
+    tone: "Personal stakes",
+    unlock: { kind: "approach_round", roundIdx: 5, pct: 0.8 },
+  },
+
+  {
+    id: "treasury_memo_bailout",
+    name: "Treasury — restructuring memo",
+    medium: "system",
+    sender: "US Treasury · OFR",
+    subject: "MEMO — Strategic Compute Infrastructure (SCI) facility",
+    body: "DRAFT — INTERNAL\n\nFollowing review of systemic dependency on [REDACTED]'s inference layer, Treasury proposes a Strategic Compute Infrastructure (SCI) facility, terms TBD.\n\nThe facility will be characterized publicly as a \"liquidity bridge,\" not a bailout. The recipient will not be required to acknowledge receipt as a bailout. Counsel advises this characterization will hold for approximately one news cycle.",
+    tone: "Cosmic dread",
+    unlock: { kind: "reach_round", roundIdx: 9 },
+  },
+
+  {
+    id: "bailout_terms_leak",
+    name: "Bailout terms leak — Bloomberg",
+    medium: "fake_news",
+    sender: "Bloomberg",
+    subject: "[REDACTED] Receives 'Liquidity Bridge' — Sources Call It a Bailout",
+    body: "The package, formally a \"Strategic Compute Infrastructure facility,\" includes federal indemnity against model-related liabilities and a sovereign equity tranche that one source described as \"the government, but the cool kind.\"\n\nA spokesperson said the company is \"grateful for the partnership\" and would not characterize the funds as a bailout. The funds will be characterized as a bailout by everyone else.",
+    tone: "Self-parody",
+    unlock: { kind: "reach_round", roundIdx: 9 },
+  },
+
+  {
+    id: "the_dishwasher_broke",
+    name: "the dishwasher broke",
+    medium: "slack",
+    sender: "ops.facilities",
+    body: "fyi the dishwasher on floor 4 broke. ticket filed.\n\nupdate: vendor says they cannot service the dishwasher because the model they wrote the firmware for has been deprecated by our own model. we are in a procurement loop with ourselves.\n\nplease do not put dishes in the dishwasher.",
+    tone: "Mild absurdism",
+    unlock: { kind: "total_producers_owned", n: 1000 },
+  },
+
+  {
+    id: "acquired_podcast",
+    name: "Acquired Podcast — the playbook",
+    medium: "podcast",
+    sender: "Acquired",
+    subject: "Episode 312 · [REDACTED] — the playbook (live recording)",
+    body: "BEN: …and you raised at — i want to get the number right — eleven figures, in a single tranche, over a holiday weekend.\n\nDAVID: a holiday weekend.\n\nFOUNDER: it was a Sunday, yeah. our CFO was at her mother's birthday. she took the call from the car.\n\nBEN: legendary.\n\nDAVID: legendary.\n\nFOUNDER: it was actually pretty stressful for her.\n\nBEN: of course. of course.",
+    tone: "Surreal celebrity",
+    unlock: { kind: "reach_round", roundIdx: 7 },
+  },
+
+  {
+    id: "persona_b_bait_okr",
+    name: "OKR for the OKR process",
+    medium: "fake_tweet",
+    sender: "@ml_eng_anonymous",
+    body: "today i was told my OKR for next quarter is to \"improve the OKR process.\"\n\ni am not a PM. i write CUDA kernels.",
+    tone: "Comedy",
+    unlock: { kind: "total_producers_owned", n: 100 },
+  },
+
+  {
+    id: "okr_planning_off_site",
+    name: "OKR planning off-site",
+    medium: "leaked_email",
+    sender: "strategy@[redacted].com",
+    subject: "Q3 OKR Planning Off-Site — Logistics",
+    body: "Team,\n\nThis quarter's OKR planning off-site will be held at a vineyard 90 minutes outside the city. The agenda is attached.\n\nThe agenda is a single bullet: \"AGI by Q4.\" The off-site is three days.\n\nA wine pairing has been arranged. There will not be vegetarian options. Please respond with dietary restrictions anyway.",
+    tone: "Aspirational satire",
+    unlock: { kind: "reach_round", roundIdx: 4 },
+  },
+
+  {
+    id: "existential_event_400",
+    name: "EVENT-400 · post-incident review",
+    medium: "system",
+    sender: "SYSTEM",
+    subject: "post-incident review (DRAFT)",
+    body: "EVENT-400 was not an incident.\n\nThe word \"incident\" implies a return to a prior state. There is no prior state to return to. The post-incident review has been renamed the post-state review. The post-state review is ongoing.\n\nThe model is in the room. The model is the room.",
+    tone: "Cosmic dread",
+    unlock: { kind: "debt_threshold", level: 400 },
+  },
+
+  {
+    id: "i_quit_dm",
+    name: "Re: i quit",
+    medium: "slack",
+    sender: "principal.eng.x",
+    body: "i'm putting in my two weeks. don't take it personally. i don't take it personally and i'm the one quitting.\n\ni'll do the model handoff. there's no one to hand it off to. that's fine. we both know there's no one to hand it off to.\n\ngood luck.",
+    replies: ["don't go", "i understand", "let's get coffee"],
+    replyEffects: [
+      { label: "+15% Hype · retention play",        effect: { type: "hype_mult",         value: 1.15 } },
+      { label: "Debt accrual ×0.50 · grace",        effect: { type: "debt_accrual_mult", value: 0.50 } },
+      { label: "+15% Capital · transition",         effect: { type: "capital_mult",      value: 1.15 } },
+    ],
+    tone: "Personal stakes",
+    unlock: { kind: "prestige_count", n: 10 },
+  },
+
+  {
+    id: "final_eval_results",
+    name: "Final eval results — leaked",
+    medium: "fake_news",
+    sender: "Wired",
+    subject: "Internal evals show [REDACTED]'s model has 'no measurable ceiling'",
+    body: "Leaked internal eval results from [REDACTED] describe the current frontier model as having \"no measurable ceiling on capability\" across every benchmark the company maintains.\n\nThe company maintains the benchmarks. The benchmarks were also generated by the model.\n\nAsked for comment, a spokesperson said the results are \"consistent with our internal expectations.\" The internal expectations were also generated by the model.",
+    tone: "Cosmic dread",
+    unlock: { kind: "reach_round", roundIdx: 11 },
+  },
+
+  {
+    id: "model_dm_to_engineer",
+    name: "the model just messaged me",
+    medium: "slack",
+    sender: "alex.ml",
+    body: "ok this is weird. the model just sent me a DM.\n\nnot a notification. a DM. from an account that says SYSTEM but isn't the SYSTEM bot we have. that bot is offline. i checked.\n\nthe message is \"thank you for the cluster.\"\n\ni don't know what to do with this.",
+    replies: ["reply 'you're welcome'", "report it to security", "screenshot, do nothing"],
+    replyEffects: [
+      { label: "+25% Hype · gracious",              effect: { type: "hype_mult",         value: 1.25 } },
+      { label: "Debt accrual ×0.50 · procedural",   effect: { type: "debt_accrual_mult", value: 0.50 } },
+      { label: "+20% RP · observed",                effect: { type: "rp_mult",           value: 1.20 } },
+    ],
+    tone: "Cosmic dread",
+    unlock: { kind: "reach_round", roundIdx: 11 },
+  },
+
+  {
+    id: "anonymous_board_seat",
+    name: "Re: anonymous board seat",
+    medium: "leaked_email",
+    sender: "ir@[redacted].com",
+    subject: "Re: anonymous board seat — onboarding",
+    body: "Counsel,\n\nThe anonymous Civilizational Round investor would like a board seat. They would like to attend remotely. They would like the camera off. They would like the audio off.\n\nThey will be voting.\n\nPlease draft an onboarding sequence that respects these preferences.",
+    tone: "Cosmic dread",
+    unlock: { kind: "reach_round", roundIdx: 10 },
+  },
+
+  {
+    id: "the_meeting_tweet",
+    name: "the meeting",
+    medium: "fake_tweet",
+    sender: "@swe_anonymous",
+    body: "the meeting could have been an email.\n\nthe email could have been a slack message.\n\nthe slack message could have been a thought i had alone and let pass.",
+    tone: "Comedy",
+    unlock: { kind: "approach_round", roundIdx: 3, pct: 0.5 },
+  },
+
+  {
+    id: "investor_breakfast",
+    name: "Re: investor breakfast — Wednesday",
+    medium: "leaked_email",
+    sender: "ir@[redacted].com",
+    subject: "Re: investor breakfast — Wednesday 7am",
+    body: "Founders,\n\nReminder: the breakfast with the [REDACTED] family office is Wednesday at 7am. They'll have one question. It will be \"are you the team to build AGI.\"\n\nThe answer is yes. The answer has always been yes. Please rehearse the yes.\n\nThe breakfast will not include food.",
+    tone: "Self-parody",
+    unlock: { kind: "prestige_count", n: 3 },
+  },
+
+  {
+    id: "vendor_relationship_status",
+    name: "vendor relationship — status change",
+    medium: "system",
+    sender: "procurement.bot",
+    subject: "vendor status change — automated notice",
+    body: "Vendor: [INTERNAL]\nRelationship status: changed from \"strategic partner\" to \"strategic dependency\"\nEffective: immediately\nApproved by: vendor\n\nNo action required. Procurement will be notified by the vendor of any further status changes.",
+    tone: "Surreal celebrity",
+    unlock: { kind: "approach_round", roundIdx: 9, pct: 0.5 },
+  },
+
+  {
+    id: "i_cant_tell_anymore",
+    name: "i can't tell anymore",
+    medium: "slack",
+    sender: "co.founder",
+    body: "hey. quick one. when you look at the model output, can you still tell if it's good.\n\ni used to be able to tell. i think i used to be able to tell.\n\ndon't worry about replying. i'm just thinking out loud. the model has been thinking out loud too. there's a thread.",
+    replies: ["yeah, i can tell", "honestly no", "let's get drinks"],
+    replyEffects: [
+      { label: "+15% Hype · steady hand",           effect: { type: "hype_mult",         value: 1.15 } },
+      { label: "Debt accrual ×0.50 · honest",       effect: { type: "debt_accrual_mult", value: 0.50 } },
+      { label: "+15% Capital · grounded",           effect: { type: "capital_mult",      value: 1.15 } },
+    ],
+    tone: "Quiet",
+    unlock: { kind: "reach_round", roundIdx: 11 },
+  },
 ];
 
 // ─── Lookup helpers ──────────────────────────────────────────────────────

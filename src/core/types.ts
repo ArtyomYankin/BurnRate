@@ -122,6 +122,13 @@ export interface AccountState {
   createdAt: number;
   lastPlayAt: number;
   onboardingStep: number;
+  /** Total app-launch count. Used to defer the push-permission ask until
+   *  session 3+ per GDD §12 (don't prompt on first launch). */
+  sessionsStarted: number;
+  /** True once the player has granted notification permission. */
+  pushOptedIn: boolean;
+  /** Epoch ms of the last time we asked. Cooldown a week between asks. */
+  pushPromptedAt: number;
 }
 
 // v5 → v6: PersistentState gains unlockedVignettes + unreadVignettes for the
@@ -136,7 +143,10 @@ export interface AccountState {
 // completionist hook (~100 at v1.0). Empty on migrate; achievements re-
 // evaluate every tick so anything the player has already earned will fire
 // on next session.
-export const SCHEMA_VERSION = 9 as const;
+// v9 → v10: AccountState gains sessionsStarted / pushOptedIn / pushPromptedAt
+// for the GDD §12 push-notification flow (defer prompt to session 3+).
+// Backfill: sessionsStarted=1, pushOptedIn=false, pushPromptedAt=0.
+export const SCHEMA_VERSION = 10 as const;
 
 export interface SaveBlob {
   schemaVersion: typeof SCHEMA_VERSION;
