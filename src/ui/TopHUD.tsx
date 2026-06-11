@@ -1,5 +1,5 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
 import { colors, fonts, PIXEL } from "./theme";
 
 interface Props {
@@ -10,6 +10,10 @@ interface Props {
   capital: string;
   equity: string;
   nextThresholdLabel: string;
+  /** Optional: called when player taps the big token counter. Genre-standard
+   *  "click for +1 token" affordance — relevant early, irrelevant once
+   *  passive rate dwarfs +1/tap. */
+  onPressTokens?(): void;
 }
 
 /**
@@ -28,7 +32,22 @@ export function TopHUD({
   capital,
   equity,
   nextThresholdLabel,
+  onPressTokens,
 }: Props) {
+  // Floating "+1" feedback — animates each tap. We keep a small queue (max
+  // 4) of in-flight floaters so rapid taps still feel responsive without
+  // burning frame time on dozens of animated nodes.
+  const [floaters, setFloaters] = React.useState<{ id: number }[]>([]);
+  const nextId = React.useRef(0);
+  const onTapTokens = () => {
+    onPressTokens?.();
+    const id = nextId.current++;
+    setFloaters((f) => (f.length >= 4 ? [...f.slice(1), { id }] : [...f, { id }]));
+    setTimeout(() => {
+      setFloaters((f) => f.filter((x) => x.id !== id));
+    }, 750);
+  };
+
   return (
     <View style={styles.wrap} pointerEvents="box-none">
       <View style={styles.box}>
@@ -40,14 +59,22 @@ export function TopHUD({
           <Text style={styles.roundLabel}>{roundLabel}</Text>
         </View>
 
-        {/* Row 2 — big tokens + per-second rate */}
-        <View style={[styles.row, { marginTop: 4, alignItems: "baseline" }]}>
+        {/* Row 2 — big tokens + per-second rate. The whole token row is the
+            tap target for the "+1 click" affordance. */}
+        <Pressable
+          onPress={onTapTokens}
+          style={[styles.row, { marginTop: 4, alignItems: "baseline" }]}
+          hitSlop={6}
+        >
           <View style={styles.tokenRow}>
             <View style={styles.tokenIcon} />
             <Text style={styles.tokenBig}>{tokens}</Text>
             <Text style={styles.tokenRate}>+{rate}</Text>
+            {floaters.map((f) => (
+              <PlusOneFloater key={f.id} />
+            ))}
           </View>
-        </View>
+        </Pressable>
 
         {/* Row 3 — small stats (Capital + Equity) + pct */}
         <View style={styles.statsRow}>
@@ -97,6 +124,34 @@ export function TopHUD({
         <Text style={styles.nextLabel}>{nextThresholdLabel}</Text>
       </View>
     </View>
+  );
+}
+
+/** Tiny "+1" that fades up and out — fires once per token tap. */
+function PlusOneFloater() {
+  const anim = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    Animated.timing(anim, {
+      toValue: 1,
+      duration: 700,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  }, [anim]);
+  return (
+    <Animated.Text
+      style={[
+        styles.floater,
+        {
+          opacity: anim.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0, 1, 0] }),
+          transform: [
+            { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [-2, -22] }) },
+          ],
+        },
+      ]}
+    >
+      +1
+    </Animated.Text>
   );
 }
 
@@ -161,6 +216,14 @@ const styles = StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 16,
     color: colors.sage_2,
+  },
+  floater: {
+    position: "absolute",
+    right: 4,
+    top: -2,
+    fontFamily: fonts.bodyBold,
+    fontSize: 16,
+    color: colors.gold,
   },
   statsRow: {
     flexDirection: "row",

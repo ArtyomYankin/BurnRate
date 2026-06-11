@@ -35,7 +35,26 @@
       "Bash(cp \"/c/Users/artem/.claude/projects/d--BurnRate/b93cd4b3-23d3-46ab-b802-53c2f0b46b98/tool-results/webfetch-1780312406300-sa1wfi.bin\" /tmp/v8.tar.gz)",
       "Bash(mkdir -p /tmp/v8)",
       "Bash(tar -xzf /tmp/v8.tar.gz -C /tmp/v8)",
-      "Read(//tmp/v8/burnrate/project/**)"
+      "Read(//tmp/v8/burnrate/project/**)",
+      "Bash(cp \"/c/Users/artem/.claude/projects/d--BurnRate/b93cd4b3-23d3-46ab-b802-53c2f0b46b98/tool-results/webfetch-1781014720881-vw4eil.bin\" /tmp/v10.tar.gz)",
+      "Bash(rm -rf /tmp/v10)",
+      "Bash(mkdir -p /tmp/v10)",
+      "Bash(tar -xzf /tmp/v10.tar.gz -C /tmp/v10)",
+      "Read(//tmp/v10/burnrate/project/**)",
+      "Bash(cp \"/c/Users/artem/.claude/projects/d--BurnRate/b93cd4b3-23d3-46ab-b802-53c2f0b46b98/tool-results/webfetch-1781109598573-zwgypj.bin\" /tmp/v11.tar.gz)",
+      "Bash(rm -rf /tmp/v11)",
+      "Bash(mkdir -p /tmp/v11)",
+      "Bash(tar -xzf /tmp/v11.tar.gz -C /tmp/v11)",
+      "Read(//tmp/v11/burnrate/project/**)",
+      "Bash(awk '/^function AGIScene/{print NR; found=1; next} found && /^}$/{print NR; exit}' src/ui/PixelScene.tsx)",
+      "Bash(grep -n \"^// ─── Tick hook\\\\|^// ═══════════════════════════════════════════════════════════════════════$\" src/ui/PixelScene.tsx)",
+      "Bash(awk 'NR==2771{header=$0; next} NR==3072{next} NR>2771 && NR<3072{count++} END{print \"lines:\", count}' src/ui/PixelScene.tsx)",
+      "Bash(node -e \"const fs=require\\('fs'\\);const f='src/ui/PixelScene.tsx';const lines=fs.readFileSync\\(f,'utf8'\\).split\\('\\\\n'\\);const before=lines.slice\\(0,2770\\);const after=lines.slice\\(3071\\);fs.writeFileSync\\(f,[...before,...after].join\\('\\\\n'\\)\\);console.log\\('Removed lines 2771-3071. Now',\\(before.length+after.length\\),'lines.'\\);\")",
+      "Bash(npx kill-port *)",
+      "Bash(grep -n \"clickToken\\\\|tokens.*add\\(1\\)\\\\|tokens.*\\\\\\\\.add\" src/game/store.ts)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
     ]
   }
 }

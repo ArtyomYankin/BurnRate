@@ -1,9 +1,8 @@
 import React from "react";
 import { Dimensions, Pressable, StyleSheet, Text, View } from "react-native";
 import { D } from "../core/decimal";
-import { PRODUCER_BY_ID } from "../core/producers";
 import { getRound } from "../core/rounds";
-import { ChainId, ProducerDef } from "../core/types";
+import { ChainId } from "../core/types";
 import { effectiveRoundThreshold, hypeThresholdDiscount } from "../core/math";
 import {
   selectActiveEffects,
@@ -47,17 +46,6 @@ interface Props {
   onOpenAchievements(): void;
 }
 
-// Map each hit zone in the scene to a producer tier (so the popup can show
-// "Owned N · Cost $X" without HomeScreen needing chain awareness for every
-// click). Wall items (research, plant) and cosmetic items have no tier.
-const HIT_TO_PRODUCER: Partial<Record<HitId, string>> = {
-  engineer: "intern",
-  monitor:  "intern",   // training run uses the monitor as its hit; producer field is read for context only
-  gpu:      "single_h100",
-  books:    "common_crawl",
-  energy:   "office_grid",
-};
-
 const HIT_TO_CHAIN: Partial<Record<HitId, ChainId>> = {
   engineer: "engineers",
   gpu:      "gpu",
@@ -89,8 +77,11 @@ export function HomeScreen({
   const pendingDebtCount = useGame((s) => selectPendingDebtEvents(s).length);
   const achievementCount = useGame(selectUnlockedAchievementCount);
   const onboardingStep = useGame((s) => s.account.onboardingStep);
+  const clickToken = useGame((s) => s.clickToken);
   const sfxMuted = useAudioStore((s) => s.sfxMuted);
   const toggleSfx = useAudioStore((s) => s.toggleSfx);
+  const musicEnabled = useAudioStore((s) => s.musicEnabled);
+  const toggleMusic = useAudioStore((s) => s.toggleMusic);
 
   const tokens = D(tokensStr);
   const capital = D(capitalStr);
@@ -166,7 +157,7 @@ export function HomeScreen({
 
   const handleHit = (id: HitId) => {
     setActiveHit(id);
-    setPopup(buildPopup(id, owned));
+    setPopup(buildPopup(id));
   };
 
   const closePopup = () => {
@@ -219,6 +210,7 @@ export function HomeScreen({
             ? `NEXT: ${round.name.toUpperCase()} · HYPE -${Math.round(hypeDiscount * 100)}%`
             : `NEXT: ${nextRound.name.toUpperCase()} · 1e${nextRound.tokenThresholdLog10} TOKENS`
         }
+        onPressTokens={clickToken}
       />
 
       {/* Visible-in-dev cheat trigger. Replaces an earlier hidden long-press
@@ -237,6 +229,13 @@ export function HomeScreen({
           anything else flips the mute. */}
       <Pressable style={styles.sfxChip} onPress={toggleSfx}>
         <Text style={styles.sfxChipText}>{sfxMuted ? "MUTE" : "SFX"}</Text>
+      </Pressable>
+
+      {/* Music toggle — sits directly under the SFX chip. Default OFF per
+          GDD §14 ("Burn Rate is played in public spaces"). Toggling on
+          starts the era-appropriate track on the next render tick. */}
+      <Pressable style={styles.musicChip} onPress={toggleMusic}>
+        <Text style={styles.sfxChipText}>{musicEnabled ? "♪ ON" : "♪ OFF"}</Text>
       </Pressable>
 
 
@@ -301,10 +300,7 @@ export function HomeScreen({
   );
 }
 
-function buildPopup(id: HitId, owned: Record<string, number>): PopupContent {
-  const producerId = HIT_TO_PRODUCER[id];
-  const def = producerId ? PRODUCER_BY_ID[producerId] : undefined;
-
+function buildPopup(id: HitId): PopupContent {
   switch (id) {
     case "monitor":
       return {
@@ -317,13 +313,13 @@ function buildPopup(id: HitId, owned: Record<string, number>): PopupContent {
         cta: "OPEN TRAINING",
       };
     case "engineer":
-      return producerCard(id, "Hire Intern", "ENGINEERS · TIER 0", owned, def, "Snacks are in the kitchen.");
+      return chainPopup(id, "Hire Engineers", "HEADCOUNT", "Engineers multiply the pipeline. Sub-linear scaling — every hire helps, just less than the last one.", "OPEN HIRING");
     case "gpu":
-      return producerCard(id, "Buy GPU", "COMPUTE · TIER 0", owned, def, "It runs hot. The room is hot.");
+      return chainPopup(id, "Buy GPU", "COMPUTE", "GPU supply feeds the pipeline. Balance with Data + Energy or you bottleneck.", "OPEN GPU");
     case "books":
-      return producerCard(id, "Buy Data", "DATA · TIER 0", owned, def, "Some of this is even labeled.");
+      return chainPopup(id, "Buy Data", "TRAINING DATA", "Data supply feeds the pipeline. Some of this is even labeled.", "OPEN DATA");
     case "energy":
-      return producerCard(id, "Buy Energy", "ENERGY · TIER 0", owned, def, "The landlord doesn't ask questions.");
+      return chainPopup(id, "Buy Energy", "POWER", "Energy supply feeds the pipeline. The landlord noticed.", "OPEN ENERGY");
     case "research":
       return {
         hit: id,
@@ -423,13 +419,12 @@ function buildPopup(id: HitId, owned: Record<string, number>): PopupContent {
         body: "Last week this seat held a Staff Engineer with twelve years of distributed-systems experience. Today his calendar reads \"sabbatical (open-ended)\" and the agent ships his JIRA tickets 4× faster. HR called it a \"win-win.\" His Slack still says \"on PTO, back Monday.\" It has said that for forty-one Mondays.",
       };
     case "gpu2":
-      return producerCard(
+      return chainPopup(
         id,
-        "Buy GPU (Continent-Scale)",
-        "GPU · TIER 7",
-        owned,
-        def,
+        "Buy GPU",
+        "COMPUTE · CONTINENT-SCALE",
         "Another row of mainframes, end to end. The facility footprint is now visible from orbit. Someone made it the desktop wallpaper.",
+        "OPEN GPU",
       );
     case "catwalk":
       return {
@@ -442,27 +437,20 @@ function buildPopup(id: HitId, owned: Record<string, number>): PopupContent {
   }
 }
 
-function producerCard(
-  id: HitId,
+/**
+ * Generic chain popup — replaces the old per-tier producerCard that lied
+ * about tier-0 costs/output in late-game scenes. Shows just chain name +
+ * a one-line description, with a button that routes to the full Producers
+ * screen where actual per-tier prices are honest.
+ */
+function chainPopup(
+  hit: HitId,
   title: string,
   subtitle: string,
-  owned: Record<string, number>,
-  def: ProducerDef | undefined,
-  flavor: string,
+  body: string,
+  cta: string,
 ): PopupContent {
-  if (!def) {
-    return { hit: id, kind: "cosmetic", title, subtitle, body: "—" };
-  }
-  return {
-    hit: id,
-    kind: "producer",
-    title,
-    subtitle,
-    owned: owned[def.id] ?? 0,
-    rate: `${def.baseOutputPerSec}`,
-    cost: `${def.baseCostCapital}`,
-    flavor,
-  };
+  return { hit, kind: "action", title, subtitle, body, cta };
 }
 
 const styles = StyleSheet.create({
@@ -610,5 +598,18 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.ink,
     letterSpacing: 1,
+  },
+  musicChip: {
+    position: "absolute",
+    top: 210, // directly under sfxChip (top:178 + ~30px chip height + gap)
+    right: 6,
+    minWidth: 44,
+    alignItems: "center",
+    backgroundColor: colors.cream_hi,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: colors.ink,
+    zIndex: 90,
   },
 });

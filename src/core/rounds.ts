@@ -17,14 +17,14 @@ export const FUNDING_ROUNDS: FundingRoundDef[] = [
   { id: "series_a",           idx: 1,  name: "Series A",              tokenThresholdLog10: 6,   equityMult:  1.50, offlineCapHours:  6.5 },
   { id: "series_b",           idx: 2,  name: "Series B",              tokenThresholdLog10: 10,  equityMult:  2.25, offlineCapHours:  9 },
   { id: "series_c",           idx: 3,  name: "Series C",              tokenThresholdLog10: 13,  equityMult:  3.40, offlineCapHours: 13.5 },
-  { id: "series_d",           idx: 4,  name: "Series D",              tokenThresholdLog10: 17,  equityMult:  5.10, offlineCapHours: 18 },
+  { id: "series_d",           idx: 4,  name: "Series D",              tokenThresholdLog10: 16,  equityMult:  5.10, offlineCapHours: 18 },
   { id: "ipo",                idx: 5,  name: "IPO",                   tokenThresholdLog10: 19,  equityMult:  7.60, offlineCapHours: 24 },
-  { id: "secondary",          idx: 6,  name: "Secondary",             tokenThresholdLog10: 25,  equityMult: 11.40, offlineCapHours: 24 },
-  { id: "acquisition",        idx: 7,  name: "Acquisition",           tokenThresholdLog10: 30,  equityMult: 17.10, offlineCapHours: 24 },
-  { id: "sovereign_wealth",   idx: 8,  name: "Sovereign Wealth Round",tokenThresholdLog10: 35,  equityMult: 25.70, offlineCapHours: 24 },
-  { id: "government_bailout", idx: 9,  name: "Government Bailout",    tokenThresholdLog10: 41,  equityMult: 38.50, offlineCapHours: 24 },
-  { id: "civilizational",     idx: 10, name: "Civilizational Round",  tokenThresholdLog10: 48,  equityMult: 57.80, offlineCapHours: 24 },
-  { id: "agi_singularity",    idx: 11, name: "AGI Singularity Round", tokenThresholdLog10: 56,  equityMult: 86.70, offlineCapHours: 24 },
+  { id: "secondary",          idx: 6,  name: "Secondary",             tokenThresholdLog10: 22,  equityMult: 11.40, offlineCapHours: 24 },
+  { id: "acquisition",        idx: 7,  name: "Acquisition",           tokenThresholdLog10: 25,  equityMult: 17.10, offlineCapHours: 24 },
+  { id: "sovereign_wealth",   idx: 8,  name: "Sovereign Wealth Round",tokenThresholdLog10: 28,  equityMult: 25.70, offlineCapHours: 24 },
+  { id: "government_bailout", idx: 9,  name: "Government Bailout",    tokenThresholdLog10: 31,  equityMult: 38.50, offlineCapHours: 24 },
+  { id: "civilizational",     idx: 10, name: "Civilizational Round",  tokenThresholdLog10: 34,  equityMult: 57.80, offlineCapHours: 24 },
+  { id: "agi_singularity",    idx: 11, name: "AGI Singularity Round", tokenThresholdLog10: 38,  equityMult: 86.70, offlineCapHours: 24 },
 ];
 
 // M+2 opens the full AGI arc: all 12 rounds through the AGI Singularity are

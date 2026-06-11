@@ -6,6 +6,7 @@ import {
   __devAddTokens,
   __devJumpToRound,
   __devReplayIntro,
+  __devSendTestPush,
   __devResetVignetteResolutions,
   __devSkipTime,
   __devUnlockAllResearch,
@@ -106,6 +107,10 @@ export function DevPanel({ visible, onClose }: Props) {
 
               <Section label="ONBOARDING">
                 <Btn label="Replay intro" onPress={() => __devReplayIntro()} />
+              </Section>
+
+              <Section label="NOTIFICATIONS">
+                <Btn label="Test push (5s)" onPress={() => void __devSendTestPush()} />
               </Section>
             </ScrollView>
           </View>

@@ -113,6 +113,52 @@ export function __devUnlockAllResearch() {
   });
 }
 
+// ─── Notifications ──────────────────────────────────────────────────────
+/**
+ * Fire a personalized re-engagement notification 5 seconds from now. Used
+ * to QA the wording (uses the same `buildReengagementBody` the production
+ * 22h-delay scheduler uses, so what you see in dev is what the player will
+ * see). Requests permission first if not already granted — silent no-op
+ * if the user declines.
+ */
+export async function __devSendTestPush() {
+  const { requestPushPermission, buildReengagementBody } = await import("./notifications");
+  const granted = await requestPushPermission();
+  if (!granted) {
+    // eslint-disable-next-line no-console
+    console.warn("[dev] push permission denied — can't show test notification");
+    return;
+  }
+  const state = useGame.getState();
+  const { title, body } = buildReengagementBody(state);
+  try {
+    const N = require("expo-notifications") as typeof import("expo-notifications");
+    // Install foreground handler so we see the notification even if the app
+    // is in the foreground (iOS swallows otherwise — this is the most
+    // common silent failure in dev testing).
+    N.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldShowAlert: true,
+        shouldPlaySound: false,
+        shouldSetBadge: false,
+      } as never),
+    });
+    // SDK 54 requires the explicit `type: 'timeInterval'` discriminant on
+    // the trigger — the old { seconds, repeats } shape silently no-ops.
+    await N.scheduleNotificationAsync({
+      content: { title, body, sound: false },
+      trigger: { type: "timeInterval", seconds: 5, repeats: false } as never,
+    });
+    // eslint-disable-next-line no-console
+    console.log(`[dev] push scheduled — fires in 5s with: ${title}`);
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn("[dev] failed to schedule:", e);
+  }
+}
+
 // ─── Onboarding ──────────────────────────────────────────────────────────
 /**
  * Replay the first-launch flow: IntroModal + the 3 tooltips. Useful for

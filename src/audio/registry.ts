@@ -50,11 +50,17 @@ export const CUE_SOURCES: Partial<Record<CueId, any>> = {
 // Background music tracks (GDD §14 — three eras, off by default).
 export type MusicTrack = "garage" | "tower" | "singularity";
 
+// Single placeholder track wired to all 3 era slots — player hears the same
+// loop across all rounds for now. When real per-era tracks land, point each
+// slot at its own file (music_garage / music_tower / music_singularity).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const BGM: any = require("../../assets/music/melody.mp3");
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const MUSIC_SOURCES: Partial<Record<MusicTrack, any>> = {
-  // garage:      require("../../assets/music/music_garage.m4a"),
-  // tower:       require("../../assets/music/music_tower.m4a"),
-  // singularity: require("../../assets/music/music_singularity.m4a"),
+  garage:      BGM,
+  tower:       BGM,
+  singularity: BGM,
 };
 
 /**

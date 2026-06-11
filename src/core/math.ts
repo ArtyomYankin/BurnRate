@@ -39,7 +39,7 @@ export const DEFAULT_ALLOCATION: Allocation = {
 // Halved from 1.0 — capital was racing ahead of the producer-cost curve from
 // round 4+ even after the prestige-bonus cut, making top-tier producers
 // spammable. 0.5 keeps the spend-vs-earn tension that powers the loop.
-const CAPITAL_PER_TOKEN = 0.5;
+export const CAPITAL_PER_TOKEN = 0.5;
 const HYPE_PER_TOKEN = 0.05;
 const RP_PER_TOKEN = 0.01;
 
@@ -172,15 +172,16 @@ export function allChainSupplies(
 
 /**
  * Engineer chain's scaling exponent on the multiplier side of the Liebig
- * pipeline. GDD §7 originally specified 0.5 (sqrt), but at the typical
- * "parity" state — equal counts of every tier-0 producer — sqrt deflates
- * Engineers so hard that their marginal ROI per dollar is always lower than
- * any flow chain's, and the whole branch turns into decoration.
+ * pipeline. GDD §7 originally specified 0.5 (sqrt). I tried 0.8 to keep
+ * Engineers competitive early, but that overpowered them late — at 1000
+ * engineers ×251 mult dwarfed every other lever, so the meta degenerated
+ * to "spam Engineers, ignore the bottleneck."
  *
- * 0.8 preserves the sub-linear "9 women, 1 month" intent (still diminishing
- * returns on headcount).
+ * 0.6 is the middle ground: 100 eng = ×16, 1000 eng = ×63, 10000 eng = ×251.
+ * Still sub-linear (the "9 women, 1 month" joke) and meaningful, but no
+ * longer the dominant strategy.
  */
-export const ENGINEER_SCALING_EXPONENT = 0.8;
+export const ENGINEER_SCALING_EXPONENT = 0.6;
 
 /**
  * Engineer multiplier, FLOORED AT 1.0 for any positive supply.

@@ -79,11 +79,15 @@ export const AUTONOMOUS_AGENT: AgentDef = {
   id: "autonomous_agent",
   name: "Autonomous Agent",
   baseCostCapital: 1_000_000_000,
-  costMult: 1.25,
-  // Boosted from ×1.10 to ×1.18 so the late-game AGI flywheel actually
-  // catches the late-round thresholds. At 100 agents: ×1.18^100 ≈ 1.1e7
-  // (was ×1.10^100 ≈ 1.4e4 — three orders of magnitude weaker).
-  multPerUnit: 1.18,
+  // Cost steepened from 1.25 to 1.35 — at 1.25 the agent was spammable
+  // (100 agents cost only ×5e9 = 5e18 capital, trivial late-game). 1.35
+  // grows roughly 4× faster per buy, so each agent feels weighty.
+  costMult: 1.35,
+  // Tamed from ×1.18 — at 1.18 a stack of 100 agents gave ×1.1e7, which
+  // combined with prestige+research bonuses closed late rounds in 2 minutes.
+  // 1.14 still scales (100 agents = ×500K) but spreads the curve so each
+  // round takes meaningful play time instead of being one-shot agent-spam.
+  multPerUnit: 1.14,
   // Secondary (round 6) — unlocked one round earlier than the GDD §6 spec
   // (Acquisition). The pre-AGI cliff (round 5→6) was unreachable in sim
   // without the agent flywheel; moving the unlock back smooths the curve and

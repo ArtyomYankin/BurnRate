@@ -13,6 +13,7 @@ import {
   roundThreshold,
   tickRun,
   tokensPerSec,
+  CAPITAL_PER_TOKEN,
 } from "../core/math";
 import {
   aggregateResearchEffects,
@@ -22,7 +23,7 @@ import {
   ResearchEffects,
 } from "../core/research";
 import { AUTONOMOUS_AGENT, PRODUCER_BY_ID, unlockRoundForTier } from "../core/producers";
-import { SPRINT_UPGRADE_BY_ID, sprintUpgradeCost } from "../core/sprintUpgrades";
+import { SPRINT_UPGRADE_BY_ID, sprintUpgradeCost, aggregateSprintEffects } from "../core/sprintUpgrades";
 import {
   effectForTier,
   resolveTrainingRun,
@@ -64,6 +65,12 @@ export interface GameState {
   applyOfflineCatchup(now?: number): { dtSeconds: number };
   tick(now?: number): void;
   buyProducer(producerId: string, count?: number): { bought: number };
+  /** Add a single token by hand. Genre-standard click-to-help — meaningful
+   *  early (when tokens/sec < 1) and naturally irrelevant by round 2+ when
+   *  passive production dwarfs +1 per tap. Pillar 1 / GDD §4 explicitly
+   *  forbid REQUIRED clicking, so this is purely a "speed up the first
+   *  90 seconds" affordance. */
+  clickToken(): void;
   buyResearchNode(nodeId: string): { bought: boolean };
   /** GDD §4 Beat 2: spend RP on a per-run sprint upgrade. Idempotent — buying
    *  the same id twice is a no-op. Effects apply for the rest of the run and
@@ -279,6 +286,28 @@ export const useGame = create<GameState>((set, get) => ({
         r.firedThresholds.length === 0
           ? s.pendingDebtEvents
           : [...s.pendingDebtEvents, ...r.firedThresholds],
+    });
+  },
+
+  clickToken() {
+    set((s) => {
+      // +1 token, plus a Capital split — same formula as the tick pipeline
+      // (produced × alloc.product × CAPITAL_PER_TOKEN × research × sprint).
+      // Doesn't route Hype/RP — keeps clicks honest to the "early-game
+      // accelerator" intent without giving spammers free Marketing/R&D.
+      const effects = aggregateResearchEffects(s.persistent.unlockedResearch);
+      const sprintFx = aggregateSprintEffects(s.run.sprintUpgradesUnlocked);
+      const capitalGain = s.run.allocation.product
+        * CAPITAL_PER_TOKEN
+        * effects.capitalMult
+        * sprintFx.capitalMult;
+      return {
+        run: {
+          ...s.run,
+          tokens: D(s.run.tokens).add(1).toString(),
+          capital: D(s.run.capital).add(capitalGain).toString(),
+        },
+      };
     });
   },
 

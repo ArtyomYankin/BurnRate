@@ -139,12 +139,39 @@ export async function scheduleReengagement(state: GameState): Promise<void> {
   if (!N) return;
   if (!state.account?.pushOptedIn) return;
   try {
+    await ensureForegroundHandler(N);
     await N.cancelAllScheduledNotificationsAsync();
     const { title, body } = buildReengagementBody(state);
     const delaySec = computeRespectfulDelay(RE_ENGAGEMENT_DELAY_SEC);
     await N.scheduleNotificationAsync({
       content: { title, body, sound: false },
-      trigger: { seconds: delaySec, repeats: false } as never,
+      trigger: { type: "timeInterval", seconds: delaySec, repeats: false } as never,
+    });
+  } catch {
+    /* noop */
+  }
+}
+
+/**
+ * One-time install of a foreground notification handler. Without this,
+ * iOS / Android silently swallow incoming notifications while the app is
+ * frontmost. Idempotent — sets a single global flag and only installs once.
+ */
+let _handlerInstalled = false;
+async function ensureForegroundHandler(N: NotifModule): Promise<void> {
+  if (_handlerInstalled) return;
+  _handlerInstalled = true;
+  try {
+    N.setNotificationHandler({
+      handleNotification: async () => ({
+        // Modern API (SDK 53+) — banner + list visibility, plus the legacy
+        // shouldShowAlert key so older runtimes don't throw.
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldShowAlert: true,
+        shouldPlaySound: false,
+        shouldSetBadge: false,
+      } as never),
     });
   } catch {
     /* noop */

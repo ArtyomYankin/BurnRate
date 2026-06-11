@@ -4,6 +4,7 @@ import Svg, {
   Circle,
   ClipPath,
   Defs,
+  Ellipse,
   G,
   LinearGradient as SvgLinearGradient,
   Path,
@@ -139,23 +140,23 @@ const MEGACORP_ZONES: HitZone[] = [
   { id: "plant",    x:   0, y: 262, w: 18, h: 30, label: "Cosmetic" },
 ];
 
-// AGI SINGULARITY — coords ported 1:1 from Claude Design v3
-// (screens.jsx::AGI_HITS). The mega-structure core IS the Autonomous Agent
-// producer; the energy beam IS the Fusion Constellation; the orbital arrays
-// ARE the Data tap; Earth itself IS planetary compute (GPU); the pulsing
-// inner core IS Recursive Self-Training.
-//
-// Research isn't in design v3's AGI hits (the player is past spending Equity
-// at this point), but we keep a compact zone on the top-right nebula so
-// reaching the Research screen from Home stays possible across all scenes.
+// AGI SINGULARITY — design v11 rewrite. The company has become a gravity
+// well: a supermassive black hole at the center, with producer anchors
+// orbiting around it.
+//   engineer = the black hole itself (Recursive Superintelligence core)
+//   energy   = Quasar Tap (lower-right)
+//   books    = Galactic Archive (spiral galaxy upper-right)
+//   monitor  = polar relativistic jet (top, "Observe")
+//   gpu      = Matrioshka swarm (lower-left)
+// Research isn't on this scene by design intent — by round 11 the player is
+// past spending Equity; the model "trains itself" beat means there's nothing
+// to manually research anymore.
 const AGI_ZONES: HitZone[] = [
-  { id: "engineer", x: 119, y: 121, w: 60, h: 60, label: "Autonomous Agent (core)" },
-  { id: "energy",   x:  70, y: 150, w: 60, h: 80, label: "Energy (beam)" },
-  { id: "books",    x:   0, y:  60, w: 70, h: 70, label: "Data (orbital arrays)" },
-  { id: "monitor",  x: 139, y: 141, w: 22, h: 22, label: "Recursive Self-Training" },
-  { id: "gpu",      x:   0, y: 250, w: 70, h: 90, label: "Planetary Compute (Earth)" },
-  // Off-design fallback so Research is still reachable from this scene.
-  { id: "research", x: 184, y:  30, w: 52, h: 38, label: "Research (nebula)" },
+  { id: "engineer", x:  92, y: 124, w: 56, h: 52, label: "Recursive Superintelligence" },
+  { id: "energy",   x: 186, y: 264, w: 44, h: 44, label: "Quasar Tap" },
+  { id: "books",    x: 184, y:  50, w: 44, h: 40, label: "Galactic Archive" },
+  { id: "monitor",  x: 108, y:  92, w: 24, h: 32, label: "Recursive Self-Training" },
+  { id: "gpu",      x:   8, y: 264, w: 52, h: 44, label: "Matrioshka Swarm" },
 ];
 
 // COWORKING (Series B/C) — coords ported 1:1 from Claude Design v4
@@ -303,6 +304,11 @@ const PLANETARY_ZONES: HitZone[] = [
   { id: "gpu",       x: 158, y: 252, w:  50, h:  50, label: "Buy GPU (Asia-Pacific)" },
   // "Americas / lower hemisphere" compute belt — covers SA + IN cluster band.
   { id: "gpu2",      x:  40, y: 310, w:  96, h:  50, label: "Buy GPU (Americas Belt)" },
+  // Design v10 added a Frontier Research Array — a deep-space observatory.
+  // Raised above the Slack button (which floats on the left at SVG y≈77-102
+  // in our rendering geometry) so taps don't conflict; sprite is mounted at
+  // anchor (36, 50) in PlanetaryScene matching this zone.
+  { id: "research",  x:  16, y:  38, w:  46, h:  40, label: "Research (Frontier Array)" },
 ];
 
 export const HIT_ZONES_BY_SCENE: Record<SceneId, HitZone[]> = {
@@ -2328,6 +2334,89 @@ function arcPath(cx: number, cy: number, r: number, a0: number, a1: number): str
   return `M ${x0} ${y0} A ${r} ${r} 0 ${large} 0 ${x1} ${y1}`;
 }
 
+// ─── Frontier Research Array (planetary research access) ──────────────
+// Design v10 port. Deep-space observatory: parabolic dish pointed up-left
+// into the void, two solar wings, central hub, sensor mast, and a
+// sweeping scan-beam. Anchored top-left at (x, y).
+function FrontierResearchArray({ x, y, t }: { x: number; y: number; t: number }) {
+  const halo: React.ReactNode[] = [];
+  for (let g = 0; g < 6; g++) {
+    halo.push(
+      <Circle key={`h${g}`} cx={x + 8} cy={y + 8} r={18 - g}
+        stroke="#3FC4E0" strokeWidth={2} fill="none"
+        opacity={0.04 + g * 0.005} />
+    );
+  }
+
+  const wings: React.ReactNode[] = [];
+  for (const s of [-1, 1]) {
+    const wx = x + 8 + s * 13;
+    wings.push(<PixelRect key={`w${s}a`} x={wx - 2} y={y + 4} w={4} h={9} c="#1E2A52" />);
+    wings.push(<PixelRect key={`w${s}b`} x={wx - 2} y={y + 4} w={4} h={1} c="#3F4E8A" />);
+    for (let i = 0; i < 3; i++) {
+      wings.push(<Px key={`w${s}c${i}`} x={wx} y={y + 5 + i * 3} c="#4A6AD0" />);
+    }
+    // boom to hub
+    wings.push(<PixelRect key={`w${s}d`} x={x + 8 + s * 7} y={y + 8} w={6} h={1} c="#6C7A92" />);
+  }
+
+  // Parabolic dish — Ellipse with rotation. Canvas used -0.6 rad ≈ -34.4°.
+  const dcx = x + 2, dcy = y - 2;
+  const rotDeg = -34.4;
+
+  // Scanning beam — sin-wave sweep. Triangle polygon.
+  const sweep = Math.sin(t / 18) * 0.5;
+  const beamPts = [
+    [dcx, dcy],
+    [dcx - 30 + sweep * 14, dcy - 22],
+    [dcx - 18 + sweep * 14, dcy - 30],
+  ];
+
+  // Data pings traveling back down the beam (2 dots).
+  const pings: React.ReactNode[] = [];
+  for (let k = 0; k < 2; k++) {
+    const pp = ((t + k * 20) % 40) / 40;
+    const px2 = Math.floor(dcx - (24 + sweep * 14) * (1 - pp));
+    const py2 = Math.floor(dcy - 22 * (1 - pp));
+    pings.push(<Px key={`p${k}`} x={px2} y={py2} c="#FBE6A8" />);
+  }
+
+  return (
+    <G>
+      {/* Faint research halo */}
+      {halo}
+
+      {/* Solar wings */}
+      {wings}
+
+      {/* Central hub */}
+      <PixelRect x={x + 4} y={y + 4} w={8} h={9} c="#8C9AB0" />
+      <PixelRect x={x + 4} y={y + 4} w={8} h={1} c="#C8D0DC" />
+      <PixelRect x={x + 4} y={y + 12} w={8} h={1} c="#4C5A72" />
+      <Px x={x + 6} y={y + 7} c="#0E1115" />
+      <Px x={x + 9} y={y + 7} c="#0E1115" />
+
+      {/* Sensor mast + blinking nav light */}
+      <PixelRect x={x + 8} y={y - 6} w={1} h={5} c="#6C7A92" />
+      <Px x={x + 8} y={y - 7} c={(t >> 1) % 8 < 4 ? "#E85A7E" : "#3A1A1E"} />
+
+      {/* Faint scan-beam cone */}
+      <Polygon points={beamPts.map((p) => `${p[0]},${p[1]}`).join(" ")} fill="#A4F0FF" opacity={0.10} />
+      {pings}
+
+      {/* Parabolic dish — outer rim + dark interior, rotated up-left */}
+      <Ellipse cx={dcx} cy={dcy} rx={6} ry={4} fill="#B0B8C4"
+        transform={`rotate(${rotDeg} ${dcx} ${dcy})`} />
+      <Ellipse cx={dcx} cy={dcy} rx={4} ry={2.6} fill="#2A3038"
+        transform={`rotate(${rotDeg} ${dcx} ${dcy})`} />
+
+      {/* Feed strut + receiver tip */}
+      <PixelRect x={dcx - 1} y={dcy} w={2} h={6} c="#6C7A92" />
+      <Px x={dcx} y={dcy} c={(t >> 2) % 6 < 3 ? "#A4F0FF" : "#2A6E88"} />
+    </G>
+  );
+}
+
 function PlanetaryScene({ t }: { t: number }) {
   // ─── Earth + Moon geometry ────────────────────────────────────────────
   const cx = W / 2, cy = H - 8, R = 150;
@@ -2648,6 +2737,11 @@ function PlanetaryScene({ t }: { t: number }) {
         {aurora}
       </G>
 
+      {/* Frontier Research Array — deep-space observatory on the left.
+          Raised above the floating Slack button (which covers SVG y≈77-102
+          in our geometry) to keep the sprite + halo + mast visible. */}
+      <FrontierResearchArray x={36} y={50} t={t} />
+
       {/* Terminator dawn sliver (outside clip, sits ON the globe edge) */}
       <Path d={termPath} stroke="#C97B5B" strokeWidth={6} fill="none" opacity={0.12} />
 
@@ -2675,303 +2769,312 @@ function PlanetaryScene({ t }: { t: number }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// AGI SINGULARITY SCENE — port of pixel-art.jsx::composeAGIScene
-// Deep-space backdrop, parallax stars, nebula bloom, a huge Earth in the
-// lower-left, a crystalline megastructure with orbital rings + satellites,
-// data-flow beams, distant server nodes, and drifting debris.
-//
-// The heavy static layers (gradient, Earth, nebula) are memoized so they
-// render once; only the animated layer redraws each tick.
+// AGI SINGULARITY SCENE — design v11 rewrite. A supermassive black hole at
+// galactic scale: accretion disk + photon ring + lensed starfield + polar
+// jets + Doppler beaming. Producer anchors orbit: a Matrioshka swarm
+// (lower-left), a Quasar Tap (lower-right), a Galactic Archive spiral
+// (upper-right). Deadpan apocalypse vibe — "the company has become a
+// gravity well." Per pixel-art.jsx::composeAGIScene.
 // ═══════════════════════════════════════════════════════════════════════
-const SPACE = {
-  bgTop:   "#08060F",
-  bgBot:   "#140E28",
-  star:    "#FBF7EC",
-  starR:   "#D45A68",
-  starG:   "#A4BDA9",
-  gold:    "#EBBE6E",
-  goldHi:  "#FFFFEE",
-  white:   "#FFFFFF",
-  neb0:    "#1F0F2C",
-  neb1:    "#3A1A40",
-  neb2:    "#5C2050",
-  neb3:    "#7A1F2A",
-  red:     "#B23A48",
-  redHi:   "#D45A68",
-  ocean:   "#1A3050",
-  oceanHi: "#3F5A78",
-  land:    "#3F5142",
-  landHi:  "#7E9A85",
-  haloIn:  "#4A6FA5",
-  haloOut: "#5C7A9A",
-  deep:    "#1A0F28",
-};
 
-const AGIBackdrop = React.memo(function AGIBackdrop() {
-  const els: React.ReactNode[] = [];
+// — Spiral galaxy (background decor + Data producer anchor) —
+function SpiralGalaxy({
+  cx, cy, R, ry, t, spin, core, arm,
+}: { cx: number; cy: number; R: number; ry: number; t: number; spin: number; core: string; arm: string }) {
+  const out: React.ReactNode[] = [];
   let k = 0;
-  const key = () => `bg${k++}`;
-  const R = (x: number, y: number, w: number, h: number, c: string) =>
-    els.push(<PixelRect key={key()} x={x} y={y} w={w} h={h} c={c} />);
-  const PX = (x: number, y: number, c: string) =>
-    els.push(<Px key={key()} x={x} y={y} c={c} />);
-
-  // Nebula bloom across the top (column step 2 to keep node count sane)
-  const NEB_Y = 20;
-  for (let i = 0; i < W; i += 2) {
-    const dist = Math.abs(i - W / 2);
-    const intensity = Math.max(0, 1 - dist / (W * 0.6));
-    if (intensity < 0.05) continue;
-    const h = (28 + intensity * 40) | 0;
-    const baseY = NEB_Y + ((Math.sin(i / 24) * 6) | 0);
-    for (let layer = 0; layer < 4; layer++) {
-      const hh = h - layer * 8;
-      if (hh <= 0) break;
-      const color = layer === 0 ? SPACE.neb0 : layer === 1 ? SPACE.neb1 : layer === 2 ? SPACE.neb2 : SPACE.neb3;
-      R(i, baseY + layer * 2, 2, hh, color);
+  // Bulge — concentric ellipses, increasing alpha toward center.
+  for (let g = 4; g > 0; g--) {
+    out.push(
+      <Ellipse key={`b${g}`} cx={cx} cy={cy} rx={g * 2.4} ry={g * 1.7}
+        fill={core} opacity={0.09 * g} />
+    );
+  }
+  // Two arms — pixel trails along parametric spirals.
+  for (let a2 = 0; a2 < 2; a2++) {
+    for (let i = 0; i < 64; i++) {
+      const a = i * 0.17 + spin + a2 * Math.PI + t / 320;
+      const rr = (i / 64) * R;
+      const x = cx + Math.cos(a) * rr;
+      const y = cy + Math.sin(a) * rr * (ry / R);
+      const tw = (t + i * 3 + a2 * 20) % 30 < 22;
+      out.push(<Px key={`g${k++}`} x={x | 0} y={y | 0} c={tw ? arm : core} />);
+      if (i % 9 === 0) out.push(<Px key={`gh${k++}`} x={(x + 1) | 0} y={y | 0} c="#FBF7EC" />);
     }
   }
-  // Embedded bright stars in nebula
-  for (let i = 0; i < 8; i++) {
-    const sx = 20 + i * 28;
-    const sy = NEB_Y + 14 + ((i * 7) % 18);
-    PX(sx, sy, SPACE.star);
-    PX(sx - 1, sy, SPACE.gold);
-    PX(sx + 1, sy, SPACE.gold);
-    PX(sx, sy - 1, SPACE.gold);
-    PX(sx, sy + 1, SPACE.gold);
-  }
+  // Bright stellar core.
+  out.push(<PixelRect key={`c0`} x={cx - 1} y={cy - 1} w={3} h={3} c="#FFF8E8" />);
+  out.push(<Px key={`c1`} x={cx} y={cy} c="#FFFFFF" />);
+  return <G>{out}</G>;
+}
 
-  // EARTH — big, lower-left foreground
-  const eCx = -10, eCy = H + 30, eR = 110;
-  for (let y = -eR; y <= eR; y += 1) {
-    const py = eCy + y;
-    if (py < 0 || py >= H) continue;
-    const xspan = Math.sqrt(eR * eR - y * y) | 0;
-    const xL = Math.max(0, eCx - xspan);
-    const xR = Math.min(W, eCx + xspan);
-    if (xR <= xL) continue;
-    const fromEdge = Math.min(Math.abs(y), eR - Math.abs(y));
-    if (fromEdge < 3) R(xL, py, xR - xL, 1, SPACE.haloOut);
-    else if (fromEdge < 6) R(xL, py, xR - xL, 1, SPACE.haloIn);
-    else {
-      R(xL, py, xR - xL, 1, SPACE.ocean);
-      if (y > -eR + 20 && y < 0) R(xL, py, 6, 1, SPACE.oceanHi);
-      if (Math.abs(y) % 5 < 3) {
-        for (let cx = xL; cx < xR; cx += 2) {
-          const noise = (cx * 13 + y * 7) % 13;
-          if (noise < 5) {
-            R(cx, py, 2, 1, noise < 2 ? SPACE.landHi : SPACE.land);
-          }
-        }
-      }
-      if (y > -eR + 12 && y < eR - 12) {
-        for (let li = 0; li < 6; li++) {
-          if ((li + y) % 4 === 0) {
-            const lx = xR - 6 - li * 3;
-            if (lx > xL) PX(lx, py, SPACE.gold);
-          }
-        }
+// — One half of the tilted accretion disk (back-half partly occluded by the
+// event horizon; front-half pops over the hole). Drawn as 10 concentric
+// elliptical arcs with a temperature gradient + animated Doppler shimmer. —
+function DiskHalf({
+  cx, cy, rx, ry, irx, iry, a0, a1, t, back,
+}: { cx: number; cy: number; rx: number; ry: number; irx: number; iry: number; a0: number; a1: number; t: number; back: boolean }) {
+  const out: React.ReactNode[] = [];
+  let k = 0;
+  const bands = 10;
+  for (let b = 0; b < bands; b++) {
+    const f = b / (bands - 1);
+    const bx = irx + (rx - irx) * f;
+    const by = iry + (ry - iry) * f;
+    const col = f < 0.2 ? "#FFF6DC"
+              : f < 0.4 ? "#FFD27A"
+              : f < 0.6 ? "#FF9A3A"
+              : f < 0.8 ? "#F5602A"
+                        : "#C0301E";
+    const [sx, sy] = [cx + Math.cos(a0) * bx, cy + Math.sin(a0) * by];
+    const [ex, ey] = [cx + Math.cos(a1) * bx, cy + Math.sin(a1) * by];
+    const large = Math.abs(a1 - a0) > Math.PI ? 1 : 0;
+    out.push(
+      <Path key={`d${b}`}
+        d={`M ${sx} ${sy} A ${bx} ${by} 0 ${large} 1 ${ex} ${ey}`}
+        stroke={col} strokeWidth={2} fill="none"
+        opacity={back ? 0.45 : 0.85} />
+    );
+  }
+  // Doppler beaming shimmer — bright on the approaching side.
+  for (let i = 0; i < 44; i++) {
+    const a = a0 + (a1 - a0) * (i / 44);
+    const f = 0.35 + 0.6 * ((Math.sin(i * 0.7 + t / 6) + 1) / 2);
+    const bx = irx + (rx - irx) * f;
+    const by = iry + (ry - iry) * f;
+    const x = cx + Math.cos(a) * bx;
+    const y = cy + Math.sin(a) * by;
+    if ((t * 2 + i * 5) % 20 >= 12) continue;
+    out.push(<Px key={`dd${k++}`} x={x | 0} y={y | 0} c={Math.cos(a) < 0 ? "#FFFFFF" : "#FFC878"} />);
+  }
+  return <G>{out}</G>;
+}
+
+// — The black hole centerpiece: outer glow + back-disk + lensed top arcs +
+// event-horizon shadow + photon ring + front-disk + relativistic polar jets. —
+function BlackHole({ cx, cy, t }: { cx: number; cy: number; t: number }) {
+  const ehR = 22, diskRx = 86, diskRy = 26, innerRx = 30, innerRy = 9;
+  // Top gravitational-lensing arcs (5 concentric).
+  const lensRings: React.ReactNode[] = [];
+  for (let ring = 0; ring < 5; ring++) {
+    const lcx = cx, lcy = cy;
+    const lrx = ehR + 6 + ring * 2, lry = ehR + 14 + ring * 3;
+    const aL = Math.PI * 1.06, aR = Math.PI * 1.94;
+    const [sx, sy] = [lcx + Math.cos(aL) * lrx, lcy + Math.sin(aL) * lry];
+    const [ex, ey] = [lcx + Math.cos(aR) * lrx, lcy + Math.sin(aR) * lry];
+    lensRings.push(
+      <Path key={`l${ring}`}
+        d={`M ${sx} ${sy} A ${lrx} ${lry} 0 0 1 ${ex} ${ey}`}
+        stroke={ring < 2 ? "#FFF2C8" : ring < 4 ? "#FFC04A" : "#FF8030"}
+        strokeWidth={2} fill="none"
+        opacity={0.55 - ring * 0.09} />
+    );
+  }
+  // Polar jets — vertical fan of bright streaks above + below.
+  const jets: React.ReactNode[] = [];
+  let jk = 0;
+  for (const dir of [-1, 1]) {
+    for (let j = 0; j < 58; j++) {
+      const jy = cy + dir * (ehR + 2 + j * 1.7);
+      const spread = j * 0.16;
+      const col = j < 12 ? "#CFEFFF" : j < 30 ? "#7EC8E8" : "#3F88C4";
+      const op = Math.max(0, 0.5 - j * 0.008);
+      const w = Math.max(1, Math.floor(spread * 2));
+      jets.push(
+        <Rect key={`j${jk++}`} x={cx - spread} y={jy} width={w} height={1} fill={col} opacity={op} />
+      );
+      if ((t + j * 2) % 8 < 3) {
+        jets.push(<Px key={`jp${jk++}`} x={cx | 0} y={jy | 0} c="#FFFFFF" />);
       }
     }
   }
+  return (
+    <G>
+      {/* Outer disk glow */}
+      <Ellipse cx={cx} cy={cy} rx={diskRx + 8} ry={diskRy + 7} fill="#FF7A2A" opacity={0.16} />
+      {/* Back half of accretion disk */}
+      <DiskHalf cx={cx} cy={cy} rx={diskRx} ry={diskRy} irx={innerRx} iry={innerRy}
+        a0={Math.PI} a1={Math.PI * 2} t={t} back />
+      {/* Gravitational lensing arcs over the top */}
+      {lensRings}
+      {/* Event-horizon shadow */}
+      <Ellipse cx={cx} cy={cy} rx={ehR} ry={ehR} fill="#070410" />
+      {/* Photon ring + soft halo */}
+      <Ellipse cx={cx} cy={cy} rx={ehR + 1.5} ry={ehR + 1.5} fill="none"
+        stroke="#FFF6DC" strokeWidth={1.5} opacity={0.9} />
+      <Ellipse cx={cx} cy={cy} rx={ehR + 3} ry={ehR + 3} fill="none"
+        stroke="#FFB84A" strokeWidth={1} opacity={0.4} />
+      {/* Front half of accretion disk (over the hole) */}
+      <DiskHalf cx={cx} cy={cy} rx={diskRx} ry={diskRy} irx={innerRx} iry={innerRy}
+        a0={0} a1={Math.PI} t={t} back={false} />
+      {/* Relativistic polar jets — above and below */}
+      {jets}
+    </G>
+  );
+}
 
-  return <G>{els}</G>;
-});
+// — Matrioshka / Dyson compute swarm (GPU producer anchor) —
+function DysonSwarm({ cx, cy, t }: { cx: number; cy: number; t: number }) {
+  const dots: React.ReactNode[] = [];
+  let k = 0;
+  for (let ring = 0; ring < 3; ring++) {
+    const rad = 8 + ring * 4, ph = t / 40 + ring;
+    for (let kk = 0; kk < 8; kk++) {
+      const a = kk * Math.PI / 4 + ph;
+      const x = cx + Math.cos(a) * rad;
+      const y = cy + Math.sin(a) * rad * 0.6;
+      dots.push(<Px key={`s${k++}`} x={x | 0} y={y | 0} c={ring % 2 ? "#A86AD0" : "#6A4A9A"} />);
+      if ((t + kk) % 6 < 3) {
+        dots.push(<Px key={`sh${k++}`} x={x | 0} y={(y - 1) | 0} c="#C9A0E0" />);
+      }
+    }
+  }
+  return (
+    <G>
+      <Ellipse cx={cx} cy={cy} rx={20} ry={20} fill="#5C3A6A" opacity={0.22} />
+      <PixelRect x={cx - 3} y={cy - 3} w={6} h={6} c="#FFE0A0" />
+      <PixelRect x={cx - 2} y={cy - 2} w={4} h={4} c="#FFF8E0" />
+      <Px x={cx} y={cy} c="#FFFFFF" />
+      {dots}
+    </G>
+  );
+}
+
+// — Quasar tap (Energy producer anchor) —
+function Quasar({ cx, cy, t }: { cx: number; cy: number; t: number }) {
+  const beams: React.ReactNode[] = [];
+  let k = 0;
+  for (const dir of [-1, 1]) {
+    for (let j = 0; j < 14; j++) {
+      const op = Math.max(0, 0.6 - j * 0.04);
+      const col = j < 5 ? "#FFFFFF" : "#EBBE6E";
+      beams.push(
+        <Rect key={`q${k++}`} x={(cx + dir * (j * 1.4)) | 0} y={(cy - j) | 0}
+          width={1} height={1} fill={col} opacity={op} />
+      );
+      beams.push(
+        <Rect key={`q${k++}`} x={(cx - dir * (j * 1.4)) | 0} y={(cy + j) | 0}
+          width={1} height={1} fill={col} opacity={op} />
+      );
+    }
+  }
+  const pulseOn = t % 14 < 7;
+  return (
+    <G>
+      <Ellipse cx={cx} cy={cy} rx={18} ry={14} fill="#5C5020" opacity={0.28} />
+      <PixelRect x={cx - 4} y={cy - 3} w={8} h={6} c="#FFC04A" />
+      <PixelRect x={cx - 2} y={cy - 2} w={4} h={4} c="#FFF8E0" />
+      <Px x={cx} y={cy} c="#FFFFFF" />
+      {beams}
+      {pulseOn && (
+        <Ellipse cx={cx} cy={cy} rx={8 + (t % 14)} ry={6 + (t % 14) * 0.7}
+          fill="none" stroke="#EBBE6E" strokeWidth={1} opacity={0.45} />
+      )}
+    </G>
+  );
+}
 
 function AGIScene({ t }: { t: number }) {
-  const els: React.ReactNode[] = [];
-  let k = 0;
-  const key = () => `ag${k++}`;
-  const R = (x: number, y: number, w: number, h: number, c: string, o?: number) =>
-    els.push(<Rect key={key()} x={x} y={y} width={w} height={h} fill={c} opacity={o} />);
-  const PX = (x: number, y: number, c: string) =>
-    els.push(<Px key={key()} x={x} y={y} c={c} />);
+  const cx = 120, cy = 150;
 
-  // Stars — twinkling small layer
-  for (let i = 0; i < 60; i++) {
-    const sx = (i * 41 + (i % 9) * 7) % W;
-    const sy = (i * 67 + (i % 5) * 13) % H;
-    if ((t + i * 11) % 32 < 24) {
-      const col = i % 7 === 0 ? SPACE.starR : i % 5 === 0 ? SPACE.starG : SPACE.star;
-      PX(sx, sy, col);
+  // Lensed starfield — stars that bend around the hole within d<72.
+  const starElems = React.useMemo(() => {
+    const out: React.ReactNode[] = [];
+    for (let i = 0; i < 130; i++) {
+      const x0 = (i * 71 + (i * i) % 17) % W;
+      const y0 = (i * 43 + (i % 7) * 11) % H;
+      const dx = x0 - cx, dy = y0 - cy, d = Math.hypot(dx, dy);
+      if (d < 24) continue;
+      let sx = x0, sy = y0;
+      if (d < 72) {
+        const ang = Math.atan2(dy, dx) + ((72 - d) / 72) * 0.8;
+        sx = cx + Math.cos(ang) * d;
+        sy = cy + Math.sin(ang) * d;
+      }
+      const tier = i % 5;
+      const c = tier === 0 ? "#FFFFFF" : tier === 1 ? "#C8D4E6" : "#7C8AA0";
+      out.push(<Px key={`st${i}`} x={sx | 0} y={sy | 0} c={c} />);
     }
-  }
-  // Bright foreground stars (2×2)
-  for (let i = 0; i < 14; i++) {
-    const sx = (i * 71 + 11) % W;
-    const sy = (i * 53 + 19) % H;
-    if ((t + i * 9) % 40 < 32) {
-      R(sx, sy, 2, 2, SPACE.star);
-      PX(sx, sy - 1, SPACE.star);
-      PX(sx + 1, sy + 2, SPACE.star);
-    }
-  }
+    return out;
+  }, []);
 
-  const eCx = -10, eCy = H + 30;
-  // Earth clouds (drifting)
-  for (let cb = 0; cb < 3; cb++) {
-    const cby = eCy - 60 + cb * 32;
-    const cbo = (t / 100 + cb * 0.7) % 1;
-    for (let i = 0; i < 40; i++) {
-      const cx = 4 + (((i * 3 + cbo * 80) | 0) % 90);
-      if (cx + eCx > 0 && cx + eCx < 110 && cby > 0 && cby < H && (i + cb) % 3 === 0) {
-        PX(eCx + cx, cby, SPACE.star);
+  // Infalling gas streams — 3 spirals decaying into the disk.
+  const infall: React.ReactNode[] = [];
+  let ifk = 0;
+  for (let s = 0; s < 3; s++) {
+    const base = s * 2.1 + t / 60;
+    for (let i = 0; i < 26; i++) {
+      const a = base + i * 0.26, rr = 98 - i * 3;
+      if (rr < 30) break;
+      const x = cx + Math.cos(a) * rr;
+      const y = cy + Math.sin(a) * rr * 0.42;
+      if ((t + i * 3 + s * 7) % 12 < 7) {
+        const col = i < 8 ? "#FFB84A" : i < 16 ? "#E8702A" : "#7A2A1E";
+        infall.push(<Px key={`if${ifk++}`} x={x | 0} y={y | 0} c={col} />);
       }
     }
   }
 
-  // Singularity point near Earth
-  const sgx = eCx + 60, sgy = eCy - 70;
-  R(sgx - 14, sgy - 14, 28, 28, SPACE.goldHi, 0.3);
-  R(sgx - 10, sgy - 10, 20, 20, SPACE.gold, 0.5);
-  R(sgx - 6, sgy, 12, 1, SPACE.goldHi);
-  R(sgx, sgy - 6, 1, 12, SPACE.goldHi);
-  R(sgx - 3, sgy - 1, 6, 3, SPACE.gold);
-  R(sgx - 1, sgy - 1, 2, 3, SPACE.white);
-  R(sgx - 4, sgy, 8, 1, SPACE.white);
-
-  // Megastructure
-  const megaCx = (W * 0.62) | 0, megaCy = (H * 0.42) | 0;
-  // Energy beam Earth → megastructure
-  for (let beamY = sgy; beamY > megaCy + 50; beamY -= 1) {
-    const tx = ((sgx * (beamY - megaCy) + megaCx * (sgy - beamY)) / (sgy - megaCy)) | 0;
-    const wobble = (beamY + t) % 6 < 3 ? 0 : 1;
-    if ((t + beamY) % 3 < 2) {
-      PX(tx, beamY, SPACE.gold);
-      PX(tx + wobble, beamY, SPACE.white);
-    }
+  // Accretion-glow wash behind everything (6 nested low-alpha ellipses).
+  const wash: React.ReactNode[] = [];
+  for (let g = 6; g > 0; g--) {
+    wash.push(
+      <Ellipse key={`w${g}`} cx={cx} cy={cy} rx={g * 22} ry={g * 16}
+        fill={g > 3 ? "#3A1A40" : "#5C2A20"} opacity={0.05} />
+    );
   }
-  // Outer halos
-  R(megaCx - 60, megaCy - 60, 120, 120, SPACE.neb2, 0.25);
-  R(megaCx - 44, megaCy - 44, 88, 88, SPACE.neb3, 0.4);
-  // Orbital rings
-  for (let a = 0; a < Math.PI * 2; a += 0.07) {
-    const rx = (megaCx + Math.cos(a + t / 100) * 110) | 0;
-    const ry = (megaCy + Math.sin(a + t / 100) * 38) | 0;
-    if (rx > 0 && rx < W && ry > 0 && ry < H) {
-      R(rx, ry, 2, 1, ((a * 7) | 0) % 4 === 0 ? SPACE.redHi : SPACE.neb2);
-    }
-  }
-  for (let a = 0; a < Math.PI * 2; a += 0.09) {
-    const rx = (megaCx + Math.cos(a - t / 80) * 80) | 0;
-    const ry = (megaCy + Math.sin(a - t / 80) * 26) | 0;
-    if (rx > 0 && rx < W && ry > 0 && ry < H) {
-      PX(rx, ry, SPACE.red);
-      PX(rx + 1, ry, SPACE.neb3);
-    }
-  }
-  for (let a = 0; a < Math.PI * 2; a += 0.12) {
-    const rx = (megaCx + Math.cos(a + t / 50) * 56) | 0;
-    const ry = (megaCy + Math.sin(a + t / 50) * 18) | 0;
-    if (rx > 0 && rx < W && ry > 0 && ry < H) PX(rx, ry, SPACE.redHi);
-  }
-  // Megastructure core — diamond
-  const mr = 30;
-  for (let i = 0; i < mr * 2; i++) {
-    const w = mr - Math.abs(i - mr);
-    const col = i < mr - 6 ? SPACE.neb2 : i < mr ? SPACE.neb3 : i < mr + 6 ? SPACE.red : SPACE.neb1;
-    R(megaCx - w, megaCy - mr + i, w * 2, 1, col);
-  }
-  for (let f = 0; f < 5; f++) {
-    const facetW = mr - 4 - f * 4;
-    R(megaCx - facetW, megaCy - mr + 4 + f * 5, facetW * 2, 1, SPACE.red);
-  }
-  for (let i = 0; i < mr; i++) {
-    PX(megaCx - (mr - i), megaCy - i, SPACE.redHi);
-    PX(megaCx + (mr - i), megaCy - i, SPACE.neb2);
-  }
-  R(megaCx - 1, megaCy - mr - 4, 2, 4, SPACE.gold);
-  PX(megaCx, megaCy - mr - 5, SPACE.white);
-  const pulse = t % 16 < 8 ? SPACE.goldHi : SPACE.gold;
-  R(megaCx - 6, megaCy - 4, 12, 8, pulse);
-  R(megaCx - 4, megaCy - 6, 8, 12, pulse);
-  R(megaCx - 2, megaCy - 2, 4, 4, SPACE.white);
-  for (let v = 0; v < 4; v++) {
-    const va = v * (Math.PI / 2) + Math.PI / 4;
-    const vx = (megaCx + Math.cos(va) * (mr - 6)) | 0;
-    const vy = (megaCy + Math.sin(va) * (mr - 6)) | 0;
-    R(vx - 2, vy - 2, 4, 4, SPACE.redHi);
-    PX(vx, vy, SPACE.goldHi);
-  }
-  // Orbiting satellites
-  for (let s = 0; s < 4; s++) {
-    const sa = t / 30 + s * (Math.PI / 2);
-    const sx = (megaCx + Math.cos(sa) * 56) | 0;
-    const sy = (megaCy + Math.sin(sa) * 20) | 0;
-    R(sx - 3, sy - 1, 7, 3, SPACE.red);
-    R(sx - 3, sy - 1, 7, 1, SPACE.redHi);
-    R(sx - 3, sy + 1, 7, 1, SPACE.neb3);
-    R(sx - 6, sy, 3, 1, SPACE.neb2);
-    R(sx + 4, sy, 3, 1, SPACE.neb2);
-    PX(sx - 7, sy, SPACE.neb1);
-    PX(sx + 6, sy, SPACE.neb1);
-    PX(sx + 4, sy + 1, (t + s * 3) % 4 < 2 ? SPACE.gold : SPACE.white);
-  }
-  // Data flow Earth → megastructure
-  for (let i = 0; i < 18; i++) {
-    const t2 = (t * 2 + i * 18) % 200;
-    if (t2 > 100) continue;
-    const fx = (sgx + ((megaCx - sgx) * t2) / 100) | 0;
-    const fy = (sgy + ((megaCy - sgy) * t2) / 100) | 0;
-    R(fx, fy, 2, 1, i % 3 === 0 ? SPACE.white : i % 2 === 0 ? SPACE.gold : SPACE.redHi);
-  }
-  // Distant orbital data nodes
-  for (let i = 0; i < 6; i++) {
-    const a = (i * Math.PI) / 3 + t / 200;
-    const sx = (megaCx + Math.cos(a) * 160) | 0;
-    const sy = (megaCy + Math.sin(a) * 72) | 0;
-    if (sx > 8 && sx < W - 8 && sy > 8 && sy < H - 12) {
-      R(sx - 4, sy - 6, 8, 12, SPACE.deep);
-      R(sx - 4, sy - 6, 8, 1, SPACE.neb2);
-      R(sx - 4, sy + 5, 8, 1, SPACE.neb1);
-      for (let row = 0; row < 5; row++) {
-        R(sx - 3, sy - 4 + row * 2, 6, 1, SPACE.neb1);
-        PX(sx - 2, sy - 4 + row * 2, (t + i * 3 + row) % 6 < 3 ? SPACE.redHi : SPACE.neb3);
-        PX(sx + 1, sy - 4 + row * 2, SPACE.gold);
-      }
-      R(sx, sy - 9, 1, 3, SPACE.neb3);
-      PX(sx, sy - 10, SPACE.redHi);
-    }
-  }
-  // Asteroid debris
-  for (let i = 0; i < 12; i++) {
-    const ax = ((i * 51 + (t >> 3)) % (W + 20)) - 10;
-    const ay = 60 + ((i * 41) % (H - 120));
-    R(ax, ay, 2, 1, SPACE.neb1);
-    PX(ax + 1, ay - 1, SPACE.neb2);
-    PX(ax, ay + 1, SPACE.deep);
-  }
-  // Reality-tear glitch (rare)
-  if ((t >> 1) % 47 < 2) {
-    const gy = (t * 7) % H;
-    R(0, gy, W, 1, SPACE.redHi);
-    R(0, gy + 1, W, 1, SPACE.goldHi);
-  }
-  // Round badge
-  R(4, H - 22, 88, 18, SPACE.deep);
-  R(4, H - 22, 88, 1, SPACE.neb2);
-  R(4, H - 5, 88, 1, SPACE.neb2);
-  R(8, H - 19, 4, 12, SPACE.redHi);
-  R(14, H - 19, 4, 12, SPACE.redHi);
-  R(20, H - 13, 4, 6, SPACE.redHi);
-  R(30, H - 17, 60, 1, SPACE.gold);
-  R(30, H - 13, 50, 1, SPACE.star);
-  R(30, H - 9, 40, 1, SPACE.redHi);
 
   return (
     <G>
-      {/* Deep-space gradient via SVG LinearGradient (1 rect) */}
       <Defs>
-        <SvgLinearGradient id="agiSpace" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor={SPACE.bgTop} />
-          <Stop offset="1" stopColor={SPACE.bgBot} />
+        <SvgLinearGradient id="agi-bg" x1="0" y1="0" x2="0" y2={H}>
+          <Stop offset="0" stopColor="#06050C" />
+          <Stop offset="1" stopColor="#0C091A" />
         </SvgLinearGradient>
       </Defs>
-      <Rect x={0} y={0} width={W} height={H} fill="url(#agiSpace)" />
-      <AGIBackdrop />
-      {els}
-      <FloatingTokens spawnX={megaCx} spawnY={megaCy} t={t} />
+
+      {/* Backdrop */}
+      <Rect x={0} y={0} width={W} height={H} fill="url(#agi-bg)" />
+
+      {/* Accretion-glow wash */}
+      {wash}
+
+      {/* Lensed starfield (stars curve around the hole) */}
+      {starElems}
+
+      {/* Distant background galaxies — purple + amber */}
+      <SpiralGalaxy cx={40} cy={58} R={18} ry={8} t={t} spin={0.5} core="#C9A0E0" arm="#7A5AA8" />
+      <SpiralGalaxy cx={200} cy={320} R={14} ry={6} t={t} spin={2.1} core="#E0C090" arm="#A8804A" />
+
+      {/* Tiny edge-on galaxy (top-mid, gold core) */}
+      <Rect x={150} y={40} width={16} height={1} fill="#C8D4E6" opacity={0.7} />
+      <Rect x={154} y={39} width={8}  height={1} fill="#FBF7EC" opacity={0.7} />
+      <Rect x={156} y={38} width={4}  height={1} fill="#FFFFFF" opacity={0.7} />
+
+      {/* The black hole centerpiece */}
+      <BlackHole cx={cx} cy={cy} t={t} />
+
+      {/* Infalling gas streams spiraling into the disk */}
+      {infall}
+
+      {/* PRODUCER ANCHORS */}
+      <DysonSwarm cx={34} cy={288} t={t} />
+      <Quasar cx={208} cy={288} t={t} />
+      <SpiralGalaxy cx={206} cy={70} R={20} ry={9} t={t} spin={1.2} core="#A4F0D0" arm="#3F8A6A" />
+      <PixelRect x={204} y={68} w={4} h={4} c="#CFFBE8" />
+
+      {/* R12 · AGI badge (bottom-left) */}
+      <PixelRect x={4} y={H - 22} w={92} h={18} c="#0E0A18" />
+      <PixelRect x={4} y={H - 22} w={92} h={1}  c="#5C2050" />
+      <PixelRect x={4} y={H - 5}  w={92} h={1}  c="#5C2050" />
+      <PixelRect x={8}  y={H - 19} w={4} h={12} c="#D45A68" />
+      <PixelRect x={14} y={H - 19} w={4} h={12} c="#D45A68" />
+      <PixelRect x={20} y={H - 13} w={4} h={6}  c="#D45A68" />
+      <PixelRect x={30} y={H - 17} w={62} h={1} c="#EBBE6E" />
+      <PixelRect x={30} y={H - 13} w={52} h={1} c="#FBF7EC" />
+      <PixelRect x={30} y={H - 9}  w={42} h={1} c="#D45A68" />
+
+      <FloatingTokens spawnX={100} spawnY={190} t={t} />
     </G>
   );
 }
