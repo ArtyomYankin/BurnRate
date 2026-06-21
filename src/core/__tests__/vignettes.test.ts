@@ -67,6 +67,22 @@ describe("vignettes data layer", () => {
       expect(v.replyEffects!.length).toBe(v.replies!.length);
     }
   });
+
+  it("every kind-tagged replyEffects triplet has exactly one buff, neutral, debuff", () => {
+    // Roles design rule: Slack DMs with 3 replies offer one of each kind so
+    // the choice is a real read of the message (one win / one no-op / one
+    // sting). Future entries can opt out by leaving kind undefined, but
+    // any vignette that uses kind must follow the triplet rule.
+    for (const v of VIGNETTES) {
+      if (!v.replyEffects) continue;
+      const tagged = v.replyEffects.filter((e) => e.kind !== undefined);
+      if (tagged.length === 0) continue;
+      expect(tagged.length, `${v.id} mixes tagged + untagged replyEffects`).toBe(v.replyEffects.length);
+      const counts = { buff: 0, neutral: 0, debuff: 0 };
+      for (const e of v.replyEffects) counts[e.kind!]++;
+      expect(counts, `${v.id} roles must be 1 buff + 1 neutral + 1 debuff`).toEqual({ buff: 1, neutral: 1, debuff: 1 });
+    }
+  });
 });
 
 describe("isConditionMet", () => {

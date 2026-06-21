@@ -22,10 +22,10 @@ import {
   useGame,
 } from "../game/store";
 import * as audio from "../audio";
-import { useAudioStore } from "../audio";
 import { BottomAllocation } from "./BottomAllocation";
 import { BuffsModal } from "./BuffsModal";
 import { HelpModal } from "./HelpModal";
+import { SettingsModal } from "./SettingsModal";
 import { SlackButton } from "./SlackButton";
 import { formatNumber, formatRate } from "./formatNumber";
 import { ItemPopup, PopupContent } from "./ItemPopup";
@@ -78,10 +78,6 @@ export function HomeScreen({
   const achievementCount = useGame(selectUnlockedAchievementCount);
   const onboardingStep = useGame((s) => s.account.onboardingStep);
   const clickToken = useGame((s) => s.clickToken);
-  const sfxMuted = useAudioStore((s) => s.sfxMuted);
-  const toggleSfx = useAudioStore((s) => s.toggleSfx);
-  const musicEnabled = useAudioStore((s) => s.musicEnabled);
-  const toggleMusic = useAudioStore((s) => s.toggleMusic);
 
   const tokens = D(tokensStr);
   const capital = D(capitalStr);
@@ -154,6 +150,7 @@ export function HomeScreen({
   const [devOpen, setDevOpen] = React.useState(false);
   const [buffsOpen, setBuffsOpen] = React.useState(false);
   const [helpOpen, setHelpOpen] = React.useState(false);
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
 
   const handleHit = (id: HitId) => {
     setActiveHit(id);
@@ -211,6 +208,8 @@ export function HomeScreen({
             : `NEXT: ${nextRound.name.toUpperCase()} · 1e${nextRound.tokenThresholdLog10} TOKENS`
         }
         onPressTokens={clickToken}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenHelp={() => setHelpOpen(true)}
       />
 
       {/* Visible-in-dev cheat trigger. Replaces an earlier hidden long-press
@@ -223,21 +222,6 @@ export function HomeScreen({
         </Pressable>
       )}
       {__DEV__ && <DevPanel visible={devOpen} onClose={() => setDevOpen(false)} />}
-
-      {/* SFX mute toggle — small chip on the right edge, just below the DEV
-          chip. Tap to flip; reads from useAudioStore so it stays in sync if
-          anything else flips the mute. */}
-      <Pressable style={styles.sfxChip} onPress={toggleSfx}>
-        <Text style={styles.sfxChipText}>{sfxMuted ? "MUTE" : "SFX"}</Text>
-      </Pressable>
-
-      {/* Music toggle — sits directly under the SFX chip. Default OFF per
-          GDD §14 ("Burn Rate is played in public spaces"). Toggling on
-          starts the era-appropriate track on the next render tick. */}
-      <Pressable style={styles.musicChip} onPress={toggleMusic}>
-        <Text style={styles.sfxChipText}>{musicEnabled ? "♪ ON" : "♪ OFF"}</Text>
-      </Pressable>
-
 
       {/* Bottom row of secondary buttons — keep prestige + producers/research
           reachable even when the player ignores hit zones. Sits above the
@@ -257,11 +241,6 @@ export function HomeScreen({
                 <Text style={styles.inboxBadgeText}>{achievementCount}</Text>
               </View>
             )}
-          </View>
-        </Pressy>
-        <Pressy onPress={() => setHelpOpen(true)}>
-          <View style={styles.inboxBtn}>
-            <Text style={styles.inboxText}>?</Text>
           </View>
         </Pressy>
         {canPrestige && (
@@ -291,6 +270,7 @@ export function HomeScreen({
       <ItemPopup item={popup} onClose={closePopup} onAction={handlePopupAction} />
       <BuffsModal visible={buffsOpen} onClose={() => setBuffsOpen(false)} />
       <HelpModal visible={helpOpen} onClose={() => setHelpOpen(false)} />
+      <SettingsModal visible={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       {/* Guided tutorial card — hide while the item popup is open so its
           BUY button isn't covered. Lives in HomeScreen (not App) so it
@@ -527,7 +507,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     backgroundColor: colors.cream_hi,
-    paddingHorizontal: 10,
+    // paddingLeft slightly tighter than paddingRight to compensate for the
+    // trailing letterSpacing on the text — without the extra right room, iOS
+    // clips the final glyph (the "H" in ACH).
+    paddingLeft: 10,
+    paddingRight: 14,
     paddingVertical: 6,
     borderWidth: 1,
     borderColor: colors.ink,
@@ -542,6 +526,10 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.ink,
     letterSpacing: 1,
+    // Hairline padding-right inside the Text itself in case the wrapper still
+    // measures tight on certain glyphs. Belt-and-suspenders with the button
+    // padding above.
+    paddingRight: 2,
   },
   inboxBadge: {
     backgroundColor: colors.tensionRed,
@@ -565,7 +553,10 @@ const styles = StyleSheet.create({
     top: 140,
     right: 6,
     backgroundColor: colors.tensionRed,
-    paddingHorizontal: 6,
+    // Asymmetric padding: trailing letterSpacing on the "V" needs extra room
+    // or iOS clips the right side of the glyph (same issue as the ACH chip).
+    paddingLeft: 6,
+    paddingRight: 10,
     paddingVertical: 3,
     borderWidth: 1,
     borderColor: colors.ink,
@@ -576,40 +567,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.cream_hi,
     letterSpacing: 1,
-  },
-  sfxChip: {
-    // Same right-edge column as DEV chip. Sits below it (DEV at top:140, this
-    // at top:178) so they stack neatly without colliding with the tutorial
-    // card on the left or the HUD above.
-    position: "absolute",
-    top: 178,
-    right: 6,
-    minWidth: 44,
-    alignItems: "center",
-    backgroundColor: colors.cream_hi,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderWidth: 1,
-    borderColor: colors.ink,
-    zIndex: 90,
-  },
-  sfxChipText: {
-    fontFamily: fonts.display,
-    fontSize: 10,
-    color: colors.ink,
-    letterSpacing: 1,
-  },
-  musicChip: {
-    position: "absolute",
-    top: 210, // directly under sfxChip (top:178 + ~30px chip height + gap)
-    right: 6,
-    minWidth: 44,
-    alignItems: "center",
-    backgroundColor: colors.cream_hi,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderWidth: 1,
-    borderColor: colors.ink,
-    zIndex: 90,
+    paddingRight: 2,
   },
 });

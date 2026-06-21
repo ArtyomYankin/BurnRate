@@ -1,5 +1,6 @@
 import React from "react";
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
+import Svg, { Circle, Path } from "react-native-svg";
 import { colors, fonts, PIXEL } from "./theme";
 
 interface Props {
@@ -14,6 +15,12 @@ interface Props {
    *  "click for +1 token" affordance — relevant early, irrelevant once
    *  passive rate dwarfs +1/tap. */
   onPressTokens?(): void;
+  /** Opens the Settings menu (sfx / music / language). Rendered as a small
+   *  gear icon in the HUD's top-right. */
+  onOpenSettings?(): void;
+  /** Opens the HelpModal ("How it works"). Rendered as a small ? icon next
+   *  to the gear. */
+  onOpenHelp?(): void;
 }
 
 /**
@@ -33,6 +40,8 @@ export function TopHUD({
   equity,
   nextThresholdLabel,
   onPressTokens,
+  onOpenSettings,
+  onOpenHelp,
 }: Props) {
   // Floating "+1" feedback — animates each tap. We keep a small queue (max
   // 4) of in-flight floaters so rapid taps still feel responsive without
@@ -51,12 +60,40 @@ export function TopHUD({
   return (
     <View style={styles.wrap} pointerEvents="box-none">
       <View style={styles.box}>
-        {/* Row 1 — brand + round badge */}
+        {/* Row 1 — brand + round badge + nav icons (gear / ?). The icons
+            sit at the very top-right of the HUD strip so they're reachable
+            from the home position without crowding the bottom of the screen. */}
         <View style={styles.row}>
           <Text style={styles.brand}>
             BURN<Text style={{ color: colors.terracotta }}>·</Text>RATE
           </Text>
-          <Text style={styles.roundLabel}>{roundLabel}</Text>
+          <View style={styles.row1Right}>
+            {/* roundLabel shrinks + truncates with ellipsis when the round
+                name is long (AGI Singularity Round · Round 10 etc), so the
+                gear / ? icons always stay reachable on the right edge. */}
+            <Text
+              style={styles.roundLabel}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              {roundLabel}
+            </Text>
+            {onOpenSettings && (
+              <Pressable onPress={onOpenSettings} hitSlop={6} style={styles.navIconBtn}>
+                <Svg width={16} height={16} viewBox="0 0 16 16">
+                  <Path d="M7 0 H9 V2 H7 Z M7 14 H9 V16 H7 Z M0 7 H2 V9 H0 Z M14 7 H16 V9 H14 Z" fill={colors.ink} />
+                  <Path d="M2 2 H4 V4 H2 Z M12 2 H14 V4 H12 Z M2 12 H4 V14 H2 Z M12 12 H14 V14 H12 Z" fill={colors.ink} />
+                  <Circle cx={8} cy={8} r={5} fill={colors.ink} />
+                  <Circle cx={8} cy={8} r={2} fill={colors.cream_hi} />
+                </Svg>
+              </Pressable>
+            )}
+            {onOpenHelp && (
+              <Pressable onPress={onOpenHelp} hitSlop={6} style={styles.navIconBtn}>
+                <Text style={styles.navIconText}>?</Text>
+              </Pressable>
+            )}
+          </View>
         </View>
 
         {/* Row 2 — big tokens + per-second rate. The whole token row is the
@@ -192,6 +229,35 @@ const styles = StyleSheet.create({
     fontSize: 9,
     color: colors.muted,
     letterSpacing: 1,
+    // flexShrink so a long round name ("AGI Singularity Round · Round 10")
+    // collapses with an ellipsis instead of pushing the gear / ? icons off
+    // the screen edge.
+    flexShrink: 1,
+  },
+  row1Right: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    // Claim remaining horizontal space (with brand on the far left) so
+    // children inside can layout cleanly with shrinking text + fixed icons.
+    flex: 1,
+    justifyContent: "flex-end",
+    marginLeft: 8,
+  },
+  navIconBtn: {
+    width: 22,
+    height: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.cream_2,
+    borderWidth: 1,
+    borderColor: colors.ink,
+  },
+  navIconText: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 13,
+    color: colors.ink,
+    lineHeight: 14,
   },
   tokenRow: {
     flexDirection: "row",

@@ -110,8 +110,13 @@ export function tutorialHighlightForStep(step: number): HitId | null {
 
 export function Onboarding() {
   const step = useGame((s) => s.account.onboardingStep);
+  const hydrated = useGame((s) => s.hydrated);
   const advance = useGame((s) => s.setOnboardingStep);
 
+  // Same flash-prevention as IntroModal: don't render the tutorial card
+  // until the save has loaded, otherwise step=0's "tap the engineer" chip
+  // briefly appears even for veteran players.
+  if (!hydrated) return null;
   const def = TUTORIAL_STEPS[step];
   if (!def) return null;
 

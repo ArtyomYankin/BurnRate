@@ -15,8 +15,14 @@ interface Props {
 export function HelpModal({ visible, onClose }: Props) {
   return (
     <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.frame} onPress={(e) => e.stopPropagation()}>
+      {/* Backdrop and frame are siblings (not parent/child). Wrapping the
+          ScrollView in an outer Pressable was eating swipe gestures and the
+          content couldn't scroll on touch devices. With the frame as a sibling
+          View rendered above the absolutely-positioned backdrop, touches on
+          the frame never reach the backdrop, so we don't need stopPropagation. */}
+      <View style={styles.modalRoot}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={styles.frame}>
           <View style={styles.headerRow}>
             <View style={[styles.swatch, { backgroundColor: colors.gold }]} />
             <Text style={styles.brand}>HOW IT WORKS</Text>
@@ -74,8 +80,8 @@ export function HelpModal({ visible, onClose }: Props) {
               }
             />
           </ScrollView>
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -90,7 +96,7 @@ function Section({ title, body }: { title: string; body: string }) {
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
+  modalRoot: {
     flex: 1,
     backgroundColor: "rgba(42,42,42,0.60)",
     justifyContent: "center",

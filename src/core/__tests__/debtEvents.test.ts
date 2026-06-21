@@ -19,6 +19,7 @@ const persistent = (overrides: Partial<PersistentState> = {}): PersistentState =
   unreadVignettes: [],
   resolvedVignettes: {},
   unlockedAchievements: [],
+  endgameSeenAt: 0,
   ...overrides,
 });
 

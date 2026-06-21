@@ -15,11 +15,18 @@ import { colors, fonts, PIXEL } from "./theme";
  */
 export function IntroModal() {
   const step = useGame((s) => s.account.onboardingStep);
+  const hydrated = useGame((s) => s.hydrated);
   const advance = useGame((s) => s.setOnboardingStep);
   // Always mount the <Modal>; toggle visibility via the prop. Unmounting an
   // open native Modal can leave a ghost overlay that swallows touches across
   // the whole screen (the bug behind "after BEGIN nothing in the scene clicks").
-  const visible = step === 0;
+  //
+  // `hydrated` gate prevents the intro from flashing for returning players —
+  // before the save loads, default state has onboardingStep=0 (which would
+  // open the modal); after hydrate, the persisted higher step kicks in and
+  // dismisses it. The flash is jarring on every cold launch — easier to just
+  // not render the intro until we KNOW the player's actual step.
+  const visible = hydrated && step === 0;
   const begin = () => advance(1);
 
   return (

@@ -1,5 +1,6 @@
 import React from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Vignette } from "../core/vignettes";
 import { colors, fonts, PIXEL } from "./theme";
 
@@ -30,11 +31,19 @@ interface Props {
  * player remembers they're still in Burn Rate.
  */
 export function VignetteReader({ vignette, onClose, onResolve, resolvedReplyIdx }: Props) {
+  // Absolute-positioned overlays don't inherit safe-area from the app-level
+  // SafeAreaView, so we pull the insets ourselves and push the frame's top /
+  // bottom in by the actual notch + home-indicator distance. Without this the
+  // × close button can sit under the dynamic island on iPhone 14 Pro+.
+  const insets = useSafeAreaInsets();
   if (!vignette) return null;
   return (
     <View style={styles.overlay}>
       <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={styles.frame}>
+      <View style={[
+        styles.frame,
+        { top: insets.top + 8, bottom: insets.bottom + 8 },
+      ]}>
         {/* Game-chrome topbar — close button + tiny "vignette" label so the
             player can tell the reader apart from the live OS notification it
             mimics. */}
@@ -113,6 +122,13 @@ function SlackView({ v, onClose, onResolve, resolvedReplyIdx }: { v: Vignette } 
             {v.replies.map((r, i) => {
               const effect = v.replyEffects?.[i];
               const picked = i === resolvedReplyIdx;
+              // Spoiler rule: pre-pick we show ONLY the reply text — the
+              // player has to read the message to guess buff/neutral/debuff.
+              // Post-pick we reveal the resolved effect on the PICKED chip
+              // (color-coded by kind: green buff / muted neutral / red debuff)
+              // with a small fade+rise animation so the player notices the
+              // outcome instead of wondering why the modal didn't close.
+              const kind = effect?.kind ?? (effect ? "buff" : undefined);
               return (
                 <Pressable
                   key={i}
@@ -132,8 +148,8 @@ function SlackView({ v, onClose, onResolve, resolvedReplyIdx }: { v: Vignette } 
                   >
                     {picked ? "✓ " : ""}{r}
                   </Text>
-                  {effect && !isResolved && (
-                    <Text style={slack.replyEffectHint}>{effect.label}</Text>
+                  {picked && effect && (
+                    <RevealLabel kind={kind}>→ {effect.label}</RevealLabel>
                   )}
                 </Pressable>
               );
@@ -141,12 +157,46 @@ function SlackView({ v, onClose, onResolve, resolvedReplyIdx }: { v: Vignette } 
           </View>
         )}
         {isResolved && (
-          <Text style={slack.resolvedNote}>
-            You already replied. Effect is active or has expired.
-          </Text>
+          <Text style={slack.resolvedNote}>You already replied.</Text>
         )}
       </View>
     </View>
+  );
+}
+
+/**
+ * Animated reveal label shown under a picked Slack reply chip — opacity 0 → 1
+ * + translateY 8 → 0 over ~320ms. The animation runs on mount, which happens
+ * the moment the player picks (since the parent re-renders with picked=true).
+ * Re-opens of an already-resolved vignette re-play the animation too, which
+ * is fine: it gives the same beat of "here's what you chose" each time.
+ */
+function RevealLabel({
+  kind,
+  children,
+}: {
+  kind: "buff" | "neutral" | "debuff" | undefined;
+  children: React.ReactNode;
+}) {
+  const opacity = React.useRef(new Animated.Value(0)).current;
+  const ty = React.useRef(new Animated.Value(8)).current;
+  React.useEffect(() => {
+    Animated.parallel([
+      Animated.timing(opacity, { toValue: 1, duration: 320, useNativeDriver: true }),
+      Animated.timing(ty,      { toValue: 0, duration: 320, useNativeDriver: true }),
+    ]).start();
+  }, [opacity, ty]);
+  const color =
+    kind === "buff"    ? "#1ED760" :
+    kind === "debuff"  ? "#FF6B6B" :
+    kind === "neutral" ? "#9B9C9F" :
+    "#D1D2D3";
+  return (
+    <Animated.Text
+      style={[slack.replyEffectHint, { color, opacity, transform: [{ translateY: ty }] }]}
+    >
+      {children}
+    </Animated.Text>
   );
 }
 

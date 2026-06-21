@@ -8,7 +8,7 @@
 // is to compress hours of grind into seconds for QA / balance tuning.
 
 import { D } from "../core/decimal";
-import { freshRunState, tickRun } from "../core/math";
+import { effectiveRoundThreshold, freshRunState, tickRun } from "../core/math";
 import { aggregateResearchEffects, RESEARCH_NODES } from "../core/research";
 import { freshSave } from "../core/save";
 import { VIGNETTES } from "../core/vignettes";
@@ -56,6 +56,22 @@ export function __devAddEquity(n: number) {
   const next = D(s.persistent.equity).add(n);
   useGame.setState({
     persistent: { ...s.persistent, equity: next.toString() },
+  });
+}
+
+/**
+ * Set tokens to just above the current round's effective threshold so the
+ * CLOSE ROUND button lights up immediately. Honors Hype-derived discount, so
+ * if the player has been spending on Marketing the cheat respects it.
+ */
+export function __devFillRoundThreshold() {
+  const s = useGame.getState();
+  const eff = effectiveRoundThreshold(s.run.fundingRoundIdx, s.run.hype);
+  // Bump 0.1% above the threshold so floating-point comparisons never reject
+  // the value as "not quite there." Cheap insurance, invisible to the player.
+  const target = eff.mul(1.001);
+  useGame.setState({
+    run: { ...s.run, tokens: target.toString() },
   });
 }
 

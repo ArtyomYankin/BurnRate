@@ -35,6 +35,13 @@ export function PrestigeModal({ visible, onClose }: Props) {
 
   const round = getRound(run.fundingRoundIdx);
   const atFinalRound = run.fundingRoundIdx >= LAST_ROUND_IDX;
+  // Finale UI: every time the player closes AGI Singularity (not just the
+  // first), show the stripped-down OK variant. The full Equity / Reset
+  // breakdown isn't meaningful on a perpetual final round — there's no
+  // "next round" to preview. The endgame modal opens after, which always
+  // re-shows: the climax beat shouldn't be one-shot just because we want
+  // to suppress a future banner.
+  const isFinale = atFinalRound;
   const nextRound = getRound(Math.min(run.fundingRoundIdx + 1, LAST_ROUND_IDX));
 
   const award = equityFromPrestige(run);
@@ -69,6 +76,47 @@ export function PrestigeModal({ visible, onClose }: Props) {
   const closeCtaLabel = atFinalRound
     ? "Loop AGI Singularity →"
     : `Close ${round.name} →`;
+
+  // Finale-first-close: stripped-down modal — ribbon + single OK. The full
+  // payout / breakdown copy lives inside the EndgameModal that takes over
+  // immediately on confirm. Keeping PrestigeModal here as a one-tap gate
+  // (rather than auto-routing to EndgameModal) preserves the "I closed the
+  // last round" beat without burying the player in two stacked modals.
+  if (isFinale) {
+    return (
+      <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
+        <View style={styles.backdrop}>
+          <View style={styles.frame}>
+            <View style={styles.ribbon}>
+              <Text style={styles.ribbonText}>▲ AGI SINGULARITY CLOSED ▲</Text>
+            </View>
+            <View style={styles.section}>
+              <Text style={styles.eyebrow}>CLOSING ROUND {round.idx + 1}</Text>
+              <Text style={styles.roundName}>{round.name.toUpperCase()}</Text>
+              <Text style={styles.recapMono}>
+                {formatNumber(tokens)} tokens · {overshootPct}% threshold
+              </Text>
+              <Text style={[styles.eyebrow, { marginTop: 12, textAlign: "center" }]}>
+                INCOMING TRANSMISSION…
+              </Text>
+            </View>
+            <View style={[styles.ctaRow, { justifyContent: "center" }]}>
+              <Pressable onPress={confirm} style={[styles.btnPrimary, { flex: 0, paddingHorizontal: 48 }]}>
+                <Text style={styles.btnPrimaryText}>OK</Text>
+                <ParticleBurst
+                  trigger={burst}
+                  count={28}
+                  palette={[colors.gold, "#E8C25F", colors.cream, colors.terracotta]}
+                  spread={120}
+                  duration={900}
+                />
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  }
 
   return (
     <Modal

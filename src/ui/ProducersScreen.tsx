@@ -11,7 +11,6 @@ import {
 import { D, Decimal } from "../core/decimal";
 import {
   autonomousAgentMult,
-  bottleneckChain,
   nextProducerCost,
   upgradeMultiplier,
   upgradeTier,
@@ -99,7 +98,6 @@ export function ProducersScreen({ onBack, defaultChain }: Props) {
     sprintUpgradesUnlocked: [],
   };
   const totalTps = tokensPerSec(runForCalc);
-  const bottleneck = bottleneckChain(runForCalc);
 
   // Autonomous Agent (AGI arc) — a global tokens/sec flywheel, not a chain.
   const agentOwned = owned[AUTONOMOUS_AGENT.id] ?? 0;
@@ -126,7 +124,6 @@ export function ProducersScreen({ onBack, defaultChain }: Props) {
         {CHAINS.map((c) => {
           const m = CHAIN_META[c.id];
           const active = c.id === activeChain;
-          const isBottleneck = c.id === bottleneck;
           return (
             // Plain Pressable here — Pressy's Animated.View wrapper swallows
             // flex:1 on iOS, leaving each tab at min-content width. With
@@ -153,9 +150,6 @@ export function ProducersScreen({ onBack, defaultChain }: Props) {
                 >
                   {m.tab}
                 </Text>
-                {isBottleneck && (
-                  <View style={[styles.bottleneckDot, { backgroundColor: active ? colors.cream_hi : colors.tensionRed }]} />
-                )}
               </View>
             </Pressable>
           );
@@ -419,11 +413,21 @@ function ProducerCard({
           <Text style={styles.cardMeta} numberOfLines={1}>
             OWNED · {ownedCount} · OUT {formatRate(effectiveRate)}
           </Text>
-          {!locked && nextThreshold !== null && nextLabel !== null && (
-            <Text style={styles.upgradeHint} numberOfLines={1}>
-              {nextThreshold - ownedCount} → {nextLabel} multiplier
-            </Text>
-          )}
+          {/* Always render the hint row to preserve vertical card height —
+              when the player buys past the last upgrade tier the hint goes
+              empty, and without this placeholder the card collapses by ~10px
+              and every card below jumps up. */}
+          <Text
+            style={[
+              styles.upgradeHint,
+              (locked || nextThreshold === null || nextLabel === null) && { opacity: 0 },
+            ]}
+            numberOfLines={1}
+          >
+            {!locked && nextThreshold !== null && nextLabel !== null
+              ? `${nextThreshold - ownedCount} → ${nextLabel} multiplier`
+              : "·"}
+          </Text>
         </View>
 
         {/* Right: buy button OR lock badge */}
@@ -471,12 +475,17 @@ function ScreenHeader({
       <Pressable onPress={onBack} hitSlop={12} style={styles.backBtn}>
         <Text style={styles.backChevron}>‹</Text>
       </Pressable>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.brand}>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.brand} numberOfLines={1}>
           BURN<Text style={{ color: colors.terracotta }}>·</Text>RATE
         </Text>
-        <Text style={styles.title}>{title}</Text>
-        {sub && <Text style={styles.sub}>{sub}</Text>}
+        <Text style={styles.title} numberOfLines={1}>{title}</Text>
+        {/* numberOfLines={1} + ellipsis so the sub line never reflows when the
+            CapitalChip on the right grows (e.g. $61 → $1.05M widens the chip,
+            stealing horizontal pixels and wrapping the sub from 1 to 2 lines).
+            Combined with the chip's fixed minWidth below, the header height
+            is stable across the whole game. */}
+        {sub && <Text style={styles.sub} numberOfLines={1} ellipsizeMode="tail">{sub}</Text>}
       </View>
       {right}
     </View>
@@ -557,6 +566,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 1,
     shadowRadius: 0,
     elevation: 0,
+    // Fixed min-width so the chip doesn't grow with the formatted capital
+    // string ($61 → $1.05M → $4.32B). Without this the chip steals horizontal
+    // pixels from the title/sub block on the left, wrapping the subtitle from
+    // 1 line to 2 and shifting every row below.
+    minWidth: 92,
   },
   capitalSwatch: {
     width: 10,
@@ -608,10 +622,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     lineHeight: 16,
   },
-  bottleneckDot: {
-    width: 6,
-    height: 6,
-  },
   chainHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -648,6 +658,11 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
+    // Fixed height so the card never resizes when an upgrade badge (×2 at
+    // 10 owned, ×8 at 50, ×64 at 100) appears in the title row. Without this
+    // the title row gains ~2px from the badge's border+padding and every
+    // card below shifts. 70 fits all states comfortably.
+    height: 70,
     borderWidth: 1,
     shadowOffset: { width: 0, height: PIXEL },
     shadowOpacity: 1,
@@ -662,6 +677,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
+    // Fixed minimum height so the upgrade badge or NEW chip appearing/dis-
+    // appearing doesn't change the row's vertical footprint by a px or two.
+    minHeight: 18,
   },
   cardTitle: {
     fontFamily: fonts.bodyBold,

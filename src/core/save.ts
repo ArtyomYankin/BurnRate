@@ -32,6 +32,7 @@ export function freshSave(now: number = Date.now()): SaveBlob {
       unreadVignettes: [],
       resolvedVignettes: {},
       unlockedAchievements: [],
+      endgameSeenAt: 0,
     },
     account: {
       anonUid: genUid(),
@@ -41,6 +42,7 @@ export function freshSave(now: number = Date.now()): SaveBlob {
       sessionsStarted: 0,
       pushOptedIn: false,
       pushPromptedAt: 0,
+      language: "EN",
     },
   };
 }
@@ -63,6 +65,20 @@ export function migrate(raw: unknown): SaveBlob {
   // v1/v2/v3 → v4 migration in one shot, since each older version is just
   // "the current shape minus some fields." Missing fields get safe defaults.
   if ((blob.schemaVersion ?? 0) < SCHEMA_VERSION && blob.run && blob.persistent && blob.account) {
+    // v11 → v12: round ladder went from 12 → 10 rounds (Series C and D
+    // dropped). Remap any pre-v12 fundingRoundIdx so the player lands
+    // somewhere sensible in the new ladder. Each dropped round folds into
+    // its scene-mate's successor: old 3 (Series C, coworking) → new 2
+    // (Series B, still coworking); old 4 (Series D, office) → new 3 (IPO,
+    // still office). Old indices ≥ 5 shift down by 2.
+    const remapRoundIdx = (old: number | undefined): number | undefined => {
+      if (typeof old !== "number") return old;
+      if ((blob.schemaVersion ?? 0) >= 12) return old;
+      const MAP: Record<number, number> = {
+        0: 0, 1: 1, 2: 2, 3: 2, 4: 3, 5: 3, 6: 4, 7: 5, 8: 6, 9: 7, 10: 8, 11: 9,
+      };
+      return MAP[old] ?? Math.min(old, 9);
+    };
     const oldRun = blob.run as RunState & Partial<{
       hype: string;
       researchPoints: string;
@@ -92,6 +108,8 @@ export function migrate(raw: unknown): SaveBlob {
         // v7 → v8: per-run sprint upgrades. Empty array = no boosts
         // carried over; the player can buy them this round with RP.
         sprintUpgradesUnlocked: oldRun.sprintUpgradesUnlocked ?? [],
+        // v11 → v12: clamp/remap into the new 10-round ladder.
+        fundingRoundIdx: remapRoundIdx(oldRun.fundingRoundIdx) ?? 0,
       },
       persistent: {
         ...oldPersist,
@@ -111,15 +129,22 @@ export function migrate(raw: unknown): SaveBlob {
         // every condition, so already-earned ones re-fire on the next tick
         // (with the audio cue + unread badge, briefly).
         unlockedAchievements: oldPersist.unlockedAchievements ?? [],
+        // v12 → v13: endgame modal seen marker. 0 lets the finale fire
+        // again for legacy saves — the modal triggers on the NEXT prestige
+        // from round 9 anyway, so the worst case is "veteran player sees
+        // it once after the migration" which is the intended UX.
+        endgameSeenAt: (oldPersist as Partial<PersistentState>).endgameSeenAt ?? 0,
       },
       account: {
         // v9 → v10: push-notification opt-in fields. Conservative defaults —
         // sessionsStarted starts at 1 (this counts as a session), pushOptedIn
         // false, pushPromptedAt 0.
+        // v10 → v11: language for the Settings menu. "EN" default.
         ...(blob.account as AccountState),
         sessionsStarted: (blob.account as Partial<AccountState>).sessionsStarted ?? 1,
         pushOptedIn:     (blob.account as Partial<AccountState>).pushOptedIn     ?? false,
         pushPromptedAt:  (blob.account as Partial<AccountState>).pushPromptedAt  ?? 0,
+        language:        (blob.account as Partial<AccountState>).language        ?? "EN",
       },
     };
   }

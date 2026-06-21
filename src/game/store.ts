@@ -60,6 +60,16 @@ export interface GameState {
    * Drained head-first by acknowledgeDebtEvent(). The UI shows one at a time.
    */
   pendingDebtEvents: number[];
+  /**
+   * Transient flag (not persisted): set true when the player closes the AGI
+   * Singularity round for the first time. App.tsx watches it to render the
+   * EndgameModal. The PERSISTENT marker is `persistent.endgameSeenAt` — once
+   * the player dismisses the modal we set both: flag → false to close the
+   * UI, seenAt → Date.now() to suppress future automatic opens. The two-flag
+   * split is so the modal can be re-opened on demand from the dev panel
+   * without flipping the persistent marker back to zero.
+   */
+  endgameOpen: boolean;
 
   hydrate(save: SaveBlob, now?: number): void;
   applyOfflineCatchup(now?: number): { dtSeconds: number };
@@ -90,6 +100,9 @@ export interface GameState {
   incrementSessionsStarted(): void;
   /** Record that we've asked for push permission. `granted` flips pushOptedIn. */
   recordPushPromptResult(granted: boolean): void;
+  /** Settings menu: swap UI language. Only "EN" is wired; the rest are
+   *  stubs that just persist the pick so the switcher feels real. */
+  setLanguage(code: string): void;
   /** GDD §5 narrative spine: unlock a vignette by id. Idempotent — duplicate
    *  calls are silently dropped. Newly unlocked vignettes also land in the
    *  unread queue (drains via markVignetteRead). */
@@ -102,6 +115,12 @@ export interface GameState {
    *  Returns true if the resolution was newly applied, false if no-op
    *  (already resolved, missing vignette, no effects, or bad index). */
   resolveVignette(id: string, replyIdx: number): boolean;
+  /** Dismiss the EndgameModal. Sets endgameOpen=false and stamps
+   *  persistent.endgameSeenAt so the finale never auto-fires again. */
+  dismissEndgame(): void;
+  /** "Raise a new seed" CTA — wipe the save and start fresh from Seed round.
+   *  Synchronous from the UI's perspective; the on-disk wipe runs in the bg. */
+  restartGame(): void;
   toSaveBlob(): SaveBlob;
 }
 
@@ -207,6 +226,7 @@ export const useGame = create<GameState>((set, get) => ({
   ...freshSave(),
   lastTickAt: Date.now(),
   hydrated: false,
+  endgameOpen: false,
   pendingDebtEvents: [],
 
   hydrate(save, now = Date.now()) {
@@ -410,6 +430,9 @@ export const useGame = create<GameState>((set, get) => ({
     if (!canPrestige(s.run)) return null;
     const awarded = equityFromPrestige(s.run);
     const nextEquity = D(s.persistent.equity).add(awarded);
+    // The round the player just closed — used below to detect the AGI
+    // Singularity finale (closingRound === LAST_ROUND_IDX).
+    const closingRound = s.run.fundingRoundIdx;
     const nextRoundIdx = Math.min(s.run.fundingRoundIdx + 1, LAST_ROUND_IDX);
     const fresh = freshRunState();
     // Carry allocation through prestige — re-picking it every round would
@@ -425,8 +448,19 @@ export const useGame = create<GameState>((set, get) => ({
       totalPrestiges: s.persistent.totalPrestiges + 1,
       // alignmentDebt + unlockedResearch persist (the thematic + design point).
     };
+    // Endgame trigger: every time the player closes the final round, pop
+    // the cosmic-visage modal. The climax beat shouldn't be one-shot —
+    // the player can dismiss it with STAY AND WATCH if they want to keep
+    // grinding without seeing it. endgameSeenAt still records the FIRST
+    // dismissal (for future analytics / "veteran" checks) but no longer
+    // gates the trigger itself.
+    const shouldOpenEndgame = closingRound === LAST_ROUND_IDX;
     // Achievements like "Closed Series A" / "5 prestiges" fire here.
-    set({ run: nextRun, persistent: processUnlocks(nextRun, nextPersistent) });
+    set({
+      run: nextRun,
+      persistent: processUnlocks(nextRun, nextPersistent),
+      ...(shouldOpenEndgame ? { endgameOpen: true } : {}),
+    });
     return { awarded: awarded.toString() };
   },
 
@@ -456,6 +490,10 @@ export const useGame = create<GameState>((set, get) => ({
         pushPromptedAt: Date.now(),
       },
     }));
+  },
+
+  setLanguage(code) {
+    set((s) => ({ account: { ...s.account, language: code } }));
   },
 
   unlockVignette(id) {
@@ -496,7 +534,15 @@ export const useGame = create<GameState>((set, get) => ({
     if (!tmpl) return false;
 
     const now = Date.now();
-    const durationSec = tmpl.durationSec ?? 3600; // GDD §4 Beat 3: ~1h default
+    // Each kind defaults to its own duration: buff = 1h (GDD §4 Beat 3),
+    // debuff = 60s (soft sting — a jab not a punishment, per design pick),
+    // neutral = 0 (no timer; effect never lands in activeEffects either way).
+    // Legacy entries without `kind` default to buff for back-compat.
+    const kind = tmpl.kind ?? "buff";
+    const defaultDur = kind === "buff" ? 3600 : kind === "debuff" ? 60 : 0;
+    const durationSec = tmpl.durationSec ?? defaultDur;
+    // Neutral picks resolve the vignette but never land in activeEffects.
+    const shouldApply = kind !== "neutral" && durationSec > 0;
     const newEffect = {
       // Reasonably-unique id: vignette + reply + timestamp. We never need
       // two effects from the same reply pick (one-shot resolution), so the
@@ -505,17 +551,14 @@ export const useGame = create<GameState>((set, get) => ({
       source: "slack_dm" as const,
       label: tmpl.label,
       appliedAt: now,
-      expiresAt: durationSec > 0 ? now + durationSec * 1000 : now, // 0 = instant expire (no-op buff)
+      expiresAt: shouldApply ? now + durationSec * 1000 : now,
       effect: tmpl.effect,
     };
 
     set({
       run: {
         ...s.run,
-        activeEffects:
-          durationSec > 0
-            ? [...s.run.activeEffects, newEffect]
-            : s.run.activeEffects,
+        activeEffects: shouldApply ? [...s.run.activeEffects, newEffect] : s.run.activeEffects,
       },
       persistent: {
         ...s.persistent,
@@ -523,6 +566,30 @@ export const useGame = create<GameState>((set, get) => ({
       },
     });
     return true;
+  },
+
+  dismissEndgame() {
+    const s = get();
+    set({
+      endgameOpen: false,
+      persistent: { ...s.persistent, endgameSeenAt: Date.now() },
+    });
+  },
+
+  restartGame() {
+    // Wipe disk in the background; rehydrate with a fresh save synchronously
+    // so the UI updates immediately. The dismissEndgame above already cleared
+    // endgameOpen — restart implicitly does the same via the fresh state.
+    void import("./persistence").then(({ wipeSave }) => wipeSave().catch(() => {}));
+    const fresh = freshSave();
+    set({
+      run: fresh.run,
+      persistent: fresh.persistent,
+      account: { ...fresh.account, anonUid: get().account.anonUid }, // keep same player id
+      lastTickAt: Date.now(),
+      pendingDebtEvents: [],
+      endgameOpen: false,
+    });
   },
 
   toSaveBlob() {

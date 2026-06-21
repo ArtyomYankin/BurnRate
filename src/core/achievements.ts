@@ -116,18 +116,11 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     condition: { kind: "reach_round", roundIdx: 2 },
   },
   {
-    id: "a_closed_series_c",
-    name: "Dominant in five categories",
-    description: "Close Series C.",
-    bucket: "milestone",
-    condition: { kind: "reach_round", roundIdx: 4 },
-  },
-  {
     id: "a_closed_ipo",
     name: "Rang the bell",
     description: "Close the IPO round.",
     bucket: "milestone",
-    condition: { kind: "reach_round", roundIdx: 6 },
+    condition: { kind: "reach_round", roundIdx: 4 },
   },
   {
     id: "a_first_research",
@@ -290,7 +283,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     name: "Acquired by the future",
     description: "Reach the Acquisition round and unlock the Autonomous Agent.",
     bucket: "endgame",
-    condition: { kind: "reach_round", roundIdx: 7 },
+    condition: { kind: "reach_round", roundIdx: 5 },
   },
   {
     id: "a_first_agent",
@@ -311,7 +304,282 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     name: "The model has reached you",
     description: "Close the AGI Singularity Round.",
     bucket: "endgame",
-    condition: { kind: "reach_round", roundIdx: 12 },
+    condition: { kind: "reach_round", roundIdx: 10 },
+  },
+
+  // ─── V31–V68: second batch ─────────────────────────────────────────────
+  // Fills the missing round-close milestones, deeper grind tiers, more
+  // hidden/subtle finds, broader comedy coverage, and the rest of the
+  // endgame ladder. Pure data; no predicate or store changes.
+
+  // Milestones — every funding-round close gets its own line so the grid
+  // tells the story of the company chronologically.
+  {
+    id: "a_closed_series_b",
+    name: "Out of the bench, into the lease",
+    description: "Close Series B.",
+    bucket: "milestone",
+    condition: { kind: "reach_round", roundIdx: 3 },
+  },
+  {
+    id: "a_closed_secondary",
+    name: "Liquidity is a feeling",
+    description: "Close the Secondary round.",
+    bucket: "milestone",
+    condition: { kind: "reach_round", roundIdx: 5 },
+  },
+  {
+    id: "a_closed_acquisition",
+    name: "Strategic partner",
+    description: "Close the Acquisition round.",
+    bucket: "milestone",
+    condition: { kind: "reach_round", roundIdx: 6 },
+  },
+  {
+    id: "a_closed_sovereign",
+    name: "Camera off, audio off, voting",
+    description: "Close the Sovereign Wealth round.",
+    bucket: "milestone",
+    condition: { kind: "reach_round", roundIdx: 7 },
+  },
+  {
+    id: "a_closed_bailout",
+    name: "Liquidity bridge",
+    description: "Close the Government Bailout round.",
+    bucket: "milestone",
+    condition: { kind: "reach_round", roundIdx: 8 },
+  },
+  {
+    id: "a_closed_civilizational",
+    name: "Three sovereign nations and an individual",
+    description: "Close the Civilizational round.",
+    bucket: "milestone",
+    condition: { kind: "reach_round", roundIdx: 9 },
+  },
+  {
+    id: "a_first_prestige",
+    name: "Fresh round, same team",
+    description: "Close your first funding round.",
+    bucket: "milestone",
+    condition: { kind: "prestige_count", n: 1 },
+  },
+
+  // Grind — bigger numbers across chains, research counts, prestige stacks.
+  {
+    id: "a_hire_engineers_1000",
+    name: "Symbolic 1000",
+    description: "Own 1,000 producers across the Engineers chain.",
+    bucket: "grind",
+    condition: { kind: "chain_count", chain: "engineers", n: 1000 },
+  },
+  {
+    id: "a_gpu_500",
+    name: "Capacity team got a Slack channel",
+    description: "Own 500 producers across the GPU chain.",
+    bucket: "grind",
+    condition: { kind: "chain_count", chain: "gpu", n: 500 },
+  },
+  {
+    id: "a_data_500",
+    name: "Eleven active data partnerships",
+    description: "Own 500 producers across the Data chain.",
+    bucket: "grind",
+    condition: { kind: "chain_count", chain: "data", n: 500 },
+  },
+  {
+    id: "a_energy_500",
+    name: "Procurement is four people",
+    description: "Own 500 producers across the Energy chain.",
+    bucket: "grind",
+    condition: { kind: "chain_count", chain: "energy", n: 500 },
+  },
+  {
+    id: "a_total_producers_500",
+    name: "Operating at scale",
+    description: "Own 500 producers across all chains.",
+    bucket: "grind",
+    condition: { kind: "total_producers", n: 500 },
+  },
+  {
+    id: "a_research_count_10",
+    name: "Tech tree — partial credit",
+    description: "Unlock 10 research nodes.",
+    bucket: "grind",
+    condition: { kind: "research_count", n: 10 },
+  },
+  {
+    id: "a_tokens_1e15",
+    name: "Crossed the petascale",
+    description: "Reach 1e15 tokens in a single run.",
+    bucket: "grind",
+    condition: { kind: "tokens_log10", n: 15 },
+  },
+  {
+    id: "a_prestige_20",
+    name: "Twenty rounds. Twenty.",
+    description: "Close 20 funding rounds total.",
+    bucket: "grind",
+    condition: { kind: "prestige_count", n: 20 },
+  },
+
+  // Subtle / hidden — show as "???" until unlocked.
+  {
+    id: "a_branch_complete_compute",
+    name: "Compute branch — paid in full",
+    description: "Unlock every node in the Compute research branch.",
+    bucket: "subtle",
+    condition: { kind: "research_branch_complete", branch: "compute" },
+  },
+  {
+    id: "a_branch_complete_data",
+    name: "Data branch — paid in full",
+    description: "Unlock every node in the Data research branch.",
+    bucket: "subtle",
+    condition: { kind: "research_branch_complete", branch: "data" },
+  },
+  {
+    id: "a_branch_complete_energy",
+    name: "Energy branch — paid in full",
+    description: "Unlock every node in the Energy research branch.",
+    bucket: "subtle",
+    condition: { kind: "research_branch_complete", branch: "energy" },
+  },
+  {
+    id: "a_branch_complete_capital",
+    name: "Capital branch — paid in full",
+    description: "Unlock every node in the Capital research branch.",
+    bucket: "subtle",
+    condition: { kind: "research_branch_complete", branch: "capital" },
+  },
+  {
+    id: "a_vignette_collector_40",
+    name: "Filed under \"more context\"",
+    description: "Unlock 40 different vignettes.",
+    bucket: "subtle",
+    condition: { kind: "vignette_count", n: 40 },
+  },
+  {
+    id: "a_safety_unsealed",
+    name: "The bell can't be unrung",
+    description: "Trigger the existential-threshold event (debt 400).",
+    bucket: "subtle",
+    condition: { kind: "debt_threshold", level: 400 },
+  },
+
+  // Comedy / parody — the screenshot-worthy bucket per GDD §10 tone bible.
+  {
+    id: "a_intern_only",
+    name: "Just the interns",
+    description: "Own 250 Interns. Specifically interns.",
+    bucket: "comedy",
+    condition: { kind: "chain_count", chain: "engineers", n: 250 },
+  },
+  {
+    id: "a_doom_loop",
+    name: "Reframing engagement",
+    description: "Fire the DAUs-down threshold event (debt 100).",
+    bucket: "comedy",
+    condition: { kind: "debt_threshold", level: 100 },
+  },
+  {
+    id: "a_regulator_visit",
+    name: "Industry best practices",
+    description: "Fire the regulator-on-site event (debt 25).",
+    bucket: "comedy",
+    condition: { kind: "debt_threshold", level: 25 },
+  },
+  {
+    id: "a_incident_zero",
+    name: "Resolved (verbally)",
+    description: "Fire the production-routing event (debt 50).",
+    bucket: "comedy",
+    condition: { kind: "debt_threshold", level: 50 },
+  },
+  {
+    id: "a_six_zeroes_dejavu",
+    name: "Numbers go vertical (again)",
+    description: "Reach 1e60 tokens in a single run.",
+    bucket: "comedy",
+    condition: { kind: "tokens_log10", n: 60 },
+  },
+  {
+    id: "a_tokens_1e200",
+    name: "Heat-death warning",
+    description: "Reach 1e200 tokens in a single run.",
+    bucket: "comedy",
+    condition: { kind: "tokens_log10", n: 200 },
+  },
+  {
+    id: "a_research_count_25",
+    name: "Tech tree — mostly fielded",
+    description: "Unlock 25 research nodes. The OKR was \"improve the OKR process.\"",
+    bucket: "comedy",
+    condition: { kind: "research_count", n: 25 },
+  },
+  {
+    id: "a_vignette_seed_only",
+    name: "Five DMs deep",
+    description: "Unlock 5 different vignettes. Inbox unread: still 5.",
+    bucket: "comedy",
+    condition: { kind: "vignette_count", n: 5 },
+  },
+  {
+    id: "a_prestige_3_subtweet",
+    name: "Three rounds in",
+    description: "Close 3 funding rounds. The founder needs a therapist.",
+    bucket: "comedy",
+    condition: { kind: "prestige_count", n: 3 },
+  },
+  {
+    id: "a_two_chains_grind",
+    name: "Vertically integrated (allegedly)",
+    description: "Own 250 producers across the GPU chain.",
+    bucket: "comedy",
+    condition: { kind: "chain_count", chain: "gpu", n: 250 },
+  },
+
+  // Endgame / AGI arc — fills the ladder between first agent and singularity.
+  {
+    id: "a_agents_25",
+    name: "It is hiring its managers",
+    description: "Own 25 Autonomous Agents simultaneously.",
+    bucket: "endgame",
+    condition: { kind: "autonomous_agent_count", n: 25 },
+  },
+  {
+    id: "a_agents_50",
+    name: "Org chart is a directed graph",
+    description: "Own 50 Autonomous Agents simultaneously.",
+    bucket: "endgame",
+    condition: { kind: "autonomous_agent_count", n: 50 },
+  },
+  {
+    id: "a_agents_100",
+    name: "Org chart is a directed cycle",
+    description: "Own 100 Autonomous Agents simultaneously.",
+    bucket: "endgame",
+    condition: { kind: "autonomous_agent_count", n: 100 },
+  },
+  {
+    id: "a_tokens_1e34",
+    name: "Civilizational throughput",
+    description: "Reach 1e34 tokens in a single run.",
+    bucket: "endgame",
+    condition: { kind: "tokens_log10", n: 34 },
+  },
+  {
+    id: "a_full_debt_ladder",
+    name: "Six distinct ways to look bad",
+    description: "Fire all 6 alignment-debt threshold events.",
+    bucket: "endgame",
+    condition: { kind: "debt_thresholds_fired_count", n: 6 },
+  },
+  {
+    id: "a_post_state_review",
+    name: "Post-state review",
+    description: "Reach the Civilizational round.",
+    bucket: "endgame",
+    condition: { kind: "reach_round", roundIdx: 8 },
   },
 ];
 

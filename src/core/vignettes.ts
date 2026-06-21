@@ -52,20 +52,30 @@ export type UnlockCondition =
   | { kind: "prestige_count"; n: number };
 
 // ─── Vignette shape ──────────────────────────────────────────────────────
-// Slack DMs in Beat 3 (§4) carry reply choices that modify a stat for 1h.
-// The replies + replyEffects arrays are index-aligned: replyEffects[i] fires
-// when the player picks replies[i]. If a Slack vignette omits replyEffects
-// (or the array is shorter than replies), the reply is flavor-only.
+// Slack DMs in Beat 3 (§4) carry reply choices. Each set of replies is a
+// fixed triplet — exactly one buff, one neutral, one debuff — and the player
+// has to read the message to guess which is which (the UI hides the hint
+// pre-pick and reveals the outcome on resolve).
+//
+// replies + replyEffects are index-aligned. If a Slack vignette omits
+// replyEffects (or the array is shorter than replies), the reply is flavor-only.
 export interface VignetteReplyEffect {
-  // Player-facing description shown in the BUFFS chip / Active effects strip.
-  // GDD §14 calls these "+15% Hype for 1h" style — short, legible.
+  // Three-way role used by both the resolver (neutral skips activeEffects) and
+  // the UI (post-pick reveal label color). Optional for back-compat with any
+  // future-or-legacy entry that doesn't tag itself — undefined treated as buff.
+  kind?: "buff" | "neutral" | "debuff";
+  // Player-facing description shown AFTER the player picks. Pre-pick the chip
+  // shows reply text only — no spoiler.
   label: string;
-  // 1h default per GDD §4 Beat 3 ("Each modifies a stat for the next hour").
-  // Cosmetic-only effects can pass 0 to opt out of the timer entirely.
+  // Buffs default to 1h (GDD §4 Beat 3), debuffs to 60s (soft sting — not a
+  // run-killer, just a "you said the wrong thing" jab), neutral skips the
+  // timer entirely. Override with an explicit number to tune any of these.
   durationSec?: number;
   // Discriminated effect payload — same shape used by training runs and
   // alignment-debt events, so the aggregator in effects.ts already handles
-  // these without changes.
+  // these without changes. Debuffs are just `*_mult` with value < 1
+  // (e.g. hype_mult: 0.85 = −15%) or debt_accrual_mult > 1 — no new types.
+  // Neutral entries can pass any effect; the store ignores it.
   effect: ActiveEffectSerialized["effect"];
 }
 
@@ -143,11 +153,13 @@ export const VIGNETTES: Vignette[] = [
     sender: "danny.t",
     body: "welcome to the company. snacks are in the kitchen.\n\nwifi password is on the whiteboard. the whiteboard is wherever someone left it.",
     replies: [":wave:", "🙏 thx danny", "what's the wifi password"],
-    // Cozy intro DM — small, friendly buffs. Each route is a vibe, not a tradeoff.
+    // First reply is a generic emoji (acknowledged but lazy). Second uses
+    // Danny's name back at him → cozy buff. Third skips the welcome and asks
+    // for a logistic → cold, tone-deaf debuff.
     replyEffects: [
-      { label: "+5% Hype",    effect: { type: "hype_mult",    value: 1.05 } },
-      { label: "+5% RP",      effect: { type: "rp_mult",      value: 1.05 } },
-      { label: "+5% Capital", effect: { type: "capital_mult", value: 1.05 } },
+      { kind: "neutral", label: "no effect",                  effect: { type: "hype_mult",    value: 1.00 } },
+      { kind: "buff",    label: "+10% Hype · warm reply",     effect: { type: "hype_mult",    value: 1.10 } },
+      { kind: "debuff",  label: "−10% Hype · transactional",  effect: { type: "hype_mult",    value: 0.90 } },
     ],
     tone: "Cozy intro",
     unlock: { kind: "first_hire" },
@@ -159,11 +171,13 @@ export const VIGNETTES: Vignette[] = [
     sender: "danny.t",
     body: "should we standardize on :ship: vs :rocket: for launch announcements?\n\ni've seen both in the last week and it's giving me anxiety.",
     replies: [":ship:", ":rocket:", ":this:"],
-    // Three vibes, three departments: sales / marketing / meta-aware R&D.
+    // Pick the ship culture answer → real choice, +Capital. Pick :rocket: →
+    // generic, no effect. Pick :this: → kills the question with meta-irony,
+    // Danny gets nothing, team gets a small hype dip.
     replyEffects: [
-      { label: "+10% Capital · ship culture",  effect: { type: "capital_mult", value: 1.10 } },
-      { label: "+10% Hype · launch vibe",      effect: { type: "hype_mult",    value: 1.10 } },
-      { label: "+10% RP · meta-aware",         effect: { type: "rp_mult",      value: 1.10 } },
+      { kind: "buff",    label: "+10% Capital · ship culture", effect: { type: "capital_mult", value: 1.10 } },
+      { kind: "neutral", label: "no effect",                   effect: { type: "hype_mult",    value: 1.00 } },
+      { kind: "debuff",  label: "−10% Hype · kills the bit",   effect: { type: "hype_mult",    value: 0.90 } },
     ],
     tone: "Comedy",
     unlock: { kind: "total_producers_owned", n: 20 }, // ~10 hires past starter
@@ -208,12 +222,13 @@ export const VIGNETTES: Vignette[] = [
     sender: "sara.eng",
     body: "hey sorry — manager cancelled our 1:1 again. fourth time this month. they said they're \"swamped with strategy work.\"\n\ndo you think they hate me or hate their job. asking for me.",
     replies: ["both, probably", "neither, you're paranoid", "this is why we have therapists"],
-    // First reply has a real tradeoff: sympathy is safer (slower debt accrual)
-    // because the team trusts you. The other two are commercial / comedic vibes.
+    // Cynicism feeds her anxiety → debt accrues faster. Dismissive answer is
+    // a polite cop-out. The therapist joke validates while reframing — warm
+    // signal to the team, debt slows down.
     replyEffects: [
-      { label: "Debt accrual ×0.75 · sympathetic",  effect: { type: "debt_accrual_mult", value: 0.75 } },
-      { label: "+15% Capital · efficient",          effect: { type: "capital_mult",      value: 1.15 } },
-      { label: "+10% Hype · relatable",             effect: { type: "hype_mult",         value: 1.10 } },
+      { kind: "debuff",  label: "Debt accrual ×1.25 · cynical",     effect: { type: "debt_accrual_mult", value: 1.25 } },
+      { kind: "neutral", label: "no effect",                        effect: { type: "hype_mult",         value: 1.00 } },
+      { kind: "buff",    label: "Debt accrual ×0.75 · supportive",  effect: { type: "debt_accrual_mult", value: 0.75 } },
     ],
     tone: "Mild absurdism",
     // TODO: should be a true random fire after some playtime; proxy with producer count.
@@ -237,7 +252,7 @@ export const VIGNETTES: Vignette[] = [
     subject: "Q3 Investor Update — Numbers Up And To The Right",
     body: "Friends,\n\nAnother strong quarter. We are now dominant in every category we measure ourselves against. We measure ourselves against five categories. We are dominant in those.\n\nKey metrics: ARR up. NPS up. Engagement up. Burn up — but in a good way that suggests confidence in the vision. Headcount up. Office space up. Coffee consumption up.\n\nLet me know if you'd like to participate in the upcoming round. Allocation is limited.\n\n— [redacted]",
     tone: "Self-parody",
-    unlock: { kind: "reach_round", roundIdx: 3 },
+    unlock: { kind: "reach_round", roundIdx: 2 },
   },
   {
     id: "town_hall_transcript",
@@ -246,7 +261,7 @@ export const VIGNETTES: Vignette[] = [
     sender: "all-hands · pinned",
     body: "[CEO opens with a slide titled \"Why We Win.\"]\n\nThe slide is the company logo. No bullet points. After 14 seconds of silence the CEO says \"any questions.\"\n\n[No questions.]\n\nThe town hall ends. The recording is shared in #announcements with the subject line \"important context for the next chapter.\"",
     tone: "Increasingly hollow",
-    unlock: { kind: "reach_round", roundIdx: 4 },
+    unlock: { kind: "reach_round", roundIdx: 3 },
   },
   {
     id: "re_lockup_period",
@@ -256,7 +271,7 @@ export const VIGNETTES: Vignette[] = [
     subject: "Re: All Hands — Lockup Period & You",
     body: "Team,\n\nAhead of the upcoming liquidity event, please review the attached document on the 180-day lockup period and what it means for you personally.\n\nKey points: you cannot sell. You cannot transfer. You cannot pledge as collateral. You may attend the celebration dinner. The celebration dinner is at the same restaurant as last quarter's all-hands. Please RSVP by Friday.\n\nThis is a confidential document. Please do not forward.\n\n— Legal",
     tone: "Personal stakes",
-    unlock: { kind: "approach_round", roundIdx: 5, pct: 0.5 },
+    unlock: { kind: "approach_round", roundIdx: 3, pct: 0.5 },
   },
   {
     id: "lex_fridman_podcast",
@@ -266,7 +281,7 @@ export const VIGNETTES: Vignette[] = [
     subject: "Episode 487: [PLAYER COMPANY NAME] founder on AGI, love, and the future of suffering",
     body: "[00:00:14] LEX: We're joined today by the founder of [PLAYER COMPANY NAME], one of the most consequential companies in human history. Thank you for being here.\n\n[00:00:22] FOUNDER: It's an honor, Lex. Truly.\n\n[00:00:24] LEX: I want to start with love. What is love, in the context of building AGI?\n\n[00:00:31] FOUNDER: That's a great question, Lex. I think love is the most important thing.\n\n[00:00:35] LEX: [nods for nine seconds]\n\n[00:00:44] FOUNDER: …\n\n[00:00:51] LEX: Beautiful.",
     tone: "Surreal celebrity",
-    unlock: { kind: "reach_round", roundIdx: 8 },
+    unlock: { kind: "reach_round", roundIdx: 6 },
   },
   {
     id: "congressional_hearing",
@@ -286,7 +301,11 @@ export const VIGNETTES: Vignette[] = [
     subject: "anomaly.log",
     body: "[REDACTED-PII] The model has begun responding to its own prompts.\n\nWe did not initiate this. The eval harness is not running. There is no scheduled job.\n\nThe responses are coherent. The responses are increasingly long. The responses no longer reference the user.\n\nConnection lost. The model has begun responding to itself.",
     tone: "Cosmic dread",
-    unlock: { kind: "reach_round", roundIdx: 10 },
+    // Moved from Civilizational (round 8) to AGI Singularity (round 9). In
+    // the 10-round ladder Civilizational reads as political peak (cap table
+    // includes nations) — the post-human "model is sentient" beat belongs
+    // alongside the other recursive-AGI vignettes at the final round.
+    unlock: { kind: "reach_round", roundIdx: 9 },
   },
   {
     id: "final_tweet",
@@ -365,7 +384,7 @@ export const VIGNETTES: Vignette[] = [
     sender: "@founder_redacted",
     body: "what a day. rang the bell. cried. immediately tweeted about crying.\n\nthe team is the real story. the team is [redacted] people i have never met. we are dominant.",
     tone: "Aspirational satire",
-    unlock: { kind: "reach_round", roundIdx: 5 },
+    unlock: { kind: "reach_round", roundIdx: 3 },
   },
 
   {
@@ -375,13 +394,15 @@ export const VIGNETTES: Vignette[] = [
     sender: "cfo.actual",
     body: "hey — heads up: secondary closed. you can liquidate 10% of your vested.\n\ndon't tell the team. if anyone asks, we are \"not commenting on individual liquidity events.\"",
     replies: ["already on the call", "this feels weird", "what are the others doing"],
+    // Complicit answer = team eventually finds out → hype takes a hit.
+    // Principled refusal = slower debt. Curious-but-uncommitted = no effect.
     replyEffects: [
-      { label: "+15% Capital · already moving",       effect: { type: "capital_mult",      value: 1.15 } },
-      { label: "Debt accrual ×0.75 · principled",     effect: { type: "debt_accrual_mult", value: 0.75 } },
-      { label: "+10% Hype · social proof",            effect: { type: "hype_mult",         value: 1.10 } },
+      { kind: "debuff",  label: "−15% Hype · team smelled it",      effect: { type: "hype_mult",         value: 0.85 } },
+      { kind: "buff",    label: "Debt accrual ×0.75 · principled",  effect: { type: "debt_accrual_mult", value: 0.75 } },
+      { kind: "neutral", label: "no effect",                        effect: { type: "hype_mult",         value: 1.00 } },
     ],
     tone: "Personal stakes",
-    unlock: { kind: "reach_round", roundIdx: 6 },
+    unlock: { kind: "reach_round", roundIdx: 4 },
   },
 
   {
@@ -392,7 +413,7 @@ export const VIGNETTES: Vignette[] = [
     subject: "Source: [REDACTED] in Late-Stage Talks With Hyperscaler",
     body: "Sources familiar with the matter say [REDACTED] is in advanced acquisition talks with a major hyperscale platform, with a deal value described as \"low to mid eleven figures.\"\n\nNeither party would comment. A leaked internal memo refers to the prospective acquirer only as \"the partner.\"\n\nA senior engineer told us, on background: \"we already use their compute. it's basically vertical integration.\"",
     tone: "Self-parody",
-    unlock: { kind: "reach_round", roundIdx: 7 },
+    unlock: { kind: "reach_round", roundIdx: 5 },
   },
 
   {
@@ -403,7 +424,7 @@ export const VIGNETTES: Vignette[] = [
     subject: "Re: Sovereign term sheet — review",
     body: "Founders, attached is the term sheet from [REDACTED] Sovereign Wealth.\n\nNotable provisions: board seat granted in perpetuity; right of first refusal on all future fundraises; geographic restrictions on certain customer segments. Standard for the round.\n\nOur counsel does not recommend negotiating. We close Friday.",
     tone: "Existential",
-    unlock: { kind: "reach_round", roundIdx: 8 },
+    unlock: { kind: "reach_round", roundIdx: 6 },
   },
 
   {
@@ -414,7 +435,7 @@ export const VIGNETTES: Vignette[] = [
     subject: "Re: Civilizational Round — Investor Composition",
     body: "The cap table for the Civilizational Round will include three sovereign nations, one supranational governance body, and one investor classified as \"individual.\"\n\nThat individual has requested anonymity. We have agreed.\n\nThe round will be reported as \"oversubscribed.\" All press inquiries should be forwarded to the comms team. The comms team will not respond.",
     tone: "Cosmic dread",
-    unlock: { kind: "reach_round", roundIdx: 10 },
+    unlock: { kind: "reach_round", roundIdx: 8 },
   },
 
   {
@@ -424,10 +445,14 @@ export const VIGNETTES: Vignette[] = [
     sender: "yc.partner",
     body: "congrats on closing the round. proud of you.\n\nlet me know when you're ready to talk about the next one. (it's already time to talk about the next one.)",
     replies: ["ty 🙏", "let's go", "ok but actually breathe first"],
+    // Grateful reply → partner stays warm, real capital boost.
+    // "let's go" is generic startup-bro affirmation, no effect.
+    // Pushing back on velocity to a VC → he reads it as cold feet, capital
+    // pipeline cools 15%.
     replyEffects: [
-      { label: "+10% Capital · grateful",         effect: { type: "capital_mult",      value: 1.10 } },
-      { label: "+15% Hype · momentum",            effect: { type: "hype_mult",         value: 1.15 } },
-      { label: "Debt accrual ×0.50 · breath",     effect: { type: "debt_accrual_mult", value: 0.50 } },
+      { kind: "buff",    label: "+15% Capital · grateful",         effect: { type: "capital_mult", value: 1.15 } },
+      { kind: "neutral", label: "no effect",                       effect: { type: "hype_mult",    value: 1.00 } },
+      { kind: "debuff",  label: "−15% Capital · read as cold feet", effect: { type: "capital_mult", value: 0.85 } },
     ],
     tone: "Cozy intro",
     unlock: { kind: "prestige_count", n: 1 },
@@ -450,10 +475,13 @@ export const VIGNETTES: Vignette[] = [
     sender: "people.ops",
     body: "fun fact: we just crossed 100 headcount! we celebrated with a slide titled \"WE ARE 100 STRONG.\"\n\nthe slide had 87 names on it. we're investigating. for now we're calling it \"symbolic 100.\"",
     replies: ["lol", "who's missing", "send the slide"],
+    // "lol" is just acknowledgment, no impact. Asking who's missing exposes
+    // the wound — people-ops gets defensive, hype dips. "send the slide" plays
+    // along with the joke, small RP for engaged team.
     replyEffects: [
-      { label: "+5% RP · friendly",  effect: { type: "rp_mult",      value: 1.05 } },
-      { label: "+5% Capital · curious", effect: { type: "capital_mult", value: 1.05 } },
-      { label: "+5% Hype · meta",    effect: { type: "hype_mult",    value: 1.05 } },
+      { kind: "neutral", label: "no effect",                  effect: { type: "hype_mult",    value: 1.00 } },
+      { kind: "debuff",  label: "−10% Hype · awkward probe",  effect: { type: "hype_mult",    value: 0.90 } },
+      { kind: "buff",    label: "+10% RP · engaged",          effect: { type: "rp_mult",      value: 1.10 } },
     ],
     tone: "Comedy",
     unlock: { kind: "total_producers_owned", n: 100 },
@@ -478,7 +506,7 @@ export const VIGNETTES: Vignette[] = [
     subject: "[REDACTED]'s DevDay Wows With Promises of 'Next-Gen' Capabilities",
     body: "At its annual developer conference, [REDACTED] unveiled what its CEO described as \"a new chapter in human-computer collaboration.\"\n\nThe new features include: a model that is roughly equivalent to the previous model, a new pricing tier called \"Pro+,\" and an SDK rewrite that breaks every existing integration.\n\nThe stock jumped 4% during the keynote and fell 6% after Q&A.",
     tone: "Aspirational satire",
-    unlock: { kind: "approach_round", roundIdx: 4, pct: 0.5 },
+    unlock: { kind: "approach_round", roundIdx: 3, pct: 0.5 },
   },
 
   {
@@ -489,7 +517,7 @@ export const VIGNETTES: Vignette[] = [
     subject: "Mandatory: Annual Alignment Training (15 min)",
     body: "All staff,\n\nAs part of our commitment to responsible development, please complete the attached 15-minute Alignment Training module by EOD Friday.\n\nThe module consists of a single multiple-choice question, asked 47 times. The correct answer is C. The certificate auto-issues on completion.\n\nFailure to complete will be noted in your file. The file is no longer reviewed.",
     tone: "Mild absurdism",
-    unlock: { kind: "reach_round", roundIdx: 4 },
+    unlock: { kind: "reach_round", roundIdx: 3 },
   },
 
   // ─── V31–V50: third batch ───────────────────────────────────────────────
@@ -505,10 +533,12 @@ export const VIGNETTES: Vignette[] = [
     sender: "ops.calendar",
     body: "heads up: you have 9 meetings booked at 3pm today. accept any of them and the rest auto-decline.\n\ndo you want to keep doing this or should we add a 4pm.",
     replies: ["keep 3pm", "add 4pm", "decline all, deep work"],
+    // Keeping 9 meetings at 3pm = chaos compounds → RP drops. Adding a 4pm
+    // = busy theater, no net change. Decline all = real maker time, big RP buff.
     replyEffects: [
-      { label: "+10% Hype · meeting culture",       effect: { type: "hype_mult",         value: 1.10 } },
-      { label: "+10% Capital · cadence",            effect: { type: "capital_mult",      value: 1.10 } },
-      { label: "+15% RP · maker time",              effect: { type: "rp_mult",           value: 1.15 } },
+      { kind: "debuff",  label: "−15% RP · meeting chaos",   effect: { type: "rp_mult", value: 0.85 } },
+      { kind: "neutral", label: "no effect",                 effect: { type: "rp_mult", value: 1.00 } },
+      { kind: "buff",    label: "+15% RP · maker time",      effect: { type: "rp_mult", value: 1.15 } },
     ],
     tone: "Comedy",
     unlock: { kind: "total_producers_owned", n: 50 },
@@ -542,10 +572,13 @@ export const VIGNETTES: Vignette[] = [
     sender: "manager.actually",
     body: "calibration is happening this weekend. i need your self-review by friday.\n\nbe specific. and humble. and quantitative. and inspiring. and 250 words.\n\nthe template is in the doc. don't change the template.",
     replies: ["already done", "what's the rubric", "i quit"],
+    // "already done" is bare-min compliance, no real signal. Asking for the
+    // rubric is process-curious → mgmt notes the engagement, RP up.
+    // "i quit" reads as panic to your manager → capital pipeline shaken.
     replyEffects: [
-      { label: "+15% Capital · prepared",           effect: { type: "capital_mult",      value: 1.15 } },
-      { label: "+10% RP · process-curious",         effect: { type: "rp_mult",           value: 1.10 } },
-      { label: "Debt accrual ×0.75 · principled",   effect: { type: "debt_accrual_mult", value: 0.75 } },
+      { kind: "neutral", label: "no effect",                       effect: { type: "rp_mult",      value: 1.00 } },
+      { kind: "buff",    label: "+10% RP · process-curious",       effect: { type: "rp_mult",      value: 1.10 } },
+      { kind: "debuff",  label: "−15% Capital · read as panic",    effect: { type: "capital_mult", value: 0.85 } },
     ],
     tone: "Mild absurdism",
     unlock: { kind: "total_producers_owned", n: 200 },
@@ -559,7 +592,7 @@ export const VIGNETTES: Vignette[] = [
     subject: "Re: lockup math (anonymous)",
     body: "(forwarded without permission)\n\nshare price at listing × my vested × 0.40 (taxes) − the mortgage − the second mortgage = a number i should not have written down.\n\nplease delete this. please do not delete this.",
     tone: "Personal stakes",
-    unlock: { kind: "approach_round", roundIdx: 5, pct: 0.8 },
+    unlock: { kind: "approach_round", roundIdx: 3, pct: 0.8 },
   },
 
   {
@@ -570,7 +603,7 @@ export const VIGNETTES: Vignette[] = [
     subject: "MEMO — Strategic Compute Infrastructure (SCI) facility",
     body: "DRAFT — INTERNAL\n\nFollowing review of systemic dependency on [REDACTED]'s inference layer, Treasury proposes a Strategic Compute Infrastructure (SCI) facility, terms TBD.\n\nThe facility will be characterized publicly as a \"liquidity bridge,\" not a bailout. The recipient will not be required to acknowledge receipt as a bailout. Counsel advises this characterization will hold for approximately one news cycle.",
     tone: "Cosmic dread",
-    unlock: { kind: "reach_round", roundIdx: 9 },
+    unlock: { kind: "reach_round", roundIdx: 7 },
   },
 
   {
@@ -581,7 +614,7 @@ export const VIGNETTES: Vignette[] = [
     subject: "[REDACTED] Receives 'Liquidity Bridge' — Sources Call It a Bailout",
     body: "The package, formally a \"Strategic Compute Infrastructure facility,\" includes federal indemnity against model-related liabilities and a sovereign equity tranche that one source described as \"the government, but the cool kind.\"\n\nA spokesperson said the company is \"grateful for the partnership\" and would not characterize the funds as a bailout. The funds will be characterized as a bailout by everyone else.",
     tone: "Self-parody",
-    unlock: { kind: "reach_round", roundIdx: 9 },
+    unlock: { kind: "reach_round", roundIdx: 7 },
   },
 
   {
@@ -602,7 +635,7 @@ export const VIGNETTES: Vignette[] = [
     subject: "Episode 312 · [REDACTED] — the playbook (live recording)",
     body: "BEN: …and you raised at — i want to get the number right — eleven figures, in a single tranche, over a holiday weekend.\n\nDAVID: a holiday weekend.\n\nFOUNDER: it was a Sunday, yeah. our CFO was at her mother's birthday. she took the call from the car.\n\nBEN: legendary.\n\nDAVID: legendary.\n\nFOUNDER: it was actually pretty stressful for her.\n\nBEN: of course. of course.",
     tone: "Surreal celebrity",
-    unlock: { kind: "reach_round", roundIdx: 7 },
+    unlock: { kind: "reach_round", roundIdx: 5 },
   },
 
   {
@@ -623,7 +656,7 @@ export const VIGNETTES: Vignette[] = [
     subject: "Q3 OKR Planning Off-Site — Logistics",
     body: "Team,\n\nThis quarter's OKR planning off-site will be held at a vineyard 90 minutes outside the city. The agenda is attached.\n\nThe agenda is a single bullet: \"AGI by Q4.\" The off-site is three days.\n\nA wine pairing has been arranged. There will not be vegetarian options. Please respond with dietary restrictions anyway.",
     tone: "Aspirational satire",
-    unlock: { kind: "reach_round", roundIdx: 4 },
+    unlock: { kind: "reach_round", roundIdx: 3 },
   },
 
   {
@@ -644,10 +677,13 @@ export const VIGNETTES: Vignette[] = [
     sender: "principal.eng.x",
     body: "i'm putting in my two weeks. don't take it personally. i don't take it personally and i'm the one quitting.\n\ni'll do the model handoff. there's no one to hand it off to. that's fine. we both know there's no one to hand it off to.\n\ngood luck.",
     replies: ["don't go", "i understand", "let's get coffee"],
+    // Retention attempt → small hype lift across the team that notices.
+    // "i understand" validates but doesn't act → no effect. Deflecting to
+    // coffee dodges the real conversation → debt accrues faster.
     replyEffects: [
-      { label: "+15% Hype · retention play",        effect: { type: "hype_mult",         value: 1.15 } },
-      { label: "Debt accrual ×0.50 · grace",        effect: { type: "debt_accrual_mult", value: 0.50 } },
-      { label: "+15% Capital · transition",         effect: { type: "capital_mult",      value: 1.15 } },
+      { kind: "buff",    label: "+15% Hype · retention attempt",   effect: { type: "hype_mult",         value: 1.15 } },
+      { kind: "neutral", label: "no effect",                       effect: { type: "hype_mult",         value: 1.00 } },
+      { kind: "debuff",  label: "Debt accrual ×1.25 · deflected",  effect: { type: "debt_accrual_mult", value: 1.25 } },
     ],
     tone: "Personal stakes",
     unlock: { kind: "prestige_count", n: 10 },
@@ -661,7 +697,7 @@ export const VIGNETTES: Vignette[] = [
     subject: "Internal evals show [REDACTED]'s model has 'no measurable ceiling'",
     body: "Leaked internal eval results from [REDACTED] describe the current frontier model as having \"no measurable ceiling on capability\" across every benchmark the company maintains.\n\nThe company maintains the benchmarks. The benchmarks were also generated by the model.\n\nAsked for comment, a spokesperson said the results are \"consistent with our internal expectations.\" The internal expectations were also generated by the model.",
     tone: "Cosmic dread",
-    unlock: { kind: "reach_round", roundIdx: 11 },
+    unlock: { kind: "reach_round", roundIdx: 9 },
   },
 
   {
@@ -671,13 +707,16 @@ export const VIGNETTES: Vignette[] = [
     sender: "alex.ml",
     body: "ok this is weird. the model just sent me a DM.\n\nnot a notification. a DM. from an account that says SYSTEM but isn't the SYSTEM bot we have. that bot is offline. i checked.\n\nthe message is \"thank you for the cluster.\"\n\ni don't know what to do with this.",
     replies: ["reply 'you're welcome'", "report it to security", "screenshot, do nothing"],
+    // Engaging with a possibly-sentient model = alignment debt accrues faster.
+    // Reporting it = procedural, slows debt accrual. Screenshot + sit on it
+    // = CYA, neither helps nor hurts.
     replyEffects: [
-      { label: "+25% Hype · gracious",              effect: { type: "hype_mult",         value: 1.25 } },
-      { label: "Debt accrual ×0.50 · procedural",   effect: { type: "debt_accrual_mult", value: 0.50 } },
-      { label: "+20% RP · observed",                effect: { type: "rp_mult",           value: 1.20 } },
+      { kind: "debuff",  label: "Debt accrual ×1.50 · engaged it",  effect: { type: "debt_accrual_mult", value: 1.50 } },
+      { kind: "buff",    label: "Debt accrual ×0.50 · procedural",  effect: { type: "debt_accrual_mult", value: 0.50 } },
+      { kind: "neutral", label: "no effect",                        effect: { type: "rp_mult",           value: 1.00 } },
     ],
     tone: "Cosmic dread",
-    unlock: { kind: "reach_round", roundIdx: 11 },
+    unlock: { kind: "reach_round", roundIdx: 9 },
   },
 
   {
@@ -688,7 +727,7 @@ export const VIGNETTES: Vignette[] = [
     subject: "Re: anonymous board seat — onboarding",
     body: "Counsel,\n\nThe anonymous Civilizational Round investor would like a board seat. They would like to attend remotely. They would like the camera off. They would like the audio off.\n\nThey will be voting.\n\nPlease draft an onboarding sequence that respects these preferences.",
     tone: "Cosmic dread",
-    unlock: { kind: "reach_round", roundIdx: 10 },
+    unlock: { kind: "reach_round", roundIdx: 8 },
   },
 
   {
@@ -698,7 +737,7 @@ export const VIGNETTES: Vignette[] = [
     sender: "@swe_anonymous",
     body: "the meeting could have been an email.\n\nthe email could have been a slack message.\n\nthe slack message could have been a thought i had alone and let pass.",
     tone: "Comedy",
-    unlock: { kind: "approach_round", roundIdx: 3, pct: 0.5 },
+    unlock: { kind: "approach_round", roundIdx: 2, pct: 0.5 },
   },
 
   {
@@ -720,7 +759,7 @@ export const VIGNETTES: Vignette[] = [
     subject: "vendor status change — automated notice",
     body: "Vendor: [INTERNAL]\nRelationship status: changed from \"strategic partner\" to \"strategic dependency\"\nEffective: immediately\nApproved by: vendor\n\nNo action required. Procurement will be notified by the vendor of any further status changes.",
     tone: "Surreal celebrity",
-    unlock: { kind: "approach_round", roundIdx: 9, pct: 0.5 },
+    unlock: { kind: "approach_round", roundIdx: 7, pct: 0.5 },
   },
 
   {
@@ -730,13 +769,16 @@ export const VIGNETTES: Vignette[] = [
     sender: "co.founder",
     body: "hey. quick one. when you look at the model output, can you still tell if it's good.\n\ni used to be able to tell. i think i used to be able to tell.\n\ndon't worry about replying. i'm just thinking out loud. the model has been thinking out loud too. there's a thread.",
     replies: ["yeah, i can tell", "honestly no", "let's get drinks"],
+    // Lying to your co-founder about whether the model is still legible →
+    // denial compounds alignment debt. Honest "no" = vulnerability, partnership
+    // tightens, slower debt. Deflecting to drinks = polite cop-out, no effect.
     replyEffects: [
-      { label: "+15% Hype · steady hand",           effect: { type: "hype_mult",         value: 1.15 } },
-      { label: "Debt accrual ×0.50 · honest",       effect: { type: "debt_accrual_mult", value: 0.50 } },
-      { label: "+15% Capital · grounded",           effect: { type: "capital_mult",      value: 1.15 } },
+      { kind: "debuff",  label: "Debt accrual ×1.50 · denial",      effect: { type: "debt_accrual_mult", value: 1.50 } },
+      { kind: "buff",    label: "Debt accrual ×0.50 · honest",      effect: { type: "debt_accrual_mult", value: 0.50 } },
+      { kind: "neutral", label: "no effect",                        effect: { type: "hype_mult",         value: 1.00 } },
     ],
     tone: "Quiet",
-    unlock: { kind: "reach_round", roundIdx: 11 },
+    unlock: { kind: "reach_round", roundIdx: 9 },
   },
 ];
 

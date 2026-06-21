@@ -4,6 +4,7 @@ import {
   __devAddCapital,
   __devAddEquity,
   __devAddTokens,
+  __devFillRoundThreshold,
   __devJumpToRound,
   __devReplayIntro,
   __devSendTestPush,
@@ -77,6 +78,7 @@ export function DevPanel({ visible, onClose }: Props) {
                 <Btn label="+1B"   onPress={() => __devAddTokens(9)} />
                 <Btn label="+1e20" onPress={() => __devAddTokens(20)} />
                 <Btn label="+1e34 (IPO)" onPress={() => __devAddTokens(34)} />
+                <Btn label="FILL ROUND" onPress={() => __devFillRoundThreshold()} />
               </Section>
 
               <Section label="OTHER CURRENCIES">

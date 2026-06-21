@@ -20,31 +20,54 @@ function reset() {
 describe("store.resolveVignette", () => {
   beforeEach(reset);
 
-  it("applies the picked reply's effect and locks the resolution", () => {
+  it("applies a buff pick (welcome[1]) and locks the resolution at 1h", () => {
+    // welcome[1] is the buff role (🙏 thx danny → +10% Hype).
     const { resolveVignette } = useGame.getState();
-    const ok = resolveVignette("welcome", 0);
+    const ok = resolveVignette("welcome", 1);
     expect(ok).toBe(true);
 
     const s = useGame.getState();
-    expect(s.persistent.resolvedVignettes.welcome).toBe(0);
+    expect(s.persistent.resolvedVignettes.welcome).toBe(1);
     expect(s.run.activeEffects.length).toBe(1);
     const eff = s.run.activeEffects[0];
     expect(eff.source).toBe("slack_dm");
     expect(eff.label).toMatch(/Hype/i);
-    expect(eff.effect).toEqual({ type: "hype_mult", value: 1.05 });
-    // 1h default duration per GDD §4 Beat 3
+    expect(eff.effect).toEqual({ type: "hype_mult", value: 1.10 });
+    // 1h default duration for buffs per GDD §4 Beat 3
     expect(eff.expiresAt - eff.appliedAt).toBe(3_600_000);
+  });
+
+  it("neutral pick (welcome[0]) locks the resolution but pushes no activeEffect", () => {
+    const { resolveVignette } = useGame.getState();
+    const ok = resolveVignette("welcome", 0);
+    expect(ok).toBe(true);
+    const s = useGame.getState();
+    expect(s.persistent.resolvedVignettes.welcome).toBe(0);
+    expect(s.run.activeEffects.length).toBe(0);
+  });
+
+  it("debuff pick (welcome[2]) applies a negative mult for 60s", () => {
+    const { resolveVignette } = useGame.getState();
+    const ok = resolveVignette("welcome", 2);
+    expect(ok).toBe(true);
+    const s = useGame.getState();
+    expect(s.run.activeEffects.length).toBe(1);
+    const eff = s.run.activeEffects[0];
+    expect(eff.effect).toEqual({ type: "hype_mult", value: 0.90 });
+    // 60s default duration for debuffs (soft sting, design pick).
+    expect(eff.expiresAt - eff.appliedAt).toBe(60_000);
   });
 
   it("is idempotent — re-resolving the same vignette returns false and adds no extra effect", () => {
     const { resolveVignette } = useGame.getState();
-    expect(resolveVignette("welcome", 0)).toBe(true);
+    // Pick the buff so activeEffects has 1 entry to compare against.
+    expect(resolveVignette("welcome", 1)).toBe(true);
     const before = useGame.getState().run.activeEffects.length;
-    expect(resolveVignette("welcome", 1)).toBe(false);
+    expect(resolveVignette("welcome", 2)).toBe(false);
     expect(resolveVignette("welcome", 0)).toBe(false);
     expect(useGame.getState().run.activeEffects.length).toBe(before);
     // The lock-in records the FIRST pick, not the attempted second one.
-    expect(useGame.getState().persistent.resolvedVignettes.welcome).toBe(0);
+    expect(useGame.getState().persistent.resolvedVignettes.welcome).toBe(1);
   });
 
   it("returns false for unknown vignette ids without mutating state", () => {
@@ -70,10 +93,10 @@ describe("store.resolveVignette", () => {
   });
 
   it("each Slack reply picks its own effect (proves index alignment)", () => {
-    // Pick index 2 → 3rd reply on welcome ("what's the wifi password" → +5% Capital).
+    // re_slack_reaction has 3 replies. Index 0 = :ship: → +10% Capital buff.
     const { resolveVignette } = useGame.getState();
-    expect(resolveVignette("welcome", 2)).toBe(true);
+    expect(resolveVignette("re_slack_reaction", 0)).toBe(true);
     const eff = useGame.getState().run.activeEffects[0];
-    expect(eff.effect).toEqual({ type: "capital_mult", value: 1.05 });
+    expect(eff.effect).toEqual({ type: "capital_mult", value: 1.10 });
   });
 });

@@ -6,6 +6,7 @@ import Svg, {
   Defs,
   Ellipse,
   G,
+  Line,
   LinearGradient as SvgLinearGradient,
   Path,
   Polygon,
@@ -136,26 +137,26 @@ const MEGACORP_ZONES: HitZone[] = [
   { id: "energy",   x:   8, y:   1, w: 60, h:  5, label: "Buy Energy (substation)" },
   // Corporate kanban whiteboard — RESEARCH
   { id: "research", x: 158, y:  80, w: 80, h: 60, label: "Research (kanban)" },
-  // Far-left corner plant — cosmetic
-  { id: "plant",    x:   0, y: 262, w: 18, h: 30, label: "Cosmetic" },
 ];
 
 // AGI SINGULARITY — design v11 rewrite. The company has become a gravity
 // well: a supermassive black hole at the center, with producer anchors
 // orbiting around it.
-//   engineer = the black hole itself (Recursive Superintelligence core)
+//   research = the black hole itself (the model IS the research at this point)
 //   energy   = Quasar Tap (lower-right)
 //   books    = Galactic Archive (spiral galaxy upper-right)
 //   monitor  = polar relativistic jet (top, "Observe")
 //   gpu      = Matrioshka swarm (lower-left)
-// Research isn't on this scene by design intent — by round 11 the player is
-// past spending Equity; the model "trains itself" beat means there's nothing
-// to manually research anymore.
+// Earlier design intent was to omit research here ("the model trains itself"),
+// but the playable experience needs an Equity sink in the loop-around AGI
+// round too — so the black hole doubles as the research portal. Engineers can
+// still be bought via the Producers screen.
 const AGI_ZONES: HitZone[] = [
-  { id: "engineer", x:  92, y: 124, w: 56, h: 52, label: "Recursive Superintelligence" },
+  { id: "research", x:  92, y: 124, w: 56, h: 52, label: "Tune the AGI" },
   { id: "energy",   x: 186, y: 264, w: 44, h: 44, label: "Quasar Tap" },
   { id: "books",    x: 184, y:  50, w: 44, h: 40, label: "Galactic Archive" },
-  { id: "monitor",  x: 108, y:  92, w: 24, h: 32, label: "Recursive Self-Training" },
+  // Training Run zone — wraps the Stellar Forge sprite (cx 32, cy 200, ~50px).
+  { id: "monitor",  x:   4, y: 172, w: 56, h: 56, label: "Stellar Forge · Training Run" },
   { id: "gpu",      x:   8, y: 264, w: 52, h: 44, label: "Matrioshka Swarm" },
 ];
 
@@ -323,24 +324,24 @@ export const HIT_ZONES_BY_SCENE: Record<SceneId, HitZone[]> = {
 };
 
 /**
- * Funding-round → scene mapping. All 8 scenes wired.
+ * Funding-round → scene mapping for the 10-round ladder (v12).
  *   seed       → rounds 0-1 (Seed, Series A)         — garage, solo founder
- *   coworking  → rounds 2-3 (Series B, Series C)     — WeWork bench
- *   office     → rounds 4-5 (Series D, IPO)          — brick + Edison bulbs
- *   megacorp   → rounds 6-7 (Secondary, Acquisition) — corporate slate-blue
- *   campus     → round 8   (Sovereign Wealth)        — Apple-Park-ish campus
- *   datacenter → round 9   (Government Bailout)      — dark server hall
- *   planetary  → round 10  (Civilizational)          — Earth from low orbit
- *   agi        → round 11  (Singularity)             — galactic endgame
+ *   coworking  → round 2   (Series B)                — WeWork bench (1 round)
+ *   office     → round 3   (IPO)                     — brick + Edison bulbs (1 round)
+ *   megacorp   → rounds 4-5 (Secondary, Acquisition) — corporate slate-blue
+ *   campus     → round 6   (Sovereign Wealth)        — Apple-Park-ish campus
+ *   datacenter → round 7   (Government Bailout)      — dark server hall
+ *   planetary  → round 8   (Civilizational)          — Earth from low orbit
+ *   agi        → round 9   (Singularity)             — galactic endgame
  */
 export function sceneForRound(roundIdx: number): SceneId {
   if (roundIdx <= 1) return "seed";
-  if (roundIdx <= 3) return "coworking";
-  if (roundIdx <= 5) return "office";
-  if (roundIdx <= 7) return "megacorp";
-  if (roundIdx <= 8) return "campus";
-  if (roundIdx <= 9) return "datacenter";
-  if (roundIdx <= 10) return "planetary";
+  if (roundIdx === 2) return "coworking";
+  if (roundIdx === 3) return "office";
+  if (roundIdx <= 5) return "megacorp";
+  if (roundIdx === 6) return "campus";
+  if (roundIdx === 7) return "datacenter";
+  if (roundIdx === 8) return "planetary";
   return "agi";
 }
 
@@ -1293,21 +1294,29 @@ function MegacorpScene({ t }: { t: number }) {
   R(0, FLOOR_Y - 2, W, 1, CORP.wallSh);
   R(0, FLOOR_Y - 1, W, 1, CORP.floorHi);
 
-  // Glass partition wall (window into another office)
+  // Glass partition wall (window into another office). Render order:
+  //   1. Glass pane background
+  //   2. City skyline + stars + clouds (CONTENT through the glass)
+  //   3. Frame edges (top/bottom/left/right) + central mullion ON TOP
+  // The earlier ordering had the skyline drawn after the mullion, which made
+  // the mullion disappear behind tall buildings; and the loop ran one column
+  // past the right frame so the city leaked outside the window.
   R(12, 70, 100, 90, CORP.glass);
-  R(12, 70, 100, 1, CORP.dark);
-  R(12, 159, 100, 1, CORP.dark);
-  R(12, 70, 1, 90, CORP.dark);
-  R(111, 70, 1, 90, CORP.dark);
-  R(61, 70, 2, 90, CORP.dark); // mullion
-  // Distant city skyline through glass
+  // Distant city skyline through glass — clamped to x:13..x:110 so it stays
+  // strictly inside the frame's left/right edges.
   const sky = [10,18,8,22,14,28,11,20,8,16,25,18,12,22,10,20,8,18,14,25,16,10,20,18,12,22,10,16,25,12];
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 98; i++) {
     const h = sky[i % 30];
     R(13 + i, 158 - h, 1, h, CORP.wallSh);
   }
   for (let i = 0; i < 20; i++) PX(16 + i * 5, 154 - (i % 4) * 3, CORP.bulb);
   for (let i = 0; i < 5; i++) R(20 + i * 18, 75 + i * 4, 4, 1, CORP.white);
+  // Frame on top of skyline so it cleanly contains the city silhouette.
+  R(12, 70, 100, 1, CORP.dark);   // top edge
+  R(12, 159, 100, 1, CORP.dark);  // bottom edge
+  R(12, 70, 1, 90, CORP.dark);    // left edge
+  R(111, 70, 1, 90, CORP.dark);   // right edge
+  R(61, 70, 2, 90, CORP.dark);    // central mullion
 
   // GPU rack visible inside glass (blinking)
   R(130, 100, 18, 60, CORP.darker);
@@ -1416,10 +1425,6 @@ function MegacorpScene({ t }: { t: number }) {
         />
       ))}
 
-      {/* Corporate plant — sleek black pot (far left per design v5) */}
-      <PixelRect x={4} y={FLOOR_Y + 60} w={14} h={18} c={CORP.dark} />
-      <PixelRect x={4} y={FLOOR_Y + 60} w={14} h={1} c={CORP.mid} />
-      <Plant x={0} y={FLOOR_Y + 40} t={t} />
       <FloatingTokens spawnX={110} spawnY={236} t={t} />
     </G>
   );
@@ -2742,6 +2747,10 @@ function PlanetaryScene({ t }: { t: number }) {
           in our geometry) to keep the sprite + halo + mast visible. */}
       <FrontierResearchArray x={36} y={50} t={t} />
 
+      {/* Endurance ring ship — Training Run target for the planetary round.
+          Upper-center deep space; rotating modules + ion thruster plume. */}
+      <EnduranceShip cx={116} cy={64} t={t} />
+
       {/* Terminator dawn sliver (outside clip, sits ON the globe edge) */}
       <Path d={termPath} stroke="#C97B5B" strokeWidth={6} fill="none" opacity={0.12} />
 
@@ -2940,6 +2949,212 @@ function DysonSwarm({ cx, cy, t }: { cx: number; cy: number; t: number }) {
   );
 }
 
+// — Stellar Forge (AGI training-run target) —
+// Protostar condensing from a nebula knot: swirling infall + accretion ring
+// + fusion core that pulses + periodic ignition flare. "Forging a new mind."
+function StellarForge({ cx, cy, t }: { cx: number; cy: number; t: number }) {
+  // Ignition cycle — flares bright every ~64 ticks
+  const cyc = t % 64;
+  const igniting = cyc < 10;
+  const flare = igniting ? (1 - cyc / 10) : 0;
+  const breathe = 1 + Math.sin(t / 14) * 0.12 + flare * 0.8;
+  const coreR = 5 * breathe;
+
+  // Spiraling infall — 3 streams of pixel dots
+  const infall: React.ReactNode[] = [];
+  let ik = 0;
+  for (let s = 0; s < 3; s++) {
+    const base = s * 2.1 + t / 18;
+    for (let i = 0; i < 18; i++) {
+      const a = base + i * 0.34;
+      const rr = 26 - i * 1.3;
+      if (rr < 5) break;
+      if ((t + i * 2 + s * 5) % 10 < 6) {
+        const x = cx + Math.cos(a) * rr;
+        const y = cy + Math.sin(a) * rr * 0.6;
+        const col = i < 5 ? "#FFE8A8" : i < 11 ? "#E8902A" : "#7A3A6A";
+        infall.push(<Px key={`if${ik++}`} x={x | 0} y={y | 0} c={col} />);
+      }
+    }
+  }
+
+  // Orbiting bright clump on the accretion ring
+  const oa = -t / 12;
+  const orx = Math.cos(oa) * 22;
+  const ory = Math.sin(oa) * 22 * 0.42;
+  const ox = cx + orx * Math.cos(-0.5) - ory * Math.sin(-0.5);
+  const oy = cy + orx * Math.sin(-0.5) + ory * Math.cos(-0.5);
+
+  // Rising newborn-star sparks
+  const sparks: React.ReactNode[] = [];
+  for (let i = 0; i < 5; i++) {
+    const sp = (t + i * 13) % 64;
+    if (sp < 40) {
+      const opacity = 0.7 * (1 - sp / 40);
+      const sxk = cx + Math.sin(i * 2 + t / 10) * (4 + sp * 0.2);
+      sparks.push(
+        <Rect key={`sp${i}`} x={sxk | 0} y={(cy - sp * 0.5) | 0}
+          width={1} height={1} fill={i % 2 ? "#FFE08A" : "#A4F0FF"} opacity={opacity} />
+      );
+    }
+  }
+
+  return (
+    <G>
+      {/* Nebula knots — 3 layered ellipses */}
+      <Ellipse cx={cx - 10} cy={cy - 6} rx={20} ry={16} fill="#3A1E50" opacity={0.45} />
+      <Ellipse cx={cx + 9}  cy={cy + 5} rx={20} ry={16} fill="#1E2E5C" opacity={0.45} />
+      <Ellipse cx={cx + 2}  cy={cy + 9} rx={20} ry={16} fill="#4A2030" opacity={0.45} />
+
+      {/* Spiraling infall */}
+      {infall}
+
+      {/* Accretion ring — 3 banded ellipses, tilted -0.5 rad */}
+      <Ellipse cx={cx} cy={cy} rx={22} ry={22 * 0.42} fill="none" stroke="#FFF2C8" strokeWidth={1.5} opacity={0.8} transform={`rotate(-28.6 ${cx} ${cy})`} />
+      <Ellipse cx={cx} cy={cy} rx={19} ry={19 * 0.42} fill="none" stroke="#FFC04A" strokeWidth={1.5} opacity={0.8} transform={`rotate(-28.6 ${cx} ${cy})`} />
+      <Ellipse cx={cx} cy={cy} rx={16} ry={16 * 0.42} fill="none" stroke="#E8702A" strokeWidth={1.5} opacity={0.8} transform={`rotate(-28.6 ${cx} ${cy})`} />
+
+      {/* Orbiting bright clump */}
+      <PixelRect x={ox - 1} y={oy - 1} w={2} h={2} c="#FFF8E0" />
+
+      {/* Core halo (breathing) */}
+      <Ellipse cx={cx} cy={cy} rx={breathe * 19.2} ry={breathe * 19.2} fill="#FFD27A" opacity={0.18 + flare * 0.4} />
+      <Ellipse cx={cx} cy={cy} rx={breathe * 12.0} ry={breathe * 12.0} fill="#FFD27A" opacity={0.28 + flare * 0.5} />
+      <Ellipse cx={cx} cy={cy} rx={breathe * 7.2}  ry={breathe * 7.2}  fill="#FF8A3A" opacity={0.5 + flare * 0.4} />
+
+      {/* Fusion core */}
+      <Ellipse cx={cx} cy={cy} rx={coreR} ry={coreR} fill="#FF9A3A" />
+      <Ellipse cx={cx} cy={cy} rx={coreR * 0.66} ry={coreR * 0.66} fill="#FFE08A" />
+      <Ellipse cx={cx} cy={cy} rx={coreR * 0.34} ry={coreR * 0.34} fill="#FFFFFF" />
+
+      {/* Ignition flare — cross spikes + ring shock */}
+      {igniting && (
+        <G opacity={flare}>
+          <Rect x={cx - (14 + (1 - flare) * 16)} y={cy} width={(14 + (1 - flare) * 16) * 2} height={1} fill="#FFF8E0" />
+          <Rect x={cx} y={cy - (14 + (1 - flare) * 16)} width={1} height={(14 + (1 - flare) * 16) * 2} fill="#FFF8E0" />
+          <Ellipse cx={cx} cy={cy} rx={10 + (1 - flare) * 22} ry={(10 + (1 - flare) * 22) * 0.6} fill="none" stroke="#FFF2C8" strokeWidth={1} />
+        </G>
+      )}
+
+      {sparks}
+    </G>
+  );
+}
+
+// — Endurance ring ship (Planetary training-run target) —
+// Interstellar-style rotating-ring craft: 12 modules on a spinning ring,
+// central hub with docking spokes, antenna, and an ion thruster plume.
+function EnduranceShip({ cx, cy, t }: { cx: number; cy: number; t: number }) {
+  const RX = 26;
+  const RY = 9.5;
+  const spin = t / 26;
+
+  // 12 modules around the ring, split into back/front for proper z-ordering
+  type Mod = { mxp: number; myp: number; front: boolean; i: number };
+  const modules: Mod[] = [];
+  for (let i = 0; i < 12; i++) {
+    const a = spin + (i / 12) * Math.PI * 2;
+    modules.push({
+      mxp: cx + Math.cos(a) * RX,
+      myp: cy + Math.sin(a) * RY,
+      front: Math.sin(a) > 0,
+      i,
+    });
+  }
+  const renderModule = (m: Mod, prefix: string) => {
+    const hab = m.i % 2 === 0;
+    const blink = (t + m.i * 4) % 16 < 9;
+    const blinkCol = blink ? (hab ? "#FFE8A8" : "#7EE0FF") : "#2A3340";
+    return (
+      <G key={`${prefix}${m.i}`}>
+        <PixelRect x={m.mxp - 2} y={m.myp - 2} w={4} h={4} c={hab ? "#D8E0EC" : "#3A4656"} />
+        <PixelRect x={m.mxp - 2} y={m.myp - 2} w={4} h={1} c={hab ? "#FFFFFF" : "#5A6A7E"} />
+        <Px x={m.mxp | 0} y={m.myp | 0} c={blinkCol} />
+      </G>
+    );
+  };
+
+  // Ion thruster plume — 9 horizontal bars, fading
+  const plume: React.ReactNode[] = [];
+  for (let i = 0; i < 9; i++) {
+    const op = (0.8 - i * 0.08) * (0.6 + 0.4 * Math.sin(t / 4 + i));
+    const col = i < 2 ? "#FFFFFF" : i < 4 ? "#A4F0FF" : i < 6 ? "#5AB0E0" : "#2A6AA0";
+    plume.push(
+      <Rect key={`pl${i}`} x={(cx - RX - 2 - i * 2) | 0} y={cy - 1}
+        width={2} height={2} fill={col} opacity={Math.max(0, op)} />
+    );
+  }
+
+  // Periodic data burst toward Earth
+  const burn = (t % 48) / 48;
+  const dataBurst = burn < 0.5 ? (
+    <Rect x={(cx + RX + 2 + burn * 30) | 0} y={(cy + 4 + burn * 20) | 0}
+      width={2} height={2} fill="#FFE08A" opacity={0.7 * (1 - burn * 2)} />
+  ) : null;
+
+  // Docking spokes — 6 short lines radiating from hub
+  const spokes: React.ReactNode[] = [];
+  for (let i = 0; i < 6; i++) {
+    const a = spin * 0.5 + i * Math.PI / 3;
+    spokes.push(
+      <Line key={`sp${i}`}
+        x1={cx} y1={cy}
+        x2={cx + Math.cos(a) * RX * 0.42}
+        y2={cy + Math.sin(a) * RY * 0.42}
+        stroke="#6C7C92" strokeWidth={1} />
+    );
+  }
+
+  // Beacon on forward command pod — blinks
+  const beaconCol = (t >> 1) % 6 < 3 ? "#FF5A4C" : "#5A1A14";
+
+  return (
+    <G>
+      {/* Running-light halo */}
+      <Ellipse cx={cx} cy={cy} rx={RX + 8} ry={RY + 6} fill="#9AB4D0" opacity={0.10} />
+      <Ellipse cx={cx} cy={cy} rx={RX + 4} ry={RY + 3} fill="#9AB4D0" opacity={0.14} />
+
+      {/* Back half of ring (behind hub) */}
+      <Path d={`M ${cx - RX} ${cy} A ${RX} ${RY} 0 0 0 ${cx + RX} ${cy}`}
+        stroke="#5A6A82" strokeWidth={2} fill="none" />
+
+      {/* Back modules */}
+      {modules.filter(m => !m.front).map(m => renderModule(m, "b"))}
+
+      {/* Front half of ring */}
+      <Path d={`M ${cx - RX} ${cy} A ${RX} ${RY} 0 0 1 ${cx + RX} ${cy}`}
+        stroke="#7E8EA6" strokeWidth={2} fill="none" />
+
+      {/* Docking spokes */}
+      {spokes}
+
+      {/* Hub body */}
+      <PixelRect x={cx - 4} y={cy - 3} w={8} h={6} c="#C8D2E0" />
+      <PixelRect x={cx - 4} y={cy - 3} w={8} h={1} c="#FFFFFF" />
+      <PixelRect x={cx - 4} y={cy + 2} w={8} h={1} c="#7E8EA6" />
+      <Px x={cx - 2} y={cy} c="#3A4656" />
+      <Px x={cx + 1} y={cy} c="#3A4656" />
+
+      {/* Forward command pod + beacon */}
+      <PixelRect x={cx - 1} y={cy - 6} w={2} h={3} c="#D8E0EC" />
+      <Px x={cx} y={cy - 7} c={beaconCol} />
+
+      {/* Antenna dish (small arc) */}
+      <Path d={`M ${cx + 6 + Math.cos(Math.PI * 1.2) * 2.5} ${cy - 2 + Math.sin(Math.PI * 1.2) * 2.5} A 2.5 2.5 0 0 1 ${cx + 6 + Math.cos(Math.PI * 2.1) * 2.5} ${cy - 2 + Math.sin(Math.PI * 2.1) * 2.5}`}
+        stroke="#8C9AAE" strokeWidth={1} fill="none" />
+
+      {/* Front modules (over hub) */}
+      {modules.filter(m => m.front).map(m => renderModule(m, "f"))}
+
+      {/* Ion thruster plume trailing left */}
+      {plume}
+
+      {/* Data burst toward Earth */}
+      {dataBurst}
+    </G>
+  );
+}
+
 // — Quasar tap (Energy producer anchor) —
 function Quasar({ cx, cy, t }: { cx: number; cy: number; t: number }) {
   const beams: React.ReactNode[] = [];
@@ -3062,6 +3277,11 @@ function AGIScene({ t }: { t: number }) {
       <Quasar cx={208} cy={288} t={t} />
       <SpiralGalaxy cx={206} cy={70} R={20} ry={9} t={t} spin={1.2} core="#A4F0D0" arm="#3F8A6A" />
       <PixelRect x={204} y={68} w={4} h={4} c="#CFFBE8" />
+
+      {/* TRAINING RUN target — Stellar Forge (protostar igniting). Tap on it
+          opens the Training Run modal; coords match the design's lower-left
+          placement (32, 200). */}
+      <StellarForge cx={32} cy={200} t={t} />
 
       {/* R12 · AGI badge (bottom-left) */}
       <PixelRect x={4} y={H - 22} w={92} h={18} c="#0E0A18" />

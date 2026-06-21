@@ -196,13 +196,14 @@ export function VignettesInbox({ onBack }: Props) {
       {/* Fullscreen reader with per-medium template (Slack / Email / Tweet /
           BoardMemo / News / Podcast / System). See VignetteReader.tsx.
           For Slack DMs with replyEffects, the reader hands the picked index
-          back through onResolve, which applies the buff and closes. */}
+          back through onResolve, which applies the buff. The modal stays
+          open so the reveal-label (→ +X% Hype · 1h) animates in — the
+          player taps × or the backdrop to close once they've read it. */}
       <VignetteReader
         vignette={open}
         onClose={() => setOpenId(null)}
         onResolve={(replyIdx) => {
           if (openId) resolveVignette(openId, replyIdx);
-          setOpenId(null);
         }}
         resolvedReplyIdx={openId ? resolved[openId] : undefined}
       />

@@ -1,9 +1,14 @@
 import { StatusBar } from "expo-status-bar";
 import { useFonts, PixelifySans_400Regular, PixelifySans_500Medium, PixelifySans_600SemiBold, PixelifySans_700Bold } from "@expo-google-fonts/pixelify-sans";
+
+// Splash dismissal is handled by the OS via the legacy `splash` field in
+// app.json (LaunchScreen.storyboard generated at native build time). It
+// auto-dismisses on first React paint — no JS code needed.
 import { Silkscreen_400Regular, Silkscreen_700Bold } from "@expo-google-fonts/silkscreen";
 import { VT323_400Regular } from "@expo-google-fonts/vt323";
 import React, { useEffect, useRef, useState } from "react";
-import { AppState, AppStateStatus, SafeAreaView, StyleSheet } from "react-native";
+import { AppState, AppStateStatus, StyleSheet } from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { freshSave } from "./src/core/save";
 import { initStorage, loadSave, saveSave } from "./src/game/persistence";
 import { startTickEngine } from "./src/game/tickEngine";
@@ -19,6 +24,7 @@ import { ResearchScreen } from "./src/ui/ResearchScreen";
 import { TrainingRunModal } from "./src/ui/TrainingRunModal";
 import { VignettesInbox } from "./src/ui/VignettesInbox";
 import { PushOptInModal } from "./src/ui/PushOptInModal";
+import { EndgameModal } from "./src/ui/EndgameModal";
 import { colors } from "./src/ui/theme";
 import { ChainId } from "./src/core/types";
 import { cancelScheduledReturn, scheduleReengagement } from "./src/game/notifications";
@@ -100,15 +106,14 @@ export default function App() {
     return () => clearInterval(id);
   }, [hydrated, toSaveBlob]);
 
-  if (!fontsLoaded) {
-    // Keep the splash visible until pixel fonts arrive — first paint must be
-    // in-style, otherwise text reflows from system sans to Pixelify and
-    // everything jumps. Cheap: bundled .ttfs load in <100ms.
-    return <SafeAreaView style={styles.root} />;
-  }
+  // No font-gate: render immediately. Fonts pop in when they load (brief
+  // system-font flash for the first frame). Splash auto-dismisses on first
+  // paint via the legacy native LaunchScreen.storyboard.
+  void fontsLoaded;
 
   return (
-    <SafeAreaView style={styles.root}>
+    <SafeAreaProvider>
+    <SafeAreaView style={styles.root} edges={["top", "bottom", "left", "right"]}>
       <StatusBar style="dark" />
       {screen === "home" && (
         <HomeScreen
@@ -153,7 +158,28 @@ export default function App() {
       <DebtEventModal />
       <IntroModal />
       <PushOptInModal />
+      <EndgameTrigger />
     </SafeAreaView>
+    </SafeAreaProvider>
+  );
+}
+
+/**
+ * Mounts the EndgameModal when the store flips `endgameOpen` to true (set by
+ * prestige() the first time the player closes the AGI Singularity round).
+ * Lives in its own component so the store selector only re-renders this leaf
+ * and not the whole App tree on the flag's transitions.
+ */
+function EndgameTrigger() {
+  const open = useGame((s) => s.endgameOpen);
+  const dismiss = useGame((s) => s.dismissEndgame);
+  const restart = useGame((s) => s.restartGame);
+  return (
+    <EndgameModal
+      visible={open}
+      onStayWatch={dismiss}
+      onRaiseNewSeed={restart}
+    />
   );
 }
 

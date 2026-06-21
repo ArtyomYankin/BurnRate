@@ -115,6 +115,10 @@ export interface PersistentState {
   // Insertion order = unlock order so the grid can show newest-last (or
   // newest-first if the screen flips it). Set semantics — no dupes.
   unlockedAchievements: string[];
+  // Timestamp (ms) the player first dismissed the endgame modal. 0 means
+  // the modal has never been shown; any positive value suppresses future
+  // automatic re-opens (player can still re-trigger from the dev panel).
+  endgameSeenAt: number;
 }
 
 export interface AccountState {
@@ -129,6 +133,10 @@ export interface AccountState {
   pushOptedIn: boolean;
   /** Epoch ms of the last time we asked. Cooldown a week between asks. */
   pushPromptedAt: number;
+  /** 2-letter UI language code per the Settings menu (EN / ES / FR / DE /
+   *  JA / ZH). Only "EN" is actually wired — others are GDD §12 i18n stubs
+   *  so the switcher feels real to the player. */
+  language: string;
 }
 
 // v5 → v6: PersistentState gains unlockedVignettes + unreadVignettes for the
@@ -146,7 +154,15 @@ export interface AccountState {
 // v9 → v10: AccountState gains sessionsStarted / pushOptedIn / pushPromptedAt
 // for the GDD §12 push-notification flow (defer prompt to session 3+).
 // Backfill: sessionsStarted=1, pushOptedIn=false, pushPromptedAt=0.
-export const SCHEMA_VERSION = 10 as const;
+// v10 → v11: AccountState gains `language` for the new Settings menu (per
+// GDD §15 i18n-ready). Backfill: "EN".
+// v11 → v12: round ladder compressed from 12 → 10 rounds (Series C and D
+// dropped — each "small office" era now shows for exactly one round). Old
+// fundingRoundIdx values 3, 4 etc. could now overshoot LAST_ROUND_IDX = 9,
+// so the migration remaps them through OLD_TO_NEW_ROUND and clamps.
+// v12 → v13: PersistentState gains `endgameSeenAt` so the AGI Singularity
+// finale modal fires exactly once per save. Backfill 0 for existing players.
+export const SCHEMA_VERSION = 13 as const;
 
 export interface SaveBlob {
   schemaVersion: typeof SCHEMA_VERSION;
