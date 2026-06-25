@@ -1,6 +1,9 @@
 import React from "react";
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
 import { colors, fonts, PIXEL } from "./theme";
+import { TutorialTargetKey } from "./tutorialTargets";
+import { useTutorialTargetMeasure } from "./TutorialSpotlight";
+import { useStrings } from "../core/i18n";
 
 /**
  * Floating Slack-style inbox button — port of design v8 screens.jsx::SlackButton.
@@ -18,9 +21,14 @@ import { colors, fonts, PIXEL } from "./theme";
 interface Props {
   unread: number;
   onPress(): void;
+  /** Registers this button's window-space rect into the tutorial spotlight
+   *  target registry so the forced walkthrough can highlight it. */
+  tutorialTargetKey: TutorialTargetKey;
 }
 
-export function SlackButton({ unread, onPress }: Props) {
+export function SlackButton({ unread, onPress, tutorialTargetKey }: Props) {
+  const targetHook = useTutorialTargetMeasure(tutorialTargetKey);
+  const t = useStrings();
   // Pulsing badge — runs only when there are unread messages, so the rest
   // of the time the layout effect doesn't burn frames.
   const pulse = React.useRef(new Animated.Value(1)).current;
@@ -38,6 +46,8 @@ export function SlackButton({ unread, onPress }: Props) {
 
   return (
     <Pressable
+      ref={targetHook.ref}
+      onLayout={targetHook.onLayout}
       onPress={onPress}
       hitSlop={6}
       style={({ pressed }) => [styles.btn, pressed && { opacity: 0.85 }]}
@@ -46,7 +56,7 @@ export function SlackButton({ unread, onPress }: Props) {
       <View style={styles.iconBox}>
         <Text style={styles.iconChar}>#</Text>
       </View>
-      <Text style={styles.label}>SLACK</Text>
+      <Text style={styles.label}>{t.home.slack}</Text>
       {unread > 0 && (
         <Animated.View style={[styles.badge, { transform: [{ scale: pulse }] }]}>
           <Text style={styles.badgeText}>{unread > 99 ? "99+" : unread}</Text>
@@ -111,9 +121,9 @@ const styles = StyleSheet.create({
     borderColor: colors.ink,
   },
   badgeText: {
-    fontFamily: fonts.display,
-    fontSize: 10,
+    fontFamily: fonts.mono,
+    fontSize: 13,
     color: "#FFFFFF",
-    letterSpacing: 0.5,
+    letterSpacing: 0,
   },
 });

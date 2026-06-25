@@ -11,6 +11,8 @@ import {
   selectUnreadVignettes,
   useGame,
 } from "../game/store";
+import { PanelHelpModal, PanelHint, PanelInfoButton } from "./PanelHelp";
+import { useStrings } from "../core/i18n";
 import { colors, fonts, PIXEL } from "./theme";
 import { VignetteReader } from "./VignetteReader";
 
@@ -36,15 +38,10 @@ const MEDIUM: Record<VignetteMedium, { label: string; color: string; glyph: stri
 
 // Filter chips at the top of the inbox. "all" + each medium that the player
 // might want to slice by. Kept short so they fit one row even on small phones.
-const FILTERS: Array<{ key: "all" | VignetteMedium; label: string }> = [
-  { key: "all",          label: "ALL" },
-  { key: "slack",        label: "SLACK" },
-  { key: "board_memo",   label: "BOARD" },
-  { key: "leaked_email", label: "EMAIL" },
-  { key: "fake_tweet",   label: "X" },
-  { key: "fake_news",    label: "NEWS" },
-  { key: "podcast",      label: "POD" },
-  { key: "system",       label: "SYS" },
+// Filter chip keys only — labels come from i18n.inbox.filters.
+const FILTER_KEYS: Array<"all" | VignetteMedium> = [
+  "all", "slack", "board_memo", "leaked_email", "fake_tweet", "fake_news",
+  "podcast", "system",
 ];
 
 /**
@@ -68,25 +65,34 @@ const FILTERS: Array<{ key: "all" | VignetteMedium; label: string }> = [
  * Slack-pastiche, fake Gmail, etc.).
  */
 export function VignettesInbox({ onBack }: Props) {
+  const [infoOpen, setInfoOpen] = React.useState(false);
+  const t = useStrings();
   const unlocked = useGame(selectUnlockedVignettes);
   const unread = useGame(selectUnreadVignettes);
   const resolved = useGame(selectResolvedVignettes);
   const markRead = useGame((s) => s.markVignetteRead);
   const resolveVignette = useGame((s) => s.resolveVignette);
+  // Tutorial lock: on step 10 (the forced "Open INBOX" walkthrough), only
+  // show unread vignettes and disable the medium filter — the player must
+  // tap an unread row to read it, which is what advances the tutorial.
+  const onboardingStep = useGame((s) => s.account.onboardingStep);
+  const tutorialLock = onboardingStep === 10;
 
-  const [filter, setFilter] = React.useState<typeof FILTERS[number]["key"]>("all");
+  const [filter, setFilter] = React.useState<"all" | VignetteMedium>("all");
   const [openId, setOpenId] = React.useState<string | null>(null);
 
   const unreadSet = React.useMemo(() => new Set(unread), [unread]);
   // Newest-first: store appends on unlock, reverse for display.
   const ordered = React.useMemo(() => [...unlocked].reverse(), [unlocked]);
-  const filtered = React.useMemo(
-    () =>
-      filter === "all"
-        ? ordered
-        : ordered.filter((id) => VIGNETTE_BY_ID[id]?.medium === filter),
-    [ordered, filter],
-  );
+  const filtered = React.useMemo(() => {
+    // Tutorial step 10: hide read rows so only the unread call-to-action
+    // is tappable. Once the player taps one, markVignetteRead advances
+    // the tutorial and the lock lifts on the next render.
+    if (tutorialLock) return ordered.filter((id) => unreadSet.has(id));
+    return filter === "all"
+      ? ordered
+      : ordered.filter((id) => VIGNETTE_BY_ID[id]?.medium === filter);
+  }, [ordered, filter, tutorialLock, unreadSet]);
 
   // getVignette returns undefined for a missing id (only happens if save
   // contains a vignette id we no longer ship). Coerce to null for the reader.
@@ -107,48 +113,59 @@ export function VignettesInbox({ onBack }: Props) {
           <Text style={styles.brand}>
             BURN<Text style={{ color: colors.terracotta }}>·</Text>RATE
           </Text>
-          <Text style={styles.title}>Inbox</Text>
+          <Text style={styles.title}>{t.inbox.title}</Text>
           <Text style={styles.sub}>
-            {unread.length} unread · {ordered.length} total event{ordered.length === 1 ? "" : "s"}
+            {unread.length} {t.inbox.unread} · {ordered.length} {t.inbox.total} {ordered.length === 1 ? t.inbox.event : t.inbox.events}
           </Text>
         </View>
+        <PanelInfoButton onPress={() => setInfoOpen(true)} />
       </View>
 
-      {/* Filter chips */}
-      <View style={styles.filtersRow}>
-        {FILTERS.map((f) => {
-          const active = f.key === filter;
-          return (
-            <Pressable
-              key={f.key}
-              onPress={() => setFilter(f.key)}
-              style={[
-                styles.filterChip,
-                {
-                  backgroundColor: active ? colors.ink : colors.cream_2,
-                },
-              ]}
-            >
-              <Text
+      <PanelHint panelKey="vignettes" text={t.inbox.hint} />
+
+      <PanelHelpModal
+        visible={infoOpen}
+        title={t.inbox.title}
+        sections={t.inbox.help}
+        onClose={() => setInfoOpen(false)}
+      />
+
+      {/* Filter chips — hidden during the step 10 tutorial lock so the
+          player isn't distracted from the single tappable row. */}
+      {!tutorialLock && (
+        <View style={styles.filtersRow}>
+          {FILTER_KEYS.map((key) => {
+            const active = key === filter;
+            return (
+              <Pressable
+                key={key}
+                onPress={() => setFilter(key)}
                 style={[
-                  styles.filterChipText,
-                  { color: active ? colors.cream_hi : colors.ink },
+                  styles.filterChip,
+                  {
+                    backgroundColor: active ? colors.ink : colors.cream_2,
+                  },
                 ]}
               >
-                {f.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+                <Text
+                  style={[
+                    styles.filterChipText,
+                    { color: active ? colors.cream_hi : colors.ink },
+                  ]}
+                >
+                  {t.inbox.filters[key]}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
 
       {/* Feed */}
       {filtered.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyText}>
-            {ordered.length === 0
-              ? "Nothing here yet. Hire your first engineer to break the silence."
-              : `No ${filter.replace("_", " ")} events yet.`}
+            {ordered.length === 0 ? t.inbox.empty : t.inbox.emptyFiltered}
           </Text>
         </View>
       ) : (

@@ -4,7 +4,6 @@ import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { D } from "../core/decimal";
 import { roundThreshold } from "../core/math";
 import {
-  PITY_THRESHOLD,
   TIER_PROBS,
   trainingRunCost,
   TrainingTier,
@@ -12,13 +11,13 @@ import {
 import {
   selectFundingRoundIdx,
   selectTokensStr,
-  selectTrainingPity,
   useGame,
 } from "../game/store";
 import * as audio from "../audio";
 import { CueId } from "../audio/registry";
 import { formatNumber } from "./formatNumber";
 import { colors, fonts, PIXEL } from "./theme";
+import { useStrings } from "../core/i18n";
 
 interface Props {
   visible: boolean;
@@ -30,19 +29,6 @@ interface Props {
 // real game math (effect type / duration / cost) stays in trainingRun.ts.
 // Multipliers below display +X% computed from TIER_TOKEN_MULT so the modal
 // stays honest if we ever rebalance.
-const TIER_FLAVOR: Record<TrainingTier, string> = {
-  Failed:
-    "Loss never converged. The eval suite literally cried.",
-  Marginal:
-    "Numbers go up. A little. Cautiously celebrate.",
-  Solid:
-    "A real model. It compiles. It mostly behaves.",
-  SOTA:
-    "Top of leaderboard for ~36 hours. Screenshot Slack.",
-  Breakthrough:
-    "You will be on the Lex Fridman podcast within 6 weeks.",
-};
-
 const TIER_COLOR: Record<TrainingTier, string> = {
   Failed:       colors.muted,
   Marginal:     colors.cream_4,
@@ -86,15 +72,20 @@ const TIERS_ORDER: TrainingTier[] = ["Failed", "Marginal", "Solid", "SOTA", "Bre
  * rare"), Breakthrough also gets a larger scale jump on reveal.
  */
 export function TrainingRunModal({ visible, onClose }: Props) {
+  const t = useStrings();
   const tokensStr = useGame(selectTokensStr);
   const fundingRoundIdx = useGame(selectFundingRoundIdx);
-  const pity = useGame(selectTrainingPity);
   const roll = useGame((s) => s.rollTrainingRun);
+  const freeUsed = useGame((s) => s.persistent.freeTrainingRunUsed);
 
   const threshold = roundThreshold(fundingRoundIdx);
   const cost = trainingRunCost(threshold);
   const tokens = D(tokensStr);
-  const canRoll = tokens.gte(cost);
+  // Free roll on first ever use: bypass cost gating + guarantee Solid tier
+  // (handled in the store action). UI shows a gold banner + the ROLL button
+  // text changes to "FREE ROLL · SOLID".
+  const isFreeRoll = !freeUsed;
+  const canRoll = isFreeRoll || tokens.gte(cost);
 
   type Phase = "idle" | "rolling" | "reveal";
   const [phase, setPhase] = useState<Phase>("idle");
@@ -117,8 +108,12 @@ export function TrainingRunModal({ visible, onClose }: Props) {
     if (!r) return;
     // Commit-then-animate. Result is locked from this instant; the reel is
     // purely a piece of theater played on top of it.
+    audio.play("tr_button");
     setResult({ tier: r.tier, pityFired: r.pityFired });
     setPhase("rolling");
+    // Loop-spin SFX under the reel animation. The reveal cue (TIER_CUE)
+    // plays at the end inside the reel-animation useEffect below.
+    audio.play("tr_spin");
   };
 
   // Reel animation — setTimeout chain so the interval can ease out. raf would
@@ -176,11 +171,11 @@ export function TrainingRunModal({ visible, onClose }: Props) {
 
             {/* Header */}
             <View style={styles.header}>
-              <Text style={styles.headerKicker}>TRAINING RUN</Text>
+              <Text style={styles.headerKicker}>{t.training.title}</Text>
               <Text style={styles.headerTitle}>
-                {phase === "idle"   && "roll for a breakthrough"}
-                {phase === "rolling" && "training…"}
-                {phase === "reveal" && "result"}
+                {phase === "idle"   && t.training.rollForBreakthrough}
+                {phase === "rolling" && t.training.trainingDots}
+                {phase === "reveal" && t.training.result}
               </Text>
             </View>
 
@@ -226,19 +221,27 @@ export function TrainingRunModal({ visible, onClose }: Props) {
 
             {/* Body — flavor / hint / rolling chatter */}
             <View style={styles.body}>
-              {phase === "idle" && (
+              {phase === "idle" && isFreeRoll && (
+                <View style={styles.freeRollBanner}>
+                  <Text style={styles.freeRollBannerTitle}>{t.training.freeRollHeader}</Text>
+                  <Text style={styles.freeRollBannerSub}>
+                    {t.training.freeRollBody1} <Text style={styles.bodyStrong}>{t.training.tiers.Solid}</Text> {t.training.freeRollBody2}
+                  </Text>
+                </View>
+              )}
+              {phase === "idle" && !isFreeRoll && (
                 <Text style={styles.bodyText}>
-                  Spend <Text style={styles.bodySpend}>{formatNumber(cost)} tokens</Text> for a probabilistic Breakthrough. Pity guarantees breakthrough at <Text style={styles.bodyStrong}>{PITY_THRESHOLD} runs</Text>.
+                  {t.training.spendPrefix} <Text style={styles.bodySpend}>{formatNumber(cost)} {t.training.spendTokens}</Text> {t.training.spendSuffix}
                 </Text>
               )}
               {phase === "rolling" && (
                 <Text style={[styles.bodyText, styles.bodyItalic]}>
-                  The eval suite is mostly held together with prayer.
+                  {t.training.rollingFlavor}
                 </Text>
               )}
               {phase === "reveal" && result && (
                 <Text style={[styles.bodyText, styles.bodyItalic]}>
-                  "{TIER_FLAVOR[result.tier]}"
+                  "{t.training.tierFlavor[result.tier]}"
                   {result.pityFired && (
                     <Text style={styles.pityFiredTag}>  · PITY FIRED</Text>
                   )}
@@ -246,42 +249,35 @@ export function TrainingRunModal({ visible, onClose }: Props) {
               )}
             </View>
 
-            {/* Probability table — idle only */}
+            {/* Probability table — idle only. Equal-width cells: weighting
+                cells by probability made rare tiers (BREAKTHROUGH @ 2%)
+                physically too small to render their label, so the right
+                column squashed into vertical letters. Equal-flex keeps
+                every tier readable; the % below already conveys odds. */}
             {phase === "idle" && (
               <View style={styles.probTable}>
-                {TIER_PROBS.map((t) => (
+                {TIER_PROBS.map((tp) => (
                   <View
-                    key={t.tier}
-                    style={[styles.probCell, { flexGrow: t.weight }]}
+                    key={tp.tier}
+                    style={[styles.probCell, { flex: 1 }]}
                   >
-                    <Text style={[styles.probCellName, { color: TIER_COLOR[t.tier] }]}>
-                      {t.tier.slice(0, 3).toUpperCase()}
+                    <Text
+                      style={[styles.probCellName, { color: TIER_COLOR[tp.tier] }]}
+                      numberOfLines={1}
+                    >
+                      {tp.tier.slice(0, 4).toUpperCase()}
                     </Text>
                     <Text style={styles.probCellPct}>
-                      {Math.round(t.weight * 100)}%
+                      {Math.round(tp.weight * 100)}%
                     </Text>
                   </View>
                 ))}
               </View>
             )}
 
-            {/* Pity bar — idle only */}
-            {phase === "idle" && (
-              <View style={styles.pityWrap}>
-                <View style={styles.pityLabelRow}>
-                  <Text style={styles.pityLabel}>PITY → BREAKTHROUGH</Text>
-                  <Text style={styles.pityLabel}>{pity} / {PITY_THRESHOLD}</Text>
-                </View>
-                <View style={styles.pityTrack}>
-                  <View
-                    style={[
-                      styles.pityFill,
-                      { width: `${(pity / PITY_THRESHOLD) * 100}%` },
-                    ]}
-                  />
-                </View>
-              </View>
-            )}
+            {/* Pity bar removed — exposed internal logic (the deterministic
+                breakthrough after N rolls) the player isn't supposed to
+                game-plan against. Pity still fires in the store; just no UI. */}
 
             {/* CTAs */}
             <View style={styles.cta}>
@@ -293,18 +289,22 @@ export function TrainingRunModal({ visible, onClose }: Props) {
                     style={[
                       styles.btn,
                       styles.btnPrimary,
-                      { backgroundColor: canRoll ? colors.terracotta : colors.disabled },
+                      { backgroundColor: canRoll ? (isFreeRoll ? colors.gold : colors.terracotta) : colors.disabled },
                     ]}
                   >
                     <Text style={styles.btnText}>
-                      {canRoll ? `ROLL · ${formatNumber(cost)}` : "NOT ENOUGH TOKENS"}
+                      {isFreeRoll
+                        ? t.training.freeRollSolid
+                        : canRoll
+                          ? `${t.training.rollLabel} · ${formatNumber(cost)}`
+                          : t.training.notEnough}
                     </Text>
                   </Pressable>
                   <Pressable
                     onPress={onClose}
                     style={[styles.btn, styles.btnSmall, { backgroundColor: colors.cream_2 }]}
                   >
-                    <Text style={[styles.btnText, { color: colors.ink }]}>LATER</Text>
+                    <Text style={[styles.btnText, { color: colors.ink }]}>{t.training.later}</Text>
                   </Pressable>
                 </>
               )}
@@ -316,7 +316,7 @@ export function TrainingRunModal({ visible, onClose }: Props) {
                     { backgroundColor: colors.cream_2 },
                   ]}
                 >
-                  <Text style={[styles.btnText, { color: colors.muted }]}>COMPILING…</Text>
+                  <Text style={[styles.btnText, { color: colors.muted }]}>{t.training.compiling}</Text>
                 </View>
               )}
               {phase === "reveal" && result && (
@@ -335,14 +335,14 @@ export function TrainingRunModal({ visible, onClose }: Props) {
                         { color: result.tier === "Failed" ? colors.cream : colors.ink },
                       ]}
                     >
-                      ROLL AGAIN
+                      {t.training.rollAgain}
                     </Text>
                   </Pressable>
                   <Pressable
                     onPress={onClose}
                     style={[styles.btn, styles.btnSmall, { backgroundColor: colors.cream_2 }]}
                   >
-                    <Text style={[styles.btnText, { color: colors.ink }]}>CLOSE</Text>
+                    <Text style={[styles.btnText, { color: colors.ink }]}>{t.training.closeBtn}</Text>
                   </Pressable>
                 </>
               )}
@@ -520,6 +520,28 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     minHeight: 40,
   },
+  freeRollBanner: {
+    backgroundColor: colors.gold,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.ink,
+  },
+  freeRollBannerTitle: {
+    fontFamily: fonts.display,
+    fontSize: 12,
+    color: colors.ink,
+    letterSpacing: 2,
+    textAlign: "center",
+    marginBottom: 4,
+  },
+  freeRollBannerSub: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    color: colors.ink,
+    textAlign: "center",
+    lineHeight: 16,
+  },
   bodyText: {
     fontFamily: fonts.mono,
     fontSize: 14,
@@ -565,10 +587,10 @@ const styles = StyleSheet.create({
     lineHeight: 12,
   },
   probCellPct: {
-    fontFamily: fonts.displayRegular,
-    fontSize: 8,
+    fontFamily: fonts.mono,
+    fontSize: 11,
     color: colors.ink,
-    letterSpacing: 0.5,
+    letterSpacing: 0,
   },
   pityWrap: {
     paddingHorizontal: 12,

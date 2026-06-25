@@ -1,6 +1,7 @@
 import React from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { colors, fonts, PIXEL } from "./theme";
+import { useStrings } from "../core/i18n";
 
 /**
  * "How does this work?" reference panel. Same content the tutorial explains
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export function HelpModal({ visible, onClose }: Props) {
+  const t = useStrings();
   return (
     <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
       {/* Backdrop and frame are siblings (not parent/child). Wrapping the
@@ -25,7 +27,7 @@ export function HelpModal({ visible, onClose }: Props) {
         <View style={styles.frame}>
           <View style={styles.headerRow}>
             <View style={[styles.swatch, { backgroundColor: colors.gold }]} />
-            <Text style={styles.brand}>HOW IT WORKS</Text>
+            <Text style={styles.brand}>{t.helpModal.title}</Text>
             <View style={{ flex: 1 }} />
             <Pressable onPress={onClose} hitSlop={12}>
               <Text style={styles.closeX}>×</Text>
@@ -37,48 +39,9 @@ export function HelpModal({ visible, onClose }: Props) {
             contentContainerStyle={{ paddingBottom: 12 }}
             showsVerticalScrollIndicator={false}
           >
-            <Section
-              title="HOW TOKENS ARE MADE"
-              body={
-                "Tokens are the fuel. They come from a pipeline of 4 chains:\n\n" +
-                "ENGINEERS · GPU · DATA · ENERGY\n\n" +
-                "The bottleneck (smallest of GPU/Data/Energy) caps your rate. " +
-                "Engineers multiply on top. Balance all four — building only one stalls everything."
-              }
-            />
-
-            <Section
-              title="ALLOCATION · TOK → 4 DEPARTMENTS"
-              body={
-                "Every token you earn splits across four departments. Tap ALLOCATE to tune the mix.\n\n" +
-                "• PRODUCT     → Capital ($) to buy more producers\n" +
-                "• R&D            → Research Points (RP) for per-run sprint upgrades\n" +
-                "• MARKETING → Hype to lower the next round's threshold\n" +
-                "• SAFETY       → pays down Alignment Debt; under 10% accrues it"
-              }
-            />
-
-            <Section
-              title="WHAT THE COUNTERS MEAN"
-              body={
-                "$  CAPITAL — buys producers. Resets at prestige.\n" +
-                "RP RESEARCH POINTS — per-run, spend on sprint upgrades.\n" +
-                "HY HYPE — lowers the next round's threshold. Resets.\n" +
-                "EQ EQUITY — earned at prestige. PERSISTS. Spend on the permanent Research Tree.\n" +
-                "DB ALIGNMENT DEBT — accrues if Safety < 10%. PERSISTS. Triggers events."
-              }
-            />
-
-            <Section
-              title="THE LOOP"
-              body={
-                "1. Buy producers in all 4 chains. Balance.\n" +
-                "2. Tokens climb. Hit the round threshold.\n" +
-                "3. CLOSE ROUND (prestige) — Capital/producers reset, you earn Equity.\n" +
-                "4. Spend Equity on the permanent Research Tree.\n" +
-                "5. Next round starts faster than the last."
-              }
-            />
+            {t.helpModal.sections.map((s, i) => (
+              <Section key={i} title={s.title} body={s.body} />
+            ))}
           </ScrollView>
         </View>
       </View>

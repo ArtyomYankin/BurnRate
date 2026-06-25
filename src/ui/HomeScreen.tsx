@@ -31,6 +31,8 @@ import { formatNumber, formatRate } from "./formatNumber";
 import { ItemPopup, PopupContent } from "./ItemPopup";
 import { HitId, PixelScene, sceneForRound } from "./PixelScene";
 import { Onboarding, tutorialHighlightForStep } from "./Onboarding";
+import { useTutorialTargetMeasure } from "./TutorialSpotlight";
+import { useStrings, getStrings } from "../core/i18n";
 import { Pressy } from "./Pressy";
 import { colors, fonts } from "./theme";
 import { DevPanel } from "./DevPanel";
@@ -77,6 +79,10 @@ export function HomeScreen({
   const pendingDebtCount = useGame((s) => selectPendingDebtEvents(s).length);
   const achievementCount = useGame(selectUnlockedAchievementCount);
   const onboardingStep = useGame((s) => s.account.onboardingStep);
+  const t = useStrings();
+  // Forced-walkthrough target registration. The ACH chip is a Pressy here
+  // (Slack and Allocate self-register inside their own components).
+  const achTargetProps = useTutorialTargetMeasure("ach-btn");
   const clickToken = useGame((s) => s.clickToken);
 
   const tokens = D(tokensStr);
@@ -109,7 +115,35 @@ export function HomeScreen({
   // Pixel scene dimensions — fit width of the phone (minus 8px gutter), keep
   // 2:3 ratio matching the design's 240×360 native scene.
   const screenW = Dimensions.get("window").width;
-  const sceneW = Math.min(screenW, 420);
+  const screenH = Dimensions.get("window").height;
+  // Tablet (iPad etc.) detection — min-side ≥ 600px is a reliable threshold
+  // across all current iPad generations and Android tablets. On tablet,
+  // scene is bound by BOTH width and available height (chrome reserve ≈
+  // 360px for TopHUD + secondary row + alloc bar + safe-area), whichever
+  // is more restrictive — so it grows to fill the larger canvas without
+  // overflowing the bottom chrome. Phones keep the original behavior:
+  // width-capped at 420px, scene height free to overflow (gets clipped
+  // gracefully behind the floating HUD strip).
+  const isTablet = Math.min(screenW, screenH) >= 600;
+  let sceneW: number;
+  if (isTablet) {
+    // Try width-first up to a generous cap, fall back to height-bound if
+    // the resulting scene would overflow the available vertical area.
+    // Chrome reserve ≈ 96 (TopHUD padding) + ~150 (bottom alloc bar +
+    // secondary row + safe area). Earlier 360 was way too generous and
+    // left a huge cream gap below the scene.
+    const widthCap = 760;
+    const sceneWByWidth = Math.min(screenW - 16, widthCap);
+    const sceneHByWidth = Math.round(sceneWByWidth * (360 / 240));
+    const heightAvail = screenH - 250;
+    if (sceneHByWidth <= heightAvail) {
+      sceneW = sceneWByWidth;
+    } else {
+      sceneW = Math.round(heightAvail * (240 / 360));
+    }
+  } else {
+    sceneW = Math.min(screenW, 420);
+  }
   const sceneH = Math.round(sceneW * (360 / 240));
 
   const [popup, setPopup] = React.useState<PopupContent | null>(null);
@@ -140,13 +174,19 @@ export function HomeScreen({
   // "bigger confirm + sparkle, once per tier" reads as "achievement unlock."
   const prevAchievementsRef = React.useRef(achievementCount);
   React.useEffect(() => {
-    if (achievementCount > prevAchievementsRef.current) audio.play("producer_upgrade");
+    // Achievement unlock — light chime cue (re-using vignette_pop's slack
+    // notification sound). The old `producer_upgrade` mapping was wrong: the
+    // "Advanced buy" track from the audio kit belongs on actual tier-4+
+    // producer purchases, not on the achievements grid.
+    if (achievementCount > prevAchievementsRef.current) audio.play("vignette_pop");
     prevAchievementsRef.current = achievementCount;
   }, [achievementCount]);
-  // Dev-cheats modal. Only opens via long-press on BURN·RATE in __DEV__
-  // builds. Release bundles tree-shake DevPanel out via the `__DEV__` import
-  // guard at the top of App.tsx — we keep the state hook here either way
-  // so the conditional render below stays simple.
+  // Dev-cheats modal. Two ways in:
+  //   1. __DEV__ builds also show a visible DEV chip in the top-right.
+  //   2. ALL builds (incl. release) accept the secret gesture: 7 taps on
+  //      the BURN·RATE wordmark within 3 seconds. Lets us debug live builds
+  //      without baking a debug-only menu into release. Players who don't
+  //      know the gesture never see the panel.
   const [devOpen, setDevOpen] = React.useState(false);
   const [buffsOpen, setBuffsOpen] = React.useState(false);
   const [helpOpen, setHelpOpen] = React.useState(false);
@@ -199,17 +239,18 @@ export function HomeScreen({
         tokens={formatNumber(tokens)}
         rate={formatRate(tps)}
         pct={pct}
-        roundLabel={`${round.name.toUpperCase()} · ROUND ${round.idx + 1}`}
+        roundLabel={`${(t.roundNames[round.id as keyof typeof t.roundNames] ?? round.name).toUpperCase()} · ${t.topHud.round} ${round.idx + 1}`}
         capital={formatNumber(capital)}
         equity={formatNumber(equity)}
         nextThresholdLabel={
           hypeDiscount > 0.005
-            ? `NEXT: ${round.name.toUpperCase()} · HYPE -${Math.round(hypeDiscount * 100)}%`
-            : `NEXT: ${nextRound.name.toUpperCase()} · 1e${nextRound.tokenThresholdLog10} TOKENS`
+            ? `${t.topHud.next}: ${(t.roundNames[round.id as keyof typeof t.roundNames] ?? round.name).toUpperCase()} · ${t.topHud.hypeDiscount} -${Math.round(hypeDiscount * 100)}%`
+            : `${t.topHud.next}: ${(t.roundNames[nextRound.id as keyof typeof t.roundNames] ?? nextRound.name).toUpperCase()} · 1e${nextRound.tokenThresholdLog10} ${t.topHud.tokens}`
         }
         onPressTokens={clickToken}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenHelp={() => setHelpOpen(true)}
+        onSecretActivate={() => setDevOpen(true)}
       />
 
       {/* Visible-in-dev cheat trigger. Replaces an earlier hidden long-press
@@ -221,7 +262,11 @@ export function HomeScreen({
           <Text style={styles.devChipText}>DEV</Text>
         </Pressable>
       )}
-      {__DEV__ && <DevPanel visible={devOpen} onClose={() => setDevOpen(false)} />}
+      {/* DevPanel mounts in ALL builds — it's not the visible DEV chip that
+          guards access, it's the secret 7-tap gesture on the BURN·RATE
+          wordmark wired through TopHUD's onSecretActivate. The chip is just
+          a shortcut for local development. */}
+      <DevPanel visible={devOpen} onClose={() => setDevOpen(false)} />
 
       {/* Bottom row of secondary buttons — keep prestige + producers/research
           reachable even when the player ignores hit zones. Sits above the
@@ -230,12 +275,16 @@ export function HomeScreen({
           from design v8 — replaces the old INBOX chip in the bottom row.
           Stands out from the cream chrome on purpose: it's the player's
           notification surface. */}
-      <SlackButton unread={unreadVignettes} onPress={onOpenVignettes} />
+      <SlackButton unread={unreadVignettes} onPress={onOpenVignettes} tutorialTargetKey="slack-btn" />
 
       <View style={styles.secondaryRow} pointerEvents="box-none">
         <Pressy onPress={onOpenAchievements}>
-          <View style={styles.inboxBtn}>
-            <Text style={styles.inboxText}>ACH</Text>
+          <View
+            ref={achTargetProps.ref}
+            onLayout={achTargetProps.onLayout}
+            style={styles.inboxBtn}
+          >
+            <Text style={styles.inboxText}>{t.home.ach}</Text>
             {achievementCount > 0 && (
               <View style={[styles.inboxBadge, { backgroundColor: colors.sage_2 }]}>
                 <Text style={styles.inboxBadgeText}>{achievementCount}</Text>
@@ -245,7 +294,7 @@ export function HomeScreen({
         </Pressy>
         {canPrestige && (
           <Pressy style={styles.prestigeBtn} onPress={onOpenPrestige}>
-            <Text style={styles.prestigeText}>CLOSE ROUND →</Text>
+            <Text style={styles.prestigeText}>{t.home.closeRound} →</Text>
           </Pressy>
         )}
         {activeEffects.length > 0 && (
@@ -254,18 +303,22 @@ export function HomeScreen({
             onPress={() => setBuffsOpen(true)}
           >
             <Text style={styles.effectsChipText}>
-              {activeEffects.length} BUFF{activeEffects.length === 1 ? "" : "S"} ▸
+              {activeEffects.length} {activeEffects.length === 1 ? t.home.buff : t.home.buffs} ▸
             </Text>
           </Pressable>
         )}
         {debt.gt(0) && (
           <View style={styles.debtChip}>
-            <Text style={styles.debtChipText}>DBT {formatNumber(debt)}</Text>
+            <Text style={styles.debtChipText}>{t.home.debt} {formatNumber(debt)}</Text>
           </View>
         )}
       </View>
 
-      <BottomAllocation allocation={allocation} onEdit={onOpenAllocate} />
+      <BottomAllocation
+        allocation={allocation}
+        onEdit={onOpenAllocate}
+        tutorialTargetKey="alloc-bar"
+      />
 
       <ItemPopup item={popup} onClose={closePopup} onAction={handlePopupAction} />
       <BuffsModal visible={buffsOpen} onClose={() => setBuffsOpen(false)} />
@@ -281,34 +334,35 @@ export function HomeScreen({
 }
 
 function buildPopup(id: HitId): PopupContent {
+  const t = getStrings();
   switch (id) {
     case "monitor":
       return {
         hit: id,
         kind: "action",
-        title: "Training Run",
-        subtitle: "ROLL THE GACHA",
-        body: "Spend tokens to roll: Failed · Marginal · Solid · SOTA · Breakthrough. Pity guaranteed at 50.",
-        flavor: "Just one more run, the loss curve looks weird.",
-        cta: "OPEN TRAINING",
+        title: t.itemPopup.monitor.title,
+        subtitle: t.itemPopup.monitor.subtitle,
+        body: t.itemPopup.monitor.body,
+        flavor: t.itemPopup.monitor.flavor,
+        cta: t.itemPopup.monitor.cta,
       };
     case "engineer":
-      return chainPopup(id, "Hire Engineers", "HEADCOUNT", "Engineers multiply the pipeline. Sub-linear scaling — every hire helps, just less than the last one.", "OPEN HIRING");
+      return chainPopup(id, t.itemPopup.engineer.title, t.itemPopup.engineer.subtitle, t.itemPopup.engineer.body, t.itemPopup.engineer.cta);
     case "gpu":
-      return chainPopup(id, "Buy GPU", "COMPUTE", "GPU supply feeds the pipeline. Balance with Data + Energy or you bottleneck.", "OPEN GPU");
+      return chainPopup(id, t.itemPopup.gpu.title, t.itemPopup.gpu.subtitle, t.itemPopup.gpu.body, t.itemPopup.gpu.cta);
     case "books":
-      return chainPopup(id, "Buy Data", "TRAINING DATA", "Data supply feeds the pipeline. Some of this is even labeled.", "OPEN DATA");
+      return chainPopup(id, t.itemPopup.data.title, t.itemPopup.data.subtitle, t.itemPopup.data.body, t.itemPopup.data.cta);
     case "energy":
-      return chainPopup(id, "Buy Energy", "POWER", "Energy supply feeds the pipeline. The landlord noticed.", "OPEN ENERGY");
+      return chainPopup(id, t.itemPopup.energy.title, t.itemPopup.energy.subtitle, t.itemPopup.energy.body, t.itemPopup.energy.cta);
     case "research":
       return {
         hit: id,
         kind: "action",
-        title: "Research",
-        subtitle: "EQUITY SINK",
-        body: "Spend Equity on permanent multipliers. 6 branches, ~30 nodes at v1.0.",
-        flavor: "Every JIRA epic has been delivered. Nobody knows what it does.",
-        cta: "OPEN RESEARCH",
+        title: t.itemPopup.research.title,
+        subtitle: t.itemPopup.research.subtitle,
+        body: t.itemPopup.research.body,
+        flavor: t.itemPopup.research.flavor,
+        cta: t.itemPopup.research.cta,
       };
     case "plant":
       return {
@@ -540,8 +594,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   inboxBadgeText: {
-    fontFamily: fonts.bodyBold,
-    fontSize: 11,
+    fontFamily: fonts.mono,
+    fontSize: 13,
     color: colors.cream_hi,
     lineHeight: 13,
   },

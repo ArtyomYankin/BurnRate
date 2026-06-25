@@ -103,6 +103,9 @@ export interface GameState {
   /** Settings menu: swap UI language. Only "EN" is wired; the rest are
    *  stubs that just persist the pick so the switcher feels real. */
   setLanguage(code: string): void;
+  /** Mark a per-panel onboarding hint as dismissed so it never re-appears
+   *  for this save. Idempotent on repeat calls. */
+  markPanelHintSeen(panelKey: string): void;
   /** GDD §5 narrative spine: unlock a vignette by id. Idempotent — duplicate
    *  calls are silently dropped. Newly unlocked vignettes also land in the
    *  unread queue (drains via markVignetteRead). */
@@ -376,7 +379,14 @@ export const useGame = create<GameState>((set, get) => ({
       equity: equity.sub(cost).toString(),
       unlockedResearch: [...s.persistent.unlockedResearch, nodeId],
     };
-    set({ persistent: processUnlocks(s.run, nextPersistent) });
+    // Onboarding advance for step 9 lives in onOpenResearch (App.tsx) — we
+    // can't gate it on buying a node because a fresh prestige might leave
+    // the player with 0 Equity, deadlocking the tutorial. Opening the
+    // screen is enough: the player learns where Research lives, no forced
+    // spend.
+    set({
+      persistent: processUnlocks(s.run, nextPersistent),
+    });
     return { bought: true };
   },
 
@@ -399,19 +409,50 @@ export const useGame = create<GameState>((set, get) => ({
 
   rollTrainingRun() {
     const s = get();
+    const now = Date.now();
+
+    // One-shot freebie: first roll ever on this save is free, costs zero
+    // tokens, and forces a Solid tier so the player gets a real but not
+    // overwhelming boost (Solid = +10% Tokens for 30 min). Teaches the
+    // gacha mechanic without forcing them to spend before they understand
+    // it. The freebie also auto-advances the matching onboarding step.
+    if (!s.persistent.freeTrainingRunUsed) {
+      const tier: TrainingTier = "Solid";
+      const newEffect = effectForTier(tier, now, `free-${Math.floor(Math.random() * 1e6)}`);
+      const account =
+        s.account.onboardingStep === 7
+          ? { ...s.account, onboardingStep: 8 }
+          : s.account;
+      set({
+        run: {
+          ...s.run,
+          activeEffects: newEffect ? [...s.run.activeEffects, newEffect] : s.run.activeEffects,
+        },
+        persistent: { ...s.persistent, freeTrainingRunUsed: true },
+        account,
+      });
+      return { tier, pityFired: false, spent: "0" };
+    }
+
     const threshold = roundThreshold(s.run.fundingRoundIdx);
     const cost = trainingRunCost(threshold);
     const tokens = D(s.run.tokens);
     if (tokens.lt(cost)) return null;
 
     const { tier, nextPity, pityFired } = resolveTrainingRun(s.run.trainingPity);
-    const now = Date.now();
     const newEffect = effectForTier(
       tier,
       now,
       `${s.run.activeEffects.length}-${Math.floor(Math.random() * 1e6)}`
     );
 
+    // Onboarding deadlock guard: a veteran whose save predates the Training
+    // Run tutorial step (so `freeTrainingRunUsed` is already true) and was
+    // migrated to step 7 by the cumulative onboarding shifter will never
+    // hit the freebie branch above — leaving them stuck at step 7 with a
+    // scene-filter that only allows tapping the monitor. Advance step on
+    // ANY roll, freebie or paid, so the loop terminates.
+    const advanceOnboarding = s.account.onboardingStep === 7;
     set({
       run: {
         ...s.run,
@@ -421,6 +462,9 @@ export const useGame = create<GameState>((set, get) => ({
           ? [...s.run.activeEffects, newEffect]
           : s.run.activeEffects,
       },
+      ...(advanceOnboarding
+        ? { account: { ...s.account, onboardingStep: 8 } }
+        : {}),
     });
     return { tier, pityFired, spent: cost.toString() };
   },
@@ -455,11 +499,19 @@ export const useGame = create<GameState>((set, get) => ({
     // dismissal (for future analytics / "veteran" checks) but no longer
     // gates the trigger itself.
     const shouldOpenEndgame = closingRound === LAST_ROUND_IDX;
+    // Onboarding: when the player closes their FIRST round (i.e. they had
+    // the Ready closer dismissed → step 8) and earned their first Equity,
+    // pop the research tutorial chip (step 9). Gated on totalPrestiges
+    // === 0 PRE-prestige so it only fires once, and on step 8 specifically
+    // so we don't yank veteran players who've skipped past it.
+    const advanceOnboarding =
+      s.account.onboardingStep === 8 && s.persistent.totalPrestiges === 0;
     // Achievements like "Closed Series A" / "5 prestiges" fire here.
     set({
       run: nextRun,
       persistent: processUnlocks(nextRun, nextPersistent),
       ...(shouldOpenEndgame ? { endgameOpen: true } : {}),
+      ...(advanceOnboarding ? { account: { ...s.account, onboardingStep: 9 } } : {}),
     });
     return { awarded: awarded.toString() };
   },
@@ -469,7 +521,19 @@ export const useGame = create<GameState>((set, get) => ({
   },
 
   setAllocation(a) {
-    set((s) => ({ run: { ...s.run, allocation: normalizeAllocation(a) } }));
+    set((s) => {
+      // Onboarding: step 5 ("Open ALLOCATE" force step) advances only when
+      // the player actually SAVES an allocation — not on screen open. Same
+      // pattern as steps 2/3 advancing on the producer buy, not on opening
+      // the producers screen.
+      const advance = s.account.onboardingStep === 5;
+      return {
+        run: { ...s.run, allocation: normalizeAllocation(a) },
+        ...(advance
+          ? { account: { ...s.account, onboardingStep: 6 } }
+          : {}),
+      };
+    });
   },
 
   setOnboardingStep(step) {
@@ -496,6 +560,17 @@ export const useGame = create<GameState>((set, get) => ({
     set((s) => ({ account: { ...s.account, language: code } }));
   },
 
+  markPanelHintSeen(panelKey) {
+    const s = get();
+    if (s.persistent.panelHintsSeen.includes(panelKey)) return;
+    set({
+      persistent: {
+        ...s.persistent,
+        panelHintsSeen: [...s.persistent.panelHintsSeen, panelKey],
+      },
+    });
+  },
+
   unlockVignette(id) {
     const s = get();
     // Idempotent: a vignette can only enter the unlocked queue once. The
@@ -515,11 +590,15 @@ export const useGame = create<GameState>((set, get) => ({
   markVignetteRead(id) {
     const s = get();
     if (!s.persistent.unreadVignettes.includes(id)) return;
+    // Onboarding: step 10 ("Open INBOX" force step) advances when the player
+    // actually opens/reads a vignette, not just on opening the inbox list.
+    const advance = s.account.onboardingStep === 10;
     set({
       persistent: {
         ...s.persistent,
         unreadVignettes: s.persistent.unreadVignettes.filter((x) => x !== id),
       },
+      ...(advance ? { account: { ...s.account, onboardingStep: 11 } } : {}),
     });
   },
 
@@ -535,11 +614,13 @@ export const useGame = create<GameState>((set, get) => ({
 
     const now = Date.now();
     // Each kind defaults to its own duration: buff = 1h (GDD §4 Beat 3),
-    // debuff = 60s (soft sting — a jab not a punishment, per design pick),
-    // neutral = 0 (no timer; effect never lands in activeEffects either way).
-    // Legacy entries without `kind` default to buff for back-compat.
+    // debuff = 30 min (long enough to actually feel — a 1-minute debuff
+    // expires before the player notices it landed; bumped from 60s after
+    // playtest feedback). neutral = 0 (no timer; effect never lands in
+    // activeEffects either way). Legacy entries without `kind` default to
+    // buff for back-compat.
     const kind = tmpl.kind ?? "buff";
-    const defaultDur = kind === "buff" ? 3600 : kind === "debuff" ? 60 : 0;
+    const defaultDur = kind === "buff" ? 3600 : kind === "debuff" ? 1800 : 0;
     const durationSec = tmpl.durationSec ?? defaultDur;
     // Neutral picks resolve the vignette but never land in activeEffects.
     const shouldApply = kind !== "neutral" && durationSec > 0;

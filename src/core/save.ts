@@ -33,6 +33,8 @@ export function freshSave(now: number = Date.now()): SaveBlob {
       resolvedVignettes: {},
       unlockedAchievements: [],
       endgameSeenAt: 0,
+      freeTrainingRunUsed: false,
+      panelHintsSeen: [],
     },
     account: {
       anonUid: genUid(),
@@ -43,6 +45,8 @@ export function freshSave(now: number = Date.now()): SaveBlob {
       pushOptedIn: false,
       pushPromptedAt: 0,
       language: "EN",
+      sfxMuted: false,
+      musicEnabled: false,
     },
   };
 }
@@ -134,21 +138,58 @@ export function migrate(raw: unknown): SaveBlob {
         // from round 9 anyway, so the worst case is "veteran player sees
         // it once after the migration" which is the intended UX.
         endgameSeenAt: (oldPersist as Partial<PersistentState>).endgameSeenAt ?? 0,
+        // v13 → v14: free training run freebie. false on migrate so vets
+        // also get the teaching boost on their next session.
+        freeTrainingRunUsed: (oldPersist as Partial<PersistentState>).freeTrainingRunUsed ?? false,
+        // v16 → v17: panel hints seen-set. Empty on migrate so vets see
+        // each compact hint once (and can dismiss it once).
+        panelHintsSeen: (oldPersist as Partial<PersistentState>).panelHintsSeen ?? [],
       },
       account: {
         // v9 → v10: push-notification opt-in fields. Conservative defaults —
         // sessionsStarted starts at 1 (this counts as a session), pushOptedIn
         // false, pushPromptedAt 0.
         // v10 → v11: language for the Settings menu. "EN" default.
+        // v13 → v14: onboardingStep semantics shifted — a new "Training Run"
+        // step was inserted at 6, pushing the old "Ready" closer from 6 → 7
+        // and "done" from 7 → 8. Shift any veteran value > 5 by +1 so the
+        // closer still fires in its right slot (and done players stay done).
         ...(blob.account as AccountState),
         sessionsStarted: (blob.account as Partial<AccountState>).sessionsStarted ?? 1,
         pushOptedIn:     (blob.account as Partial<AccountState>).pushOptedIn     ?? false,
         pushPromptedAt:  (blob.account as Partial<AccountState>).pushPromptedAt  ?? 0,
         language:        (blob.account as Partial<AccountState>).language        ?? "EN",
+        // v14 → v15: backfill defaults that match the old transient-only
+        // values (SFX on, music off — the GDD §14 "public spaces" default).
+        sfxMuted:        (blob.account as Partial<AccountState>).sfxMuted        ?? false,
+        musicEnabled:    (blob.account as Partial<AccountState>).musicEnabled    ?? false,
+        onboardingStep:  shiftOnboardingStep(
+          (blob.account as Partial<AccountState>).onboardingStep ?? 0,
+          blob.schemaVersion ?? 0,
+        ),
       },
     };
   }
   return freshSave();
+}
+
+/** Cumulative onboarding-step shifts applied as new tutorial steps were
+ *  inserted into the chain over the schema's life. Each guard checks the
+ *  source version so re-running on an already-migrated value is a no-op. */
+function shiftOnboardingStep(step: number, fromVersion: number): number {
+  // v13 → v14: inserted "Training Run" at step 6.
+  if (fromVersion < 14 && step >= 6) step += 1;
+  // v15 → v16: inserted "Research tutorial" at step 8.
+  if (fromVersion < 16 && step >= 8) step += 1;
+  // v17 → v18: inserted "Open ALLOCATE" at step 5, "Open INBOX" at step 10,
+  // "Open ACHIEVEMENTS" at step 11. Apply in order so a veteran "done"
+  // (was step 9 after v16 migration) lands on the new "done" (step 12).
+  if (fromVersion < 18) {
+    if (step >= 5) step += 1;
+    if (step >= 10) step += 1;
+    if (step >= 11) step += 1;
+  }
+  return step;
 }
 
 export function serialize(save: SaveBlob): string {

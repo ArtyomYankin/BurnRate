@@ -23,6 +23,8 @@ import {
 } from "../core/producers";
 import { getRound } from "../core/rounds";
 import * as audio from "../audio";
+import { PanelHelpModal, PanelHelpSection, PanelHint, PanelInfoButton } from "./PanelHelp";
+import { useStrings } from "../core/i18n";
 import { ChainId, ProducerDef } from "../core/types";
 import {
   selectCapitalStr,
@@ -37,38 +39,24 @@ import { colors, fonts, PIXEL, spacing } from "./theme";
 interface Props {
   onBack(): void;
   defaultChain?: ChainId;
+  /** When set, only this chain's tab is rendered — used by the guided
+   *  tutorial to force the player into buying from a specific chain during
+   *  steps 2/3. Other tabs are hidden so there's no escape. */
+  lockedChain?: ChainId;
 }
 
-// Each chain's display label + accent color + tab abbrev. Color choices mirror
-// the Claude Design mock (sage / terracotta / gold / tension-red).
-const CHAIN_META: Record<ChainId, { label: string; sub: string; color: string; tab: string }> = {
-  engineers: {
-    label: "ENGINEERS",
-    sub: "Headcount · √-scaled supply",
-    color: colors.sage,
-    tab: "ENGI",
-  },
-  gpu: {
-    label: "GPU COMPUTE",
-    sub: "Runs the models · min(supply)",
-    color: colors.terracotta,
-    tab: "GPU",
-  },
-  data: {
-    label: "DATA",
-    sub: "Training corpus · min(supply)",
-    color: colors.gold,
-    tab: "DATA",
-  },
-  energy: {
-    label: "ENERGY",
-    sub: "Powers the GPUs · min(supply)",
-    color: colors.tensionRed,
-    tab: "ENER",
-  },
+// Chain accent colors only — labels/subs/tabs come from i18n via
+// t.producers.chains so they can localize per-language.
+const CHAIN_COLORS: Record<ChainId, string> = {
+  engineers: colors.sage,
+  gpu:       colors.terracotta,
+  data:      colors.gold,
+  energy:    colors.tensionRed,
 };
 
-export function ProducersScreen({ onBack, defaultChain }: Props) {
+export function ProducersScreen({ onBack, defaultChain, lockedChain }: Props) {
+  const [infoOpen, setInfoOpen] = useState(false);
+  const t = useStrings();
   const capitalStr = useGame(selectCapitalStr);
   const owned = useGame(selectProducersOwned);
   const fundingRoundIdx = useGame(selectFundingRoundIdx);
@@ -76,13 +64,19 @@ export function ProducersScreen({ onBack, defaultChain }: Props) {
   const capital = D(capitalStr);
 
   const [activeChain, setActiveChain] = useState<ChainId | "agent">(
-    defaultChain ?? "engineers"
+    lockedChain ?? defaultChain ?? "engineers"
   );
   const agentUnlocked = fundingRoundIdx >= AUTONOMOUS_AGENT.unlockRoundIdx;
   const isAgent = activeChain === "agent";
   // Falls back to engineers' meta when the agent tab is active — only ever read
   // inside the chain-mode branch, but keeps `meta` non-null for the header.
-  const meta = isAgent ? CHAIN_META.engineers : CHAIN_META[activeChain];
+  const metaChain: ChainId = isAgent ? "engineers" : activeChain;
+  const meta = {
+    label: t.producers.chains[metaChain].label,
+    sub:   t.producers.chains[metaChain].sub,
+    tab:   t.producers.chains[metaChain].tab,
+    color: CHAIN_COLORS[metaChain],
+  };
 
   // Live chain supply for the footer (+X/s).
   const runForCalc = {
@@ -113,16 +107,33 @@ export function ProducersScreen({ onBack, defaultChain }: Props) {
   return (
     <View style={styles.shell}>
       <ScreenHeader
-        title="PRODUCERS"
-        sub="Buy supply for each production chain"
+        title={t.producers.title}
+        sub={t.producers.sub}
         onBack={onBack}
-        right={<CapitalChip capital={capital} />}
+        right={
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <PanelInfoButton onPress={() => setInfoOpen(true)} />
+            <CapitalChip capital={capital} />
+          </View>
+        }
       />
 
-      {/* Chain tabs — 4 buttons side-by-side, active gets full color fill */}
+      <PanelHint panelKey="producers" text={t.producers.hint} />
+
+      <PanelHelpModal
+        visible={infoOpen}
+        title={t.producers.title}
+        sections={t.producers.help}
+        onClose={() => setInfoOpen(false)}
+      />
+
+      {/* Chain tabs — 4 buttons side-by-side, active gets full color fill.
+          Filtered to a single tab when `lockedChain` is set (tutorial
+          forces the player into that chain only). */}
       <View style={styles.tabsRow}>
-        {CHAINS.map((c) => {
-          const m = CHAIN_META[c.id];
+        {CHAINS.filter((c) => !lockedChain || c.id === lockedChain).map((c) => {
+          const tabLabel = t.producers.chains[c.id].tab;
+          const tabColor = CHAIN_COLORS[c.id];
           const active = c.id === activeChain;
           return (
             // Plain Pressable here — Pressy's Animated.View wrapper swallows
@@ -136,7 +147,7 @@ export function ProducersScreen({ onBack, defaultChain }: Props) {
                 {
                   flex: 1,
                   minWidth: 0,
-                  backgroundColor: active ? m.color : colors.cream_2,
+                  backgroundColor: active ? tabColor : colors.cream_2,
                 },
               ]}
             >
@@ -148,7 +159,7 @@ export function ProducersScreen({ onBack, defaultChain }: Props) {
                   ]}
                   numberOfLines={1}
                 >
-                  {m.tab}
+                  {tabLabel}
                 </Text>
               </View>
             </Pressable>
@@ -249,7 +260,13 @@ export function ProducersScreen({ onBack, defaultChain }: Props) {
                 fresh={tier.tierIdx === newTierIdx}
                 onBuy={() => {
                   const r = buy(tier.id, 1);
-                  if (r.bought > 0) audio.play("producer_buy");
+                  if (r.bought > 0) {
+                    // "Advanced" buy SFX from the audio kit kicks in for
+                    // mid/late-tier producers (Staff Engineer + above) where
+                    // each purchase is a meaningful capital commitment. Lower
+                    // tiers stay on the lighter standard buy cue.
+                    audio.play(tier.tierIdx >= 4 ? "producer_upgrade" : "producer_buy");
+                  }
                 }}
               />
             ))}
@@ -282,6 +299,7 @@ function AgentCard({
   affordable: boolean;
   onBuy(): void;
 }) {
+  const t = useStrings();
   return (
     <View
       style={[
@@ -306,10 +324,10 @@ function AgentCard({
           </View>
         </View>
         <Text style={styles.cardMeta} numberOfLines={1}>
-          OWNED · {owned} · ×{AUTONOMOUS_AGENT.multPerUnit.toFixed(2)} GLOBAL EACH
+          {t.producers.owned} · {owned} · ×{AUTONOMOUS_AGENT.multPerUnit.toFixed(2)} {t.producers.globalEach}
         </Text>
         <Text style={styles.upgradeHint} numberOfLines={2}>
-          Each agent compounds total tokens/s. The flywheel of recursive self-improvement.
+          {t.producers.agentFlywheel}
         </Text>
       </View>
       <Pressable
@@ -347,6 +365,7 @@ function ProducerCard({
   fresh: boolean;
   onBuy(): void;
 }) {
+  const t = useStrings();
   const unlockRound = unlockRoundForTier(def.tierIdx);
   const locked = currentRound < unlockRound;
 
@@ -407,11 +426,11 @@ function ProducerCard({
               </View>
             )}
             {fresh && !locked && (
-              <Text style={styles.newBadge}>NEW</Text>
+              <Text style={styles.newBadge}>{t.producers.newBadge}</Text>
             )}
           </View>
           <Text style={styles.cardMeta} numberOfLines={1}>
-            OWNED · {ownedCount} · OUT {formatRate(effectiveRate)}
+            {t.producers.owned} · {ownedCount} · {t.producers.out} {formatRate(effectiveRate)}
           </Text>
           {/* Always render the hint row to preserve vertical card height —
               when the player buys past the last upgrade tier the hint goes
@@ -425,7 +444,7 @@ function ProducerCard({
             numberOfLines={1}
           >
             {!locked && nextThreshold !== null && nextLabel !== null
-              ? `${nextThreshold - ownedCount} → ${nextLabel} multiplier`
+              ? `${nextThreshold - ownedCount} → ${nextLabel} ${t.producers.multiplier}`
               : "·"}
           </Text>
         </View>
@@ -434,7 +453,7 @@ function ProducerCard({
         {locked ? (
           <View style={styles.lockBadge}>
             <Text style={styles.lockBadgeText}>
-              🔒 {getRound(unlockRound).name.replace("Series ", "S")}
+              🔒 {(t.roundNames[getRound(unlockRound).id as keyof typeof t.roundNames] ?? getRound(unlockRound).name).replace("Series ", "S")}
             </Text>
           </View>
         ) : (
@@ -695,10 +714,10 @@ const styles = StyleSheet.create({
     borderColor: colors.ink,
   },
   upgradeBadgeText: {
-    fontFamily: fonts.bodyBold,
-    fontSize: 10,
+    fontFamily: fonts.mono,
+    fontSize: 13,
     color: colors.ink,
-    letterSpacing: 0.5,
+    letterSpacing: 0,
   },
   newBadge: {
     fontFamily: fonts.display,
@@ -735,10 +754,10 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   buyText: {
-    fontFamily: fonts.bodyBold,
-    fontSize: 13,
+    fontFamily: fonts.mono,
+    fontSize: 15,
     color: colors.cream_hi,
-    letterSpacing: 0.5,
+    letterSpacing: 0,
   },
   lockBadge: {
     paddingHorizontal: 6,
@@ -779,7 +798,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   footerValue: {
-    fontFamily: fonts.bodyBold,
-    fontSize: 16,
+    fontFamily: fonts.mono,
+    fontSize: 18,
   },
 });

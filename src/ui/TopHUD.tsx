@@ -21,6 +21,10 @@ interface Props {
   /** Opens the HelpModal ("How it works"). Rendered as a small ? icon next
    *  to the gear. */
   onOpenHelp?(): void;
+  /** Fired when the player taps the BURN·RATE wordmark 7 times within 3
+   *  seconds. The secret gesture to open the developer cheat panel — works
+   *  in release builds so we can debug live, but invisible to normal play. */
+  onSecretActivate?(): void;
 }
 
 /**
@@ -42,7 +46,28 @@ export function TopHUD({
   onPressTokens,
   onOpenSettings,
   onOpenHelp,
+  onSecretActivate,
 }: Props) {
+  // Secret-tap detector for the dev cheat panel. Counts taps on the BURN·RATE
+  // wordmark; if 7 land within 3 seconds, fire onSecretActivate. The window
+  // resets on the next tap after a 3-second gap so we don't accumulate stale
+  // taps from minutes ago.
+  const tapCount = React.useRef(0);
+  const tapWindowStart = React.useRef(0);
+  const onBrandTap = () => {
+    const now = Date.now();
+    if (now - tapWindowStart.current > 3000) {
+      tapCount.current = 1;
+      tapWindowStart.current = now;
+      return;
+    }
+    tapCount.current += 1;
+    if (tapCount.current >= 7) {
+      tapCount.current = 0;
+      tapWindowStart.current = 0;
+      onSecretActivate?.();
+    }
+  };
   // Floating "+1" feedback — animates each tap. We keep a small queue (max
   // 4) of in-flight floaters so rapid taps still feel responsive without
   // burning frame time on dozens of animated nodes.
@@ -64,9 +89,11 @@ export function TopHUD({
             sit at the very top-right of the HUD strip so they're reachable
             from the home position without crowding the bottom of the screen. */}
         <View style={styles.row}>
-          <Text style={styles.brand}>
-            BURN<Text style={{ color: colors.terracotta }}>·</Text>RATE
-          </Text>
+          <Pressable onPress={onBrandTap} hitSlop={6}>
+            <Text style={styles.brand}>
+              BURN<Text style={{ color: colors.terracotta }}>·</Text>RATE
+            </Text>
+          </Pressable>
           <View style={styles.row1Right}>
             {/* roundLabel shrinks + truncates with ellipsis when the round
                 name is long (AGI Singularity Round · Round 10 etc), so the
@@ -126,7 +153,14 @@ export function TopHUD({
             <Text style={styles.statValue}>{equity}</Text>
           </View>
           <View style={{ flex: 1 }} />
-          <Text style={styles.statLabel}>{Math.floor(pct)}%</Text>
+          <Text
+            style={[
+              styles.progressPct,
+              { color: pct > 85 ? colors.gold_2 : colors.sage_2 },
+            ]}
+          >
+            {Math.floor(pct)}%
+          </Text>
         </View>
 
         {/* Row 4 — round-progress pixel bar with tick marks */}
@@ -273,10 +307,14 @@ const styles = StyleSheet.create({
     alignSelf: "center",
   },
   tokenBig: {
-    fontFamily: fonts.bodyBold,
-    fontSize: 28,
+    // VT323 mono — same family as the rate "+X/s" right next to it. The
+    // chunky PixelifySans bold we used before made 2/6/8 hard to tell
+    // apart at low token counts; mono digits have wider apertures and
+    // are unambiguous.
+    fontFamily: fonts.mono,
+    fontSize: 34,
     color: colors.ink,
-    lineHeight: 30,
+    lineHeight: 34,
   },
   tokenRate: {
     fontFamily: fonts.mono,
@@ -314,6 +352,15 @@ const styles = StyleSheet.create({
     fontSize: 9,
     color: colors.muted,
     letterSpacing: 1,
+  },
+  // Round-progress percentage — promoted to a bigger, bolder, colored stat
+  // so the player can see at a glance how close they are to closing the
+  // round. Color matches the progress bar (sage growing, gold near
+  // threshold) so it reads as part of the same indicator.
+  progressPct: {
+    fontFamily: fonts.mono,
+    fontSize: 22,
+    letterSpacing: 0,
   },
   statValue: {
     fontFamily: fonts.mono,

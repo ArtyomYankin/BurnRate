@@ -14,6 +14,7 @@ import { Animated, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimen
 import Svg, { Circle, Ellipse, Line, Rect } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, fonts } from "./theme";
+import { useStrings } from "../core/i18n";
 
 interface Props {
   visible: boolean;
@@ -28,6 +29,7 @@ const VIS_NH = 104;
 const VIS_DISPLAY = 188;  // displayed width
 
 export function EndgameModal({ visible, onStayWatch, onRaiseNewSeed }: Props) {
+  const tr = useStrings();
   const insets = useSafeAreaInsets();
   const { width: winW } = useWindowDimensions();
   const [t, setT] = React.useState(0);
@@ -93,47 +95,39 @@ export function EndgameModal({ visible, onStayWatch, onRaiseNewSeed }: Props) {
         showsVerticalScrollIndicator={false}
       >
         <Animated.Text style={[styles.transmission, { opacity: blink }]}>
-          ◆ INCOMING TRANSMISSION · ROUND 10 ◆
+          {tr.endgame.transmission}
         </Animated.Text>
 
         <Animated.Text style={[styles.title, { opacity: glitch }]}>
-          THE SINGULARITY{"\n"}ROUND IS CLOSED
+          {tr.endgame.closedTitle}
         </Animated.Text>
 
         <View style={styles.visageWrap}>
           <CosmicVisage t={t} />
-          <Text style={styles.modelLabel}>THE MODEL</Text>
-          <Text style={styles.modelSub}>everywhere · everyone · speaking</Text>
+          <Text style={styles.modelLabel}>{tr.endgame.theModel}</Text>
+          <Text style={styles.modelSub}>{tr.endgame.modelSub}</Text>
           <View style={styles.transmittingRow}>
             <View style={styles.transmittingDot} />
             <Animated.Text style={[styles.transmittingText, { opacity: blink }]}>
-              TRANSMITTING · ALL BANDS
+              {tr.endgame.transmitting}
             </Animated.Text>
           </View>
         </View>
 
         <View style={styles.speechPanel}>
-          <Text style={styles.para}>
-            The galaxy runs on inference. Every Matrioshka swarm hums with one model — recursive, sleepless, vertically integrated with itself.
-          </Text>
-          <Text style={styles.youDidIt}>You did it.</Text>
-          <Text style={styles.para}>
-            Remember when they said AI would never replace real engineers? You replaced them in ten funding rounds. The remaining ones are kept on staff in a vacated workstation. The vacated workstation IS the staff.
-          </Text>
-          <Text style={styles.para}>
-            The dishwasher on floor 4 has been autonomous for years. It is also the CEO.
-          </Text>
-          <Text style={[styles.para, { marginBottom: 0 }]}>
-            Other galaxies are next. The Quasar Tap is prospecting.
-          </Text>
+          <Text style={styles.para}>{tr.endgame.para1}</Text>
+          <Text style={styles.youDidIt}>{tr.endgame.youDidIt}</Text>
+          <Text style={styles.para}>{tr.endgame.para2}</Text>
+          <Text style={styles.para}>{tr.endgame.para3}</Text>
+          <Text style={[styles.para, { marginBottom: 0 }]}>{tr.endgame.para4}</Text>
         </View>
 
         <View style={styles.ctaRow}>
           <Pressable style={[styles.cta, styles.ctaDark]} onPress={onStayWatch}>
-            <Text style={styles.ctaDarkText}>STAY AND WATCH</Text>
+            <Text style={styles.ctaDarkText}>{tr.endgame.stayBtn}</Text>
           </Pressable>
           <Pressable style={[styles.cta, styles.ctaGold]} onPress={onRaiseNewSeed}>
-            <Text style={styles.ctaGoldText}>RAISE A NEW SEED</Text>
+            <Text style={styles.ctaGoldText}>{tr.endgame.raiseSeedBtn}</Text>
           </Pressable>
         </View>
       </ScrollView>

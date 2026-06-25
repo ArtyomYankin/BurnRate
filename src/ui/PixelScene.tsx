@@ -143,7 +143,7 @@ const MEGACORP_ZONES: HitZone[] = [
 // well: a supermassive black hole at the center, with producer anchors
 // orbiting around it.
 //   research = the black hole itself (the model IS the research at this point)
-//   energy   = Quasar Tap (lower-right)
+//   energy   = Dyson Sphere (lower-right) — caged star with collimated tap beam
 //   books    = Galactic Archive (spiral galaxy upper-right)
 //   monitor  = polar relativistic jet (top, "Observe")
 //   gpu      = Matrioshka swarm (lower-left)
@@ -153,7 +153,7 @@ const MEGACORP_ZONES: HitZone[] = [
 // still be bought via the Producers screen.
 const AGI_ZONES: HitZone[] = [
   { id: "research", x:  92, y: 124, w: 56, h: 52, label: "Tune the AGI" },
-  { id: "energy",   x: 186, y: 264, w: 44, h: 44, label: "Quasar Tap" },
+  { id: "energy",   x: 186, y: 264, w: 44, h: 44, label: "Dyson Sphere" },
   { id: "books",    x: 184, y:  50, w: 44, h: 40, label: "Galactic Archive" },
   // Training Run zone — wraps the Stellar Forge sprite (cx 32, cy 200, ~50px).
   { id: "monitor",  x:   4, y: 172, w: 56, h: 56, label: "Stellar Forge · Training Run" },
@@ -418,20 +418,30 @@ export function PixelScene({ width, height, onHit, activeHit, scene = "seed", tu
         })()}
       </Svg>
 
-      {/* Invisible touch overlay — one Pressable per hit zone. */}
+      {/* Invisible touch overlay — one Pressable per hit zone. When the
+          tutorial is forcing the player toward a specific zone
+          (`tutorialHighlight` set), filter out every other zone so taps on
+          non-target sprites do nothing. Keeps the player on the strict
+          guided path during steps 2/3 without us needing a separate
+          overlay component. */}
       {onHit && (
         <View
           style={{ position: "absolute", left: 0, top: 0, width, height }}
           pointerEvents="box-none"
         >
-          {zones.map((z, i) => {
+          {zones
+            .filter((z) => !tutorialHighlight || z.id === tutorialHighlight)
+            .map((z, i) => {
             const sx = width / W;
             const sy = height / H;
+            // Match index back into the unfiltered zone list so activeHit
+            // outline still finds its zone.
+            const idxInAll = zones.indexOf(z);
             return (
               <Pressable
-                key={`${z.id}-${i}`}
+                key={`${z.id}-${idxInAll}`}
                 onPress={() => {
-                  setActiveIdx(i);
+                  setActiveIdx(idxInAll);
                   onHit(z.id);
                 }}
                 style={{
@@ -2781,7 +2791,7 @@ function PlanetaryScene({ t }: { t: number }) {
 // AGI SINGULARITY SCENE — design v11 rewrite. A supermassive black hole at
 // galactic scale: accretion disk + photon ring + lensed starfield + polar
 // jets + Doppler beaming. Producer anchors orbit: a Matrioshka swarm
-// (lower-left), a Quasar Tap (lower-right), a Galactic Archive spiral
+// (lower-left), a Dyson Sphere (lower-right), a Galactic Archive spiral
 // (upper-right). Deadpan apocalypse vibe — "the company has become a
 // gravity well." Per pixel-art.jsx::composeAGIScene.
 // ═══════════════════════════════════════════════════════════════════════
@@ -3155,36 +3165,107 @@ function EnduranceShip({ cx, cy, t }: { cx: number; cy: number; t: number }) {
   );
 }
 
-// — Quasar tap (Energy producer anchor) —
-function Quasar({ cx, cy, t }: { cx: number; cy: number; t: number }) {
-  const beams: React.ReactNode[] = [];
-  let k = 0;
-  for (const dir of [-1, 1]) {
-    for (let j = 0; j < 14; j++) {
-      const op = Math.max(0, 0.6 - j * 0.04);
-      const col = j < 5 ? "#FFFFFF" : "#EBBE6E";
-      beams.push(
-        <Rect key={`q${k++}`} x={(cx + dir * (j * 1.4)) | 0} y={(cy - j) | 0}
-          width={1} height={1} fill={col} opacity={op} />
-      );
-      beams.push(
-        <Rect key={`q${k++}`} x={(cx - dir * (j * 1.4)) | 0} y={(cy + j) | 0}
-          width={1} height={1} fill={col} opacity={op} />
+// — Dyson Sphere (Energy producer anchor in AGI scene) —
+// A brilliant star caged in a geodesic Dyson lattice with collector panels
+// along the equator; energy tapped off as a collimated beam.
+function DysonStar({ cx, cy, t }: { cx: number; cy: number; t: number }) {
+  const R = 14;
+
+  // Stellar corona — 7 nested low-alpha ellipses
+  const corona: React.ReactNode[] = [];
+  for (let g = 7; g > 0; g--) {
+    corona.push(
+      <Ellipse key={`co${g}`} cx={cx} cy={cy} rx={g * 2.6} ry={g * 2.6}
+        fill={g > 4 ? "#FFD27A" : "#FF9A3A"} opacity={0.05 + g * 0.006} />,
+    );
+  }
+
+  // Surface granulation flicker — 5 short-lived dots on the star surface
+  const granulation: React.ReactNode[] = [];
+  for (let i = 0; i < 5; i++) {
+    if ((t + i * 3) % 10 < 5) {
+      const a = i * 1.7 + t / 8;
+      const rr = (R - 4) * 0.6;
+      granulation.push(
+        <Px key={`gr${i}`} x={(cx + Math.cos(a) * rr) | 0} y={(cy + Math.sin(a) * rr) | 0} c="#FFE8A8" />,
       );
     }
   }
-  const pulseOn = t % 14 < 7;
+
+  // Dyson geodesic lattice — 3 great-circle rings at angles, slow rotation
+  const spin = t / 60;
+  const rings = [0, Math.PI / 3, -Math.PI / 3];
+  const latticeRings: React.ReactNode[] = rings.map((base, i) => {
+    const rotDeg = ((base + spin) * 180) / Math.PI;
+    return (
+      <Ellipse
+        key={`lr${i}`}
+        cx={cx}
+        cy={cy}
+        rx={R}
+        ry={R * 0.34}
+        fill="none"
+        stroke="#2A3340"
+        strokeWidth={1}
+        opacity={0.9}
+        transform={`rotate(${rotDeg.toFixed(2)} ${cx} ${cy})`}
+      />
+    );
+  });
+
+  // Collector panels caged around the equator with blinking glints
+  const collectors: React.ReactNode[] = [];
+  for (let i = 0; i < 12; i++) {
+    const a = spin * 0.7 + (i / 12) * Math.PI * 2;
+    const pxx = cx + Math.cos(a) * R;
+    const pyy = cy + Math.sin(a) * R * 0.34;
+    collectors.push(
+      <React.Fragment key={`cp${i}`}>
+        <PixelRect x={pxx - 1} y={pyy - 1} w={2} h={2} c={i % 2 ? "#3A4656" : "#222A36"} />
+        <Px x={pxx | 0} y={pyy | 0} c={(t + i * 3) % 14 < 8 ? "#FFB84A" : "#5A3A1A"} />
+      </React.Fragment>,
+    );
+  }
+
+  // Energy tap beam — 16 horizontal pulsing bars trailing right
+  const beam: React.ReactNode[] = [];
+  for (let j = 0; j < 16; j++) {
+    const op = Math.max(0, (0.85 - j * 0.05) * (0.6 + 0.4 * Math.sin(t / 4 + j)));
+    const col = j < 3 ? "#FFFFFF" : j < 7 ? "#FFE8A8" : "#EBBE6E";
+    beam.push(
+      <Rect key={`bm${j}`} x={(cx + R + 2 + j * 2) | 0} y={cy - 1} width={2} height={2} fill={col} opacity={op} />,
+    );
+  }
+
+  // Power-collected pulse ring (briefly, every 30 ticks)
+  const burn = (t % 30) / 30;
+  const pulseRing = burn < 0.5
+    ? (
+      <Ellipse
+        cx={cx}
+        cy={cy}
+        rx={R + 2 + burn * 14}
+        ry={(R + 2 + burn * 14) * 0.5}
+        fill="none"
+        stroke="#FFD27A"
+        strokeWidth={1}
+        opacity={0.4 * (1 - burn * 2)}
+      />
+    )
+    : null;
+
   return (
     <G>
-      <Ellipse cx={cx} cy={cy} rx={18} ry={14} fill="#5C5020" opacity={0.28} />
-      <PixelRect x={cx - 4} y={cy - 3} w={8} h={6} c="#FFC04A" />
-      <PixelRect x={cx - 2} y={cy - 2} w={4} h={4} c="#FFF8E0" />
-      <Px x={cx} y={cy} c="#FFFFFF" />
-      {beams}
-      {pulseOn && (
-        <Ellipse cx={cx} cy={cy} rx={8 + (t % 14)} ry={6 + (t % 14) * 0.7}
-          fill="none" stroke="#EBBE6E" strokeWidth={1} opacity={0.45} />
-      )}
+      {corona}
+      {/* The star — 3 concentric ellipses */}
+      <Ellipse cx={cx} cy={cy} rx={R - 2}             ry={R - 2}             fill="#FF9A3A" />
+      <Ellipse cx={cx} cy={cy} rx={(R - 2) * 0.7}     ry={(R - 2) * 0.7}     fill="#FFD27A" />
+      <Ellipse cx={cx} cy={cy} rx={(R - 2) * 0.36}    ry={(R - 2) * 0.36}    fill="#FFF8E0" />
+      {granulation}
+      {latticeRings}
+      {collectors}
+      {beam}
+      {pulseRing}
     </G>
   );
 }
@@ -3274,7 +3355,9 @@ function AGIScene({ t }: { t: number }) {
 
       {/* PRODUCER ANCHORS */}
       <DysonSwarm cx={34} cy={288} t={t} />
-      <Quasar cx={208} cy={288} t={t} />
+      {/* Energy anchor — Dyson Sphere (caged star + collimated tap beam),
+          replaces the older Quasar Tap. */}
+      <DysonStar cx={208} cy={288} t={t} />
       <SpiralGalaxy cx={206} cy={70} R={20} ry={9} t={t} spin={1.2} core="#A4F0D0" arm="#3F8A6A" />
       <PixelRect x={204} y={68} w={4} h={4} c="#CFFBE8" />
 

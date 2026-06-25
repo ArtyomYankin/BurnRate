@@ -6,6 +6,8 @@ import {
   AchievementDef,
 } from "../core/achievements";
 import { selectUnlockedAchievements, useGame } from "../game/store";
+import { PanelHelpModal, PanelHint, PanelInfoButton } from "./PanelHelp";
+import { useStrings } from "../core/i18n";
 import { colors, fonts, PIXEL } from "./theme";
 
 interface Props {
@@ -17,13 +19,13 @@ interface Props {
 // (milestone) to deep (endgame), so the grid reads top-down as progression.
 const BUCKET_META: Record<
   AchievementBucket,
-  { label: string; color: string; hideLockedDescription: boolean }
+  { color: string; hideLockedDescription: boolean }
 > = {
-  milestone: { label: "MILESTONES",      color: colors.sage,        hideLockedDescription: false },
-  grind:     { label: "GRIND",           color: colors.terracotta,  hideLockedDescription: false },
-  subtle:    { label: "HIDDEN",          color: colors.tension_2,   hideLockedDescription: true  },
-  comedy:    { label: "COMEDY",          color: colors.gold,        hideLockedDescription: false },
-  endgame:   { label: "ENDGAME",         color: colors.tensionRed,  hideLockedDescription: false },
+  milestone: { color: colors.sage,        hideLockedDescription: false },
+  grind:     { color: colors.terracotta,  hideLockedDescription: false },
+  subtle:    { color: colors.tension_2,   hideLockedDescription: true  },
+  comedy:    { color: colors.gold,        hideLockedDescription: false },
+  endgame:   { color: colors.tensionRed,  hideLockedDescription: false },
 };
 
 const BUCKET_ORDER: AchievementBucket[] = ["milestone", "grind", "subtle", "comedy", "endgame"];
@@ -37,6 +39,8 @@ const BY_BUCKET: Record<AchievementBucket, AchievementDef[]> = (() => {
 })();
 
 export function AchievementsScreen({ onBack }: Props) {
+  const [infoOpen, setInfoOpen] = React.useState(false);
+  const t = useStrings();
   const unlocked = useGame(selectUnlockedAchievements);
   const unlockedSet = React.useMemo(() => new Set(unlocked), [unlocked]);
   const total = ACHIEVEMENTS.length;
@@ -53,10 +57,20 @@ export function AchievementsScreen({ onBack }: Props) {
           <Text style={styles.brand}>
             BURN<Text style={{ color: colors.terracotta }}>·</Text>RATE
           </Text>
-          <Text style={styles.title}>ACHIEVEMENTS</Text>
-          <Text style={styles.sub}>{done} / {total} unlocked</Text>
+          <Text style={styles.title}>{t.achievements.title}</Text>
+          <Text style={styles.sub}>{done} / {total} {t.achievements.unlockedPattern}</Text>
         </View>
+        <PanelInfoButton onPress={() => setInfoOpen(true)} />
       </View>
+
+      <PanelHint panelKey="achievements" text={t.achievements.hint} />
+
+      <PanelHelpModal
+        visible={infoOpen}
+        title={t.achievements.title}
+        sections={t.achievements.help}
+        onClose={() => setInfoOpen(false)}
+      />
 
       {/* Progress bar — quick visual of completion % */}
       <View style={styles.progressTrack}>
@@ -83,7 +97,7 @@ export function AchievementsScreen({ onBack }: Props) {
               <View style={styles.bucketHeader}>
                 <View style={[styles.bucketSwatch, { backgroundColor: meta.color }]} />
                 <Text style={[styles.bucketLabel, { color: meta.color }]}>
-                  {meta.label}
+                  {t.achievements.buckets[bucket]}
                 </Text>
                 <Text style={styles.bucketCount}>{bucketDone} / {list.length}</Text>
               </View>
@@ -115,6 +129,7 @@ function AchievementCard({
   hideLockedDescription: boolean;
   accent: string;
 }) {
+  const t = useStrings();
   const showName = unlocked || !hideLockedDescription;
   const showDesc = unlocked || !hideLockedDescription;
   return (
@@ -137,7 +152,7 @@ function AchievementCard({
           ]}
           numberOfLines={2}
         >
-          {showName ? def.name : "???"}
+          {showName ? def.name : t.achievements.hidden}
         </Text>
         <Text
           style={[
@@ -146,7 +161,7 @@ function AchievementCard({
           ]}
           numberOfLines={3}
         >
-          {showDesc ? def.description : "Hidden — keep playing."}
+          {showDesc ? def.description : t.achievements.hiddenDesc}
         </Text>
       </View>
       {unlocked && (

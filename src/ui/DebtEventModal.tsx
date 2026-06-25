@@ -9,12 +9,14 @@ import {
 } from "../game/store";
 import { Pressy } from "./Pressy";
 import { colors, gradient, radii, shadow, spacing, type } from "./theme";
+import { useStrings } from "../core/i18n";
 
 /**
  * Sits at the App root. Self-shows when pendingDebtEvents queue is non-empty.
  * Drains one head-of-queue at a time so each event lands as a discrete moment.
  */
 export function DebtEventModal() {
+  const t = useStrings();
   const queue = useGame(selectPendingDebtEvents);
   const ack = useGame((s) => s.acknowledgeDebtEvent);
   const head = queue[0];
@@ -40,14 +42,14 @@ export function DebtEventModal() {
           >
             <AlertOctagon size={20} color={colors.cream} strokeWidth={2.5} />
             <Text style={styles.headerText}>{ev.title}</Text>
-            <Text style={styles.thresholdTag}>debt ≥ {ev.threshold}</Text>
+            <Text style={styles.thresholdTag}>{t.debtEvent.debtPrefix} ≥ {ev.threshold}</Text>
           </LinearGradient>
 
           <Text style={styles.body}>{ev.body}</Text>
 
           <View style={styles.effectBlock}>
             <Text style={[type.caption, { color: colors.muted, marginBottom: 4 }]}>
-              Consequence
+              {t.debtEvent.consequence}
             </Text>
             <Text style={[type.h2, { color: colors.tensionRed }]}>{ev.effectLabel}</Text>
             <Text style={[type.caption, { color: colors.muted, marginTop: 4 }]}>
@@ -62,7 +64,7 @@ export function DebtEventModal() {
               end={{ x: 0, y: 1 }}
               style={StyleSheet.absoluteFill}
             />
-            <Text style={styles.primaryText}>Acknowledge</Text>
+            <Text style={styles.primaryText}>{t.debtEvent.closeBtn}</Text>
           </Pressy>
         </View>
       </View>

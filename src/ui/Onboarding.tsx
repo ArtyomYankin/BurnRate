@@ -3,101 +3,67 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useGame } from "../game/store";
 import { HitId } from "./PixelScene";
 import { colors, fonts, PIXEL } from "./theme";
+import { useStrings } from "../core/i18n";
 
 /**
  * Guided first-run tutorial. Sits below the IntroModal in the onboarding
  * chain.
  *
- * onboardingStep semantics:
+ * onboardingStep semantics (12-step forced walkthrough):
  *   0 → IntroModal (welcome). Separate component (IntroModal.tsx).
  *   1 → "How tokens are made" — Liebig pipeline explanation. Manual dismiss.
  *   2 → "Hire an engineer" — auto-advances on any engineers-chain purchase.
  *   3 → "Buy a GPU" — auto-advances on any gpu-chain purchase.
- *   4 → "Allocation" — explain Product/Marketing/R&D/Safety split. Manual.
- *   5 → "Currencies" — quick glossary of $ Capital / Hype / RP / Equity / Debt. Manual.
- *   6 → "Ready" closer. Manual dismiss.
- *   7 → done. Tutorial component renders nothing.
+ *   4 → "Allocation" explainer — what the 4 departments mean. Manual.
+ *   5 → "Open ALLOCATE" FORCED — spotlight on the bottom allocation bar,
+ *        every other tap blocked. Auto-advances when AllocateScreen opens.
+ *   6 → "Currencies" — quick glossary. Manual dismiss.
+ *   7 → "Training Run" — points at the monitor; auto-advances when the
+ *        player consumes the free-first-roll freebie (handled in store).
+ *   8 → "Ready" closer. Manual dismiss.
+ *   9 → "Research available" — appears only AFTER the player closes their
+ *        first round (so they have Equity to spend). Auto-advances on first
+ *        research-node buy.
+ *   10 → "Open INBOX" FORCED — spotlight on Slack button, blocks everything
+ *        else. Only renders once the player actually has an unread vignette.
+ *        Auto-advances on Vignettes screen open.
+ *   11 → "Open ACHIEVEMENTS" FORCED — spotlight on the ACH chip in the HUD,
+ *        blocks others. Auto-advances on AchievementsScreen open.
+ *   12 → done. Tutorial component renders nothing.
  *
- * The pulsing scene highlight that points to the target is owned by
- * PixelScene via the `tutorialHighlight` prop, which HomeScreen feeds with
- * `tutorialHighlightForStep()` below.
- *
- * Explanation steps (1/4/5) render as a BIGGER card with title + multi-line
- * body. Interactive steps (2/3) render as a compact chip with a 1-line
- * instruction that disappears once the player completes the required action.
+ * Explainer steps render as a BIGGER card with title + multi-line body.
+ * Interactive scene-tap steps render as a compact chip at the top. Forced
+ * walkthrough steps (5/10/11) render via TutorialSpotlight — the overlay
+ * with the cutout — so this component renders NOTHING for those.
  */
 
-interface TutorialStep {
+interface TutorialStepMeta {
   target: HitId | null;
-  title: string;
-  text: string;
   /** Step is dismissible by tapping the card (no required scene action). */
   manualDismiss?: boolean;
   /** Render as a large explanation card instead of a compact action chip. */
   layout?: "chip" | "explainer";
 }
 
-const TUTORIAL_STEPS: Record<number, TutorialStep> = {
-  1: {
-    target: null,
-    title: "HOW TOKENS ARE MADE",
-    text:
-      "Tokens are the fuel — and they come from a pipeline of 4 chains:\n\n" +
-      "ENGINEERS · GPU · DATA · ENERGY\n\n" +
-      "The bottleneck (smallest of GPU/Data/Energy) caps your rate. " +
-      "Engineers multiply on top. Balance all four — building only one stalls everything.\n\n" +
-      "(Tap to continue.)",
-    manualDismiss: true,
-    layout: "explainer",
-  },
-  2: {
-    target: "engineer",
-    title: "STEP 1 of 2 · HIRE",
-    text: "Tap the engineer to hire one more. Engineers multiply the pipeline.",
-    layout: "chip",
-  },
-  3: {
-    target: "gpu",
-    title: "STEP 2 of 2 · COMPUTE",
-    text: "Tap the GPU. The engineer needs compute to run code on.",
-    layout: "chip",
-  },
-  4: {
-    target: null,
-    title: "ALLOCATION · TOK → 4 DEPARTMENTS",
-    text:
-      "Every token you earn splits across four departments. Tap ALLOCATE to tune the mix.\n\n" +
-      "• PRODUCT  → Capital ($) to buy more producers\n" +
-      "• R&D       → Research Points (RP) for per-run sprint upgrades\n" +
-      "• MARKETING → Hype to lower the next round's threshold\n" +
-      "• SAFETY    → pays down Alignment Debt; under 10% accrues it\n\n" +
-      "Default is Product-heavy. Crank Safety if events warn you.\n\n" +
-      "(Tap to continue.)",
-    manualDismiss: true,
-    layout: "explainer",
-  },
-  5: {
-    target: null,
-    title: "WHAT THE COUNTERS MEAN",
-    text:
-      "$  CAPITAL — buys producers. Resets at prestige.\n" +
-      "RP  RESEARCH POINTS — per-run, spend on sprint upgrades.\n" +
-      "HY  HYPE — lowers the next round's threshold. Resets.\n" +
-      "EQ  EQUITY — earned at prestige. PERSISTS. Spend on the permanent Research Tree.\n" +
-      "DB  ALIGNMENT DEBT — accrues if Safety < 10%. PERSISTS. Triggers events.\n\n" +
-      "(Tap to continue.)",
-    manualDismiss: true,
-    layout: "explainer",
-  },
-  6: {
-    target: null,
-    title: "READY",
-    text:
-      "Numbers climb on their own. Balance the 4 chains, close the round, prestige, " +
-      "spend Equity on Research, repeat.\n\n(Tap to dismiss.)",
-    manualDismiss: true,
-    layout: "explainer",
-  },
+// Non-localizable metadata only — title / text come from i18n via
+// t.onboarding.steps[step].
+const STEP_META: Record<number, TutorialStepMeta> = {
+  1:  { target: null,       manualDismiss: true, layout: "explainer" },
+  2:  { target: "engineer",                       layout: "chip" },
+  3:  { target: "gpu",                            layout: "chip" },
+  4:  { target: null,       manualDismiss: true, layout: "explainer" },
+  // Step 5 is a forced walkthrough — rendered by TutorialSpotlight, not
+  // here. Onboarding.tsx returns null below so the spotlight's caption is
+  // the only thing the player sees for this step.
+  5:  { target: null,                             layout: "chip" },
+  6:  { target: null,       manualDismiss: true, layout: "explainer" },
+  7:  { target: "monitor",                        layout: "chip" },
+  8:  { target: null,       manualDismiss: true, layout: "explainer" },
+  9:  { target: "research",                       layout: "chip" },
+  // Steps 10 & 11 are forced — rendered by TutorialSpotlight. Onboarding
+  // skips rendering for them too.
+  10: { target: null,                             layout: "chip" },
+  11: { target: null,                             layout: "chip" },
 };
 
 /**
@@ -105,23 +71,34 @@ const TUTORIAL_STEPS: Record<number, TutorialStep> = {
  * current onboardingStep. Returns null when no highlight is needed.
  */
 export function tutorialHighlightForStep(step: number): HitId | null {
-  return TUTORIAL_STEPS[step]?.target ?? null;
+  return STEP_META[step]?.target ?? null;
 }
 
 export function Onboarding() {
   const step = useGame((s) => s.account.onboardingStep);
   const hydrated = useGame((s) => s.hydrated);
   const advance = useGame((s) => s.setOnboardingStep);
+  const t = useStrings();
 
   // Same flash-prevention as IntroModal: don't render the tutorial card
   // until the save has loaded, otherwise step=0's "tap the engineer" chip
   // briefly appears even for veteran players.
   if (!hydrated) return null;
-  const def = TUTORIAL_STEPS[step];
-  if (!def) return null;
+  // Forced-walkthrough steps (5/10/11) are rendered by TutorialSpotlight,
+  // not here. Onboarding stays out of the way so the spotlight's caption
+  // is the only on-screen instruction for those steps.
+  if (step === 5 || step === 10 || step === 11) return null;
+  const meta = STEP_META[step];
+  if (!meta) return null;
+  const copy = t.onboarding.steps[step as keyof typeof t.onboarding.steps];
+  if (!copy) return null;
+  // Step 9 (Research) advances on opening the Research screen — not on
+  // buying a node. So we no longer gate the chip on equity > 0; the
+  // player can complete the step even with 0 Equity (the chip teaches
+  // WHERE Research lives, doesn't force a spend).
 
-  const onTap = def.manualDismiss ? () => advance(step + 1) : undefined;
-  const isExplainer = def.layout === "explainer";
+  const onTap = meta.manualDismiss ? () => advance(step + 1) : undefined;
+  const isExplainer = meta.layout === "explainer";
 
   // Explainer cards are wider + centered + full-screen modal-like (with a
   // dimmed backdrop) so the player notices the new information. Chip cards
@@ -137,9 +114,9 @@ export function Onboarding() {
         <View style={styles.explainerCard}>
           <View style={styles.headerRow}>
             <View style={[styles.swatch, { backgroundColor: colors.gold }]} />
-            <Text style={styles.explainerTitle}>{def.title}</Text>
+            <Text style={styles.explainerTitle}>{copy.title}</Text>
           </View>
-          <Text style={styles.explainerBody}>{def.text}</Text>
+          <Text style={styles.explainerBody}>{copy.text}</Text>
         </View>
       </Pressable>
     );
@@ -147,12 +124,12 @@ export function Onboarding() {
 
   return (
     <View pointerEvents="box-none" style={styles.wrap}>
-      <Pressable onPress={onTap} style={styles.card} disabled={!def.manualDismiss}>
+      <Pressable onPress={onTap} style={styles.card} disabled={!meta.manualDismiss}>
         <View style={styles.headerRow}>
           <View style={[styles.swatch, { backgroundColor: colors.gold }]} />
-          <Text style={styles.title}>{def.title}</Text>
+          <Text style={styles.title}>{copy.title}</Text>
         </View>
-        <Text style={styles.body}>{def.text}</Text>
+        <Text style={styles.body}>{copy.text}</Text>
       </Pressable>
     </View>
   );

@@ -21,6 +21,8 @@ import {
   useGame,
 } from "../game/store";
 import { formatNumber } from "./formatNumber";
+import { PanelHelpModal, PanelHint, PanelInfoButton } from "./PanelHelp";
+import { useStrings } from "../core/i18n";
 import { colors, fonts, PIXEL } from "./theme";
 
 interface Props {
@@ -28,16 +30,17 @@ interface Props {
 }
 
 // ─── Branch metadata ─────────────────────────────────────────────────────
-// Labels + accent colors used for the branch headers and node accents.
+// Accent colors used for the branch headers and node accents. Labels come
+// from i18n.research.branches so each branch localizes per-language.
 // Colors mirror Claude Design `sub-screens.jsx::RESEARCH_BRANCHES` where
 // each branch maps to a distinct chain color.
-const BRANCH_META: Record<ResearchBranch, { label: string; color: string }> = {
-  rd:      { label: "R&D",         color: colors.sage },
-  compute: { label: "COMPUTE",     color: colors.terracotta },
-  data:    { label: "DATA",        color: colors.gold },
-  energy:  { label: "ENERGY",      color: colors.tensionRed },
-  safety:  { label: "SAFETY",      color: colors.tension_hi },
-  capital: { label: "CAPITAL",     color: colors.gold_2 },
+const BRANCH_COLORS: Record<ResearchBranch, string> = {
+  rd:      colors.sage,
+  compute: colors.terracotta,
+  data:    colors.gold,
+  energy:  colors.tensionRed,
+  safety:  colors.tension_hi,
+  capital: colors.gold_2,
 };
 
 // Pre-grouped nodes by branch, preserving definition order.
@@ -52,6 +55,8 @@ const NODES_BY_BRANCH: Record<ResearchBranch, ResearchNode[]> = (() => {
 type NodeState = "owned" | "available" | "locked";
 
 export function ResearchScreen({ onBack }: Props) {
+  const [infoOpen, setInfoOpen] = React.useState(false);
+  const t = useStrings();
   const equityStr = useGame(selectEquityStr);
   const rpStr = useGame(selectResearchPointsStr);
   const unlocked = useGame(selectUnlockedResearch);
@@ -83,9 +88,19 @@ export function ResearchScreen({ onBack }: Props) {
   return (
     <View style={styles.shell}>
       <ScreenHeader
-        title="Research Tree"
-        sub={`${formatNumber(equity)} Equity available · spend before prestige`}
+        title={t.research.title}
+        sub={`${formatNumber(equity)} ${t.research.equity} ${t.research.available} · ${t.research.spendBeforePrestige}`}
         onBack={onBack}
+        right={<PanelInfoButton onPress={() => setInfoOpen(true)} />}
+      />
+
+      <PanelHint panelKey="research" text={t.research.hint} />
+
+      <PanelHelpModal
+        visible={infoOpen}
+        title={t.research.title}
+        sections={t.research.help}
+        onClose={() => setInfoOpen(false)}
       />
 
       {/* Sprint section — per-run RP-bought boosts (GDD §4 Beat 2). Lives
@@ -94,10 +109,10 @@ export function ResearchScreen({ onBack }: Props) {
       <View style={styles.sprintHeader}>
         <View style={[styles.sprintSwatch, { backgroundColor: colors.sage }]} />
         <View style={{ flex: 1 }}>
-          <Text style={styles.sprintLabel}>SPRINT · RP</Text>
-          <Text style={styles.sprintSub}>per-run boosts · reset on prestige</Text>
+          <Text style={styles.sprintLabel}>{t.research.sprintHeader}</Text>
+          <Text style={styles.sprintSub}>{t.research.sprintSub.toLowerCase()}</Text>
         </View>
-        <Text style={styles.sprintRp}>{formatNumber(rp)} RP</Text>
+        <Text style={styles.sprintRp}>{formatNumber(rp)} {t.research.rp}</Text>
       </View>
       <ScrollView
         horizontal
@@ -127,7 +142,7 @@ export function ResearchScreen({ onBack }: Props) {
           <Text style={styles.equityValue}>{formatNumber(equity)}</Text>
         </View>
         <View style={{ alignItems: "flex-end" }}>
-          <Text style={styles.equityLabel}>NEXT TIER</Text>
+          <Text style={styles.equityLabel}>{t.research.nextTier}</Text>
           <Text style={styles.equityNextHint}>×3 cost</Text>
         </View>
       </View>
@@ -165,12 +180,14 @@ function Branch({
   stateOf(n: ResearchNode): NodeState;
   onBuy(id: string): void;
 }) {
-  const meta = BRANCH_META[branch];
+  const t = useStrings();
+  const color = BRANCH_COLORS[branch];
+  const label = t.research.branches[branch];
   return (
     <View style={styles.branch}>
       <View style={styles.branchHeader}>
-        <View style={[styles.branchSwatch, { backgroundColor: meta.color }]} />
-        <Text style={[styles.branchLabel, { color: meta.color }]}>{meta.label}</Text>
+        <View style={[styles.branchSwatch, { backgroundColor: color }]} />
+        <Text style={[styles.branchLabel, { color: color }]}>{label}</Text>
       </View>
       <ScrollView
         horizontal
@@ -181,7 +198,7 @@ function Branch({
           <ResearchNodeCard
             key={n.id}
             node={n}
-            color={meta.color}
+            color={color}
             state={stateOf(n)}
             onBuy={() => onBuy(n.id)}
           />
@@ -308,7 +325,14 @@ function SprintCard({
 }
 
 // ─── ScreenHeader (same pattern as Producers/Allocate) ───────────────────
-function ScreenHeader({ title, sub, onBack }: { title: string; sub?: string; onBack(): void }) {
+function ScreenHeader({
+  title, sub, onBack, right,
+}: {
+  title: string;
+  sub?: string;
+  onBack(): void;
+  right?: React.ReactNode;
+}) {
   return (
     <View style={styles.header}>
       <Pressable onPress={onBack} hitSlop={12} style={styles.backBtn}>
@@ -321,6 +345,7 @@ function ScreenHeader({ title, sub, onBack }: { title: string; sub?: string; onB
         <Text style={styles.title}>{title}</Text>
         {sub && <Text style={styles.sub} numberOfLines={1}>{sub}</Text>}
       </View>
+      {right}
     </View>
   );
 }
@@ -393,15 +418,15 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   equityValue: {
-    fontFamily: fonts.bodyBold,
-    fontSize: 20,
+    fontFamily: fonts.mono,
+    fontSize: 24,
     color: colors.gold,
-    lineHeight: 20,
+    lineHeight: 24,
     marginTop: 2,
   },
   equityNextHint: {
-    fontFamily: fonts.bodyBold,
-    fontSize: 12,
+    fontFamily: fonts.mono,
+    fontSize: 14,
     color: colors.ink,
     marginTop: 2,
   },
@@ -451,10 +476,10 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
   },
   tierBadgeText: {
-    fontFamily: fonts.bodyBold,
-    fontSize: 9,
+    fontFamily: fonts.mono,
+    fontSize: 12,
     color: colors.cream_hi,
-    letterSpacing: 0.5,
+    letterSpacing: 0,
   },
   stateIndicator: {
     flexDirection: "row",
@@ -468,8 +493,8 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   indicatorCost: {
-    fontFamily: fonts.bodyBold,
-    fontSize: 11,
+    fontFamily: fonts.mono,
+    fontSize: 13,
   },
   indicatorEq: {
     fontFamily: fonts.displayRegular,
@@ -566,8 +591,8 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
   },
   sprintCardCost: {
-    fontFamily: fonts.display,
-    fontSize: 10,
-    letterSpacing: 1,
+    fontFamily: fonts.mono,
+    fontSize: 14,
+    letterSpacing: 0,
   },
 });

@@ -2,6 +2,7 @@ import React from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useGame } from "../game/store";
 import { colors, fonts, PIXEL } from "./theme";
+import { useStrings } from "../core/i18n";
 
 /**
  * First-launch welcome screen. Sets the story up so the player knows WHY
@@ -17,6 +18,7 @@ export function IntroModal() {
   const step = useGame((s) => s.account.onboardingStep);
   const hydrated = useGame((s) => s.hydrated);
   const advance = useGame((s) => s.setOnboardingStep);
+  const t = useStrings();
   // Always mount the <Modal>; toggle visibility via the prop. Unmounting an
   // open native Modal can leave a ghost overlay that swallows touches across
   // the whole screen (the bug behind "after BEGIN nothing in the scene clicks").
@@ -40,39 +42,39 @@ export function IntroModal() {
             </Text>
           </View>
 
-          <Text style={styles.eyebrow}>IT'S THE AI ERA</Text>
+          <Text style={styles.eyebrow}>{t.intro.eyebrow}</Text>
 
+          <Text style={styles.body}>{t.intro.body1}</Text>
           <Text style={styles.body}>
-            You have a garage, a hoodie, and an idea worth a billion dollars.
+            {t.intro.body2Prefix}
+            <Text style={styles.bodyEm}>{t.intro.tokens}</Text>
+            {t.intro.body2Mid}
+            <Text style={styles.bodyEm}>{t.intro.engineers}</Text>
+            {t.intro.body2Sep}
+            <Text style={styles.bodyEm}>{t.intro.gpus}</Text>
+            {t.intro.body2Data}
+            <Text style={styles.bodyEm}>{t.intro.data}</Text>
+            {t.intro.body2Energy}
+            <Text style={styles.bodyEm}>{t.intro.energy}</Text>
+            {t.intro.body2Period}
           </Text>
-          <Text style={styles.body}>
-            To ship it you need <Text style={styles.bodyEm}>TOKENS</Text> — and
-            to make tokens you need <Text style={styles.bodyEm}>Engineers</Text>,{" "}
-            <Text style={styles.bodyEm}>GPUs</Text>,{" "}
-            <Text style={styles.bodyEm}>Data</Text>, and{" "}
-            <Text style={styles.bodyEm}>Energy</Text>.
-          </Text>
-          <Text style={styles.body}>
-            Build all four. Balance the pipeline. Grow as fast as you can.
-            Close funding rounds, raise the bar, and try not to lose the
-            alignment plot.
-          </Text>
+          <Text style={styles.body}>{t.intro.body3}</Text>
 
           <View style={styles.hintRow}>
             <View style={[styles.hintDot, { backgroundColor: colors.sage }]} />
-            <Text style={styles.hint}>TAP things on the screen to buy / act</Text>
+            <Text style={styles.hint}>{t.intro.hint1}</Text>
           </View>
           <View style={styles.hintRow}>
             <View style={[styles.hintDot, { backgroundColor: colors.terracotta }]} />
-            <Text style={styles.hint}>WATCH the token counter at the top</Text>
+            <Text style={styles.hint}>{t.intro.hint2}</Text>
           </View>
           <View style={styles.hintRow}>
             <View style={[styles.hintDot, { backgroundColor: colors.gold }]} />
-            <Text style={styles.hint}>CLOSE ROUND when you hit the threshold</Text>
+            <Text style={styles.hint}>{t.intro.hint3}</Text>
           </View>
 
           <Pressable style={styles.cta} onPress={begin}>
-            <Text style={styles.ctaText}>BEGIN →</Text>
+            <Text style={styles.ctaText}>{t.intro.beginBtn} →</Text>
           </Pressable>
         </View>
       </View>

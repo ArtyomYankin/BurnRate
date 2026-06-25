@@ -6,6 +6,7 @@ import {
   requestPushPermission,
 } from "../game/notifications";
 import { colors, fonts, PIXEL } from "./theme";
+import { useStrings } from "../core/i18n";
 
 /**
  * Push-permission opt-in card. Fires once when the player crosses the
@@ -19,6 +20,7 @@ import { colors, fonts, PIXEL } from "./theme";
  * you if there's something fun to come back to" — Pillar 1 anti-FOMO.
  */
 export function PushOptInModal() {
+  const t = useStrings();
   const account = useGame((s) => s.account);
   const recordPrompt = useGame((s) => s.recordPushPromptResult);
 
@@ -49,23 +51,17 @@ export function PushOptInModal() {
         <View style={styles.frame}>
           <View style={styles.headerRow}>
             <View style={[styles.swatch, { backgroundColor: colors.gold }]} />
-            <Text style={styles.brand}>NOTIFICATIONS?</Text>
+            <Text style={styles.brand}>{t.pushOptIn.title}</Text>
           </View>
 
-          <Text style={styles.body}>
-            We'll only ping you once a day, when there's something pooled
-            worth coming back for — RP, Capital, an event.
-          </Text>
-          <Text style={styles.body}>
-            No streaks. No FOMO timers. Quiet hours respected (22-08 local).
-            Turn it off anytime in Settings.
-          </Text>
+          <Text style={styles.body}>{t.pushOptIn.body1}</Text>
+          <Text style={styles.body}>{t.pushOptIn.body2}</Text>
 
           <Pressable style={styles.cta} onPress={enable}>
-            <Text style={styles.ctaText}>ENABLE</Text>
+            <Text style={styles.ctaText}>{t.pushOptIn.enableBtn}</Text>
           </Pressable>
           <Pressable style={styles.skipBtn} onPress={skip}>
-            <Text style={styles.skipText}>NOT NOW</Text>
+            <Text style={styles.skipText}>{t.pushOptIn.notNowBtn}</Text>
           </Pressable>
         </View>
       </View>

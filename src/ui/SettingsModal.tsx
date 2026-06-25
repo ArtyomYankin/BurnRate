@@ -1,106 +1,39 @@
 import React from "react";
-import { Alert, Linking, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Linking, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useGame } from "../game/store";
 import { useAudioStore } from "../audio";
 import {
   getNotificationPermissionStatus,
   NotifPermStatus,
   requestPushPermission,
-  sendTestNotification,
 } from "../game/notifications";
 import { colors, fonts, PIXEL } from "./theme";
+import { useStrings } from "../core/i18n";
 
 /**
  * Settings menu — port of design v12 SettingsModal. Three sections:
  *
  *   1. Sound FX toggle (sage swatch) — wired to audioStore.sfxMuted
  *   2. Music toggle (terracotta swatch) — wired to audioStore.musicEnabled
- *   3. Language switcher — 6 options, only EN actually wired (others are
- *      i18n stubs per GDD §12 — the switcher persists the pick so the
- *      menu feels real even though the rest of the UI stays English).
+ *   3. Language switcher — EN + DE (full localization rolling out — only
+ *      Settings copy is currently translated; rest of the UI follows in a
+ *      dedicated i18n pass). Earlier 6-language stub array (ES/FR/JA/ZH)
+ *      was removed — it advertised support that wasn't actually being
+ *      delivered.
+ *   4. Notifications — status + Enable button. Test push button removed
+ *      (was dev-only diagnostic, not useful in player path).
  *
  * Sits at the App root, shown when settingsOpen state is true (controlled
- * by the gear button in HomeScreen). Per Pillar 1 — settings persist across
- * launches via the save schema (language) + audioStore (sound/music kept
- * in-memory only for now; that's a known limitation).
+ * by the gear button in HomeScreen).
  */
 interface Props {
   visible: boolean;
   onClose(): void;
 }
 
-// Localized strings per design. Only one screen worth — the rest of the
-// app stays in English regardless of selection (TODO: full i18n pass).
-const I18N: Record<string, {
-  title: string; sound: string; soundSub: string; music: string; musicSub: string;
-  lang: string; done: string; on: string; off: string;
-  restart: string; restartConfirm: string; restartYes: string; restartNo: string;
-  notifSection: string; notifEnable: string; notifTest: string;
-  notifGranted: string; notifDenied: string; notifAsk: string; notifSentToast: string;
-}> = {
-  EN: { title: "Settings", sound: "Sound FX", soundSub: "Clicks, coins, machine hum",
-        music: "Music", musicSub: "Ambient chiptune score",
-        lang: "Language", done: "Done", on: "ON", off: "OFF",
-        restart: "Raise a new seed", restartConfirm: "Wipe save and start over?",
-        restartYes: "Yes, restart", restartNo: "Cancel",
-        notifSection: "Notifications", notifEnable: "Enable push reminders",
-        notifTest: "Send test push (5s)",
-        notifGranted: "Enabled", notifDenied: "Blocked — open iOS Settings",
-        notifAsk: "Not yet enabled", notifSentToast: "Scheduled — fires in 5s" },
-  ES: { title: "Ajustes", sound: "Efectos", soundSub: "Clics, monedas, zumbido",
-        music: "Música", musicSub: "Banda chiptune ambiental",
-        lang: "Idioma", done: "Hecho", on: "SÍ", off: "NO",
-        restart: "Nueva semilla", restartConfirm: "¿Borrar y empezar de nuevo?",
-        restartYes: "Sí, reiniciar", restartNo: "Cancelar",
-        notifSection: "Notificaciones", notifEnable: "Activar recordatorios",
-        notifTest: "Enviar push de prueba (5s)",
-        notifGranted: "Activadas", notifDenied: "Bloqueadas — abre Ajustes",
-        notifAsk: "No activadas", notifSentToast: "Programado — llega en 5s" },
-  FR: { title: "Réglages", sound: "Effets", soundSub: "Clics, pièces, bourdon",
-        music: "Musique", musicSub: "Fond chiptune ambiant",
-        lang: "Langue", done: "Terminé", on: "OUI", off: "NON",
-        restart: "Nouvelle graine", restartConfirm: "Effacer et recommencer ?",
-        restartYes: "Oui, recommencer", restartNo: "Annuler",
-        notifSection: "Notifications", notifEnable: "Activer les rappels",
-        notifTest: "Envoyer un test (5s)",
-        notifGranted: "Activées", notifDenied: "Bloquées — ouvre Réglages",
-        notifAsk: "Pas encore activées", notifSentToast: "Programmé — dans 5s" },
-  DE: { title: "Einstellungen", sound: "Soundeffekte", soundSub: "Klicks, Münzen, Summen",
-        music: "Musik", musicSub: "Ambient-Chiptune",
-        lang: "Sprache", done: "Fertig", on: "AN", off: "AUS",
-        restart: "Neue Seed-Runde", restartConfirm: "Spielstand löschen?",
-        restartYes: "Ja, neustarten", restartNo: "Abbrechen",
-        notifSection: "Benachrichtigungen", notifEnable: "Erinnerungen aktivieren",
-        notifTest: "Test-Push senden (5s)",
-        notifGranted: "Aktiviert", notifDenied: "Blockiert — iOS-Einstellungen",
-        notifAsk: "Noch nicht aktiviert", notifSentToast: "Geplant — in 5s" },
-  JA: { title: "設定", sound: "効果音", soundSub: "クリック・コイン・駆動音",
-        music: "音楽", musicSub: "アンビエント・チップチューン",
-        lang: "言語", done: "完了", on: "ON", off: "OFF",
-        restart: "シードからやり直し", restartConfirm: "セーブを消去して再開？",
-        restartYes: "はい、再起動", restartNo: "キャンセル",
-        notifSection: "通知", notifEnable: "通知を有効にする",
-        notifTest: "テスト通知 (5秒)",
-        notifGranted: "有効", notifDenied: "ブロック中 — 設定を開く",
-        notifAsk: "未設定", notifSentToast: "5秒後に届きます" },
-  ZH: { title: "设置", sound: "音效", soundSub: "点击、金币、机器嗡鸣",
-        music: "音乐", musicSub: "环境芯片音乐",
-        lang: "语言", done: "完成", on: "开", off: "关",
-        restart: "重新开始", restartConfirm: "清除存档并重新开始?",
-        restartYes: "是的，重新开始", restartNo: "取消",
-        notifSection: "通知", notifEnable: "启用提醒",
-        notifTest: "发送测试通知 (5秒)",
-        notifGranted: "已启用", notifDenied: "已阻止 — 打开 iOS 设置",
-        notifAsk: "未启用", notifSentToast: "5秒后送达" },
-};
-
 const LANGS = [
   { code: "EN", name: "English" },
-  { code: "ES", name: "Español" },
-  { code: "FR", name: "Français" },
   { code: "DE", name: "Deutsch" },
-  { code: "JA", name: "日本語" },
-  { code: "ZH", name: "中文" },
 ];
 
 export function SettingsModal({ visible, onClose }: Props) {
@@ -119,13 +52,13 @@ export function SettingsModal({ visible, onClose }: Props) {
   // toggled it in iOS Settings.
   const recordPushPrompt = useGame((s) => s.recordPushPromptResult);
   const [notifStatus, setNotifStatus] = React.useState<NotifPermStatus>("undetermined");
-  const [testToast, setTestToast] = React.useState<string | null>(null);
   React.useEffect(() => {
     if (!visible) return;
     getNotificationPermissionStatus().then(setNotifStatus);
   }, [visible]);
 
-  const L = I18N[language] ?? I18N.EN;
+  const t = useStrings();
+  const L = { ...t.settings, on: t.common.on, off: t.common.off, done: t.common.done };
   // Sound is "on" when NOT muted — invert sfxMuted for the toggle.
   const soundOn = !sfxMuted;
 
@@ -282,39 +215,6 @@ export function SettingsModal({ visible, onClose }: Props) {
               >
                 <Text style={styles.notifBtnText}>{L.notifEnable.toUpperCase()}</Text>
               </Pressable>
-            )}
-            {notifStatus === "granted" && (
-              <Pressable
-                style={[styles.notifBtn, { backgroundColor: colors.cream_2 }]}
-                onPress={async () => {
-                  const res = await sendTestNotification();
-                  if (res.ok) {
-                    Alert.alert(
-                      "Test scheduled",
-                      `Notification fires in 5 seconds.\n\nIf you don't see it:\n• Check iOS Focus / Do Not Disturb is off\n• Make sure Settings → BurnRate → Notifications → "Banners" is enabled\n• The phone may show it in the Notification Center only (swipe down from top)\n\nScheduled id: ${res.scheduledId.slice(0, 8)}…`,
-                      [{ text: "OK" }],
-                    );
-                  } else if (res.reason === "denied") {
-                    Alert.alert(
-                      "Permission denied",
-                      `iOS is blocking notifications.\n\nFix: open iOS Settings → BurnRate → Notifications → toggle Allow Notifications.\n\nDetail: ${res.detail}`,
-                      [
-                        { text: "Cancel", style: "cancel" },
-                        { text: "Open iOS Settings", onPress: () => Linking.openSettings() },
-                      ],
-                    );
-                  } else if (res.reason === "no_native") {
-                    Alert.alert("Native module missing", res.detail);
-                  } else {
-                    Alert.alert("Scheduling failed", res.detail);
-                  }
-                }}
-              >
-                <Text style={[styles.notifBtnText, { color: colors.ink }]}>{L.notifTest.toUpperCase()}</Text>
-              </Pressable>
-            )}
-            {testToast && (
-              <Text style={styles.notifToast}>{testToast}</Text>
             )}
           </View>
 
@@ -512,7 +412,10 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   langBtn: {
-    width: "31.3%", // 3 columns w/ 6px gap
+    // EN + DE only — 2 columns. flex:1 in the row's flexWrap container
+    // would not split cleanly, so go with a percent that leaves room for
+    // the 6px gap. 48.5% × 2 + 6px gap ≈ 100% of available width.
+    width: "48.5%",
     height: 50, // fixed, not minHeight — language switches must not resize the grid
     paddingHorizontal: 4,
     paddingVertical: 8,
@@ -596,17 +499,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.ink,
     letterSpacing: 1.5,
-  },
-  notifToast: {
-    marginTop: 6,
-    paddingVertical: 6,
-    textAlign: "center",
-    fontFamily: fonts.body,
-    fontSize: 11,
-    color: colors.sage_2,
-    backgroundColor: colors.cream_2,
-    borderLeftWidth: 2,
-    borderLeftColor: colors.sage_2,
   },
   restartSection: {
     paddingHorizontal: 12,

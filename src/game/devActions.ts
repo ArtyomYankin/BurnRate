@@ -1,7 +1,9 @@
 // Dev-only mutations on game state. Imported ONLY from DevPanel, which is
-// itself gated behind __DEV__ in App.tsx — so release bundles tree-shake this
-// file away. Every action prefix is `__dev` so a grep before ship can confirm
-// nothing in the player path calls into it.
+// available in ALL builds via a secret 7-tap gesture on the BURN·RATE
+// wordmark (HomeScreen + TopHUD onSecretActivate). Every action prefix is
+// `__dev` so a grep before ship can confirm nothing in the player path
+// calls into it. The gesture lets us debug release builds without baking
+// debug UI into the visible player path.
 //
 // These bypass GDD rules on purpose: time-skip ignores the offline cap, jump-
 // to-round skips threshold checks, "unlock all" doesn't pay Equity. The point

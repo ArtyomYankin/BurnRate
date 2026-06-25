@@ -3,6 +3,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-nati
 import { ActiveEffectSerialized } from "../core/types";
 import { selectActiveEffects, useGame } from "../game/store";
 import { colors, fonts, PIXEL } from "./theme";
+import { useStrings } from "../core/i18n";
 
 interface Props {
   visible: boolean;
@@ -19,6 +20,7 @@ interface Props {
  * only mounted while visible.
  */
 export function BuffsModal({ visible, onClose }: Props) {
+  const t = useStrings();
   const effects = useGame(selectActiveEffects);
   const [now, setNow] = useState(() => Date.now());
 
@@ -36,16 +38,13 @@ export function BuffsModal({ visible, onClose }: Props) {
         <View style={styles.frame}>
           {/* Header ribbon */}
           <View style={styles.ribbon}>
-            <Text style={styles.ribbonText}>▲ ACTIVE BUFFS ▲</Text>
+            <Text style={styles.ribbonText}>{t.buffs.ribbonTitle}</Text>
           </View>
 
           {effects.length === 0 ? (
             <View style={styles.empty}>
-              <Text style={styles.emptyTitle}>NOTHING ACTIVE</Text>
-              <Text style={styles.emptyBody}>
-                Roll a Training Run for a Breakthrough, or pick a reply on a Slack DM —
-                each adds a temporary multiplier here.
-              </Text>
+              <Text style={styles.emptyTitle}>{t.buffs.nothingActive}</Text>
+              <Text style={styles.emptyBody}>{t.buffs.emptyBody}</Text>
             </View>
           ) : (
             <ScrollView style={styles.list} contentContainerStyle={styles.listPad}>
@@ -56,7 +55,7 @@ export function BuffsModal({ visible, onClose }: Props) {
           )}
 
           <Pressable style={styles.closeBtn} onPress={onClose}>
-            <Text style={styles.closeText}>CLOSE</Text>
+            <Text style={styles.closeText}>{t.buffs.closeBtn}</Text>
           </Pressable>
         </View>
       </View>
@@ -65,6 +64,7 @@ export function BuffsModal({ visible, onClose }: Props) {
 }
 
 function BuffRow({ eff, now }: { eff: ActiveEffectSerialized; now: number }) {
+  const t = useStrings();
   const { label: effLabel, tint } = formatEffect(eff.effect);
   const remaining = formatRemaining(eff.expiresAt - now);
   return (
@@ -76,7 +76,7 @@ function BuffRow({ eff, now }: { eff: ActiveEffectSerialized; now: number }) {
         </Text>
         <View style={styles.rowMetaRow}>
           <Text style={[styles.rowSource, { color: tint }]}>
-            {SOURCE_LABEL[eff.source] ?? eff.source.toUpperCase()}
+            {t.buffs.sources[eff.source] ?? eff.source.toUpperCase()}
           </Text>
           <Text style={styles.rowDot}>·</Text>
           <Text style={[styles.rowEffect, { color: tint }]}>{effLabel}</Text>
@@ -231,8 +231,8 @@ const styles = StyleSheet.create({
     color: colors.muted,
   },
   rowEffect: {
-    fontFamily: fonts.bodyBold,
-    fontSize: 11,
+    fontFamily: fonts.mono,
+    fontSize: 13,
   },
   rowTime: {
     fontFamily: fonts.mono,

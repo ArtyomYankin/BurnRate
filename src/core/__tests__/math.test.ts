@@ -65,6 +65,8 @@ const freshPersistent = (debt = 0): PersistentState => ({
   resolvedVignettes: {},
   unlockedAchievements: [],
   endgameSeenAt: 0,
+  freeTrainingRunUsed: false,
+  panelHintsSeen: [],
 });
 
 describe("producer cost math", () => {

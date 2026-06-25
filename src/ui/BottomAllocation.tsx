@@ -1,12 +1,17 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Allocation } from "../core/types";
-import { Pressy } from "./Pressy";
 import { colors, fonts, PIXEL } from "./theme";
+import { TutorialTargetKey } from "./tutorialTargets";
+import { useTutorialTargetMeasure } from "./TutorialSpotlight";
+import { useStrings } from "../core/i18n";
 
 interface Props {
   allocation: Allocation;
   onEdit(): void;
+  /** Registers this bar's window-space rect into the tutorial spotlight
+   *  registry for the forced walkthrough. */
+  tutorialTargetKey: TutorialTargetKey;
 }
 
 /**
@@ -15,7 +20,9 @@ interface Props {
  * width is proportional to its % of incoming tokens. "Safety low" turns the
  * SAFE segment red and shows a debt-accruing warning underneath.
  */
-export function BottomAllocation({ allocation, onEdit }: Props) {
+export function BottomAllocation({ allocation, onEdit, tutorialTargetKey }: Props) {
+  const targetHook = useTutorialTargetMeasure(tutorialTargetKey);
+  const t = useStrings();
   const pct = {
     rd:        Math.round(allocation.rd * 100),
     product:   Math.round(allocation.product * 100),
@@ -24,12 +31,12 @@ export function BottomAllocation({ allocation, onEdit }: Props) {
   };
   const warnSafety = pct.safety < 10;
   const segments = [
-    { key: "rd",        label: "R&D",  pct: pct.rd,        color: colors.sage },
-    { key: "product",   label: "PROD", pct: pct.product,   color: colors.terracotta },
-    { key: "marketing", label: "MKT",  pct: pct.marketing, color: colors.gold },
+    { key: "rd",        label: t.allocate.rd,        pct: pct.rd,        color: colors.sage },
+    { key: "product",   label: t.allocate.product,   pct: pct.product,   color: colors.terracotta },
+    { key: "marketing", label: t.allocate.marketing, pct: pct.marketing, color: colors.gold },
     {
       key: "safety",
-      label: "SAFE",
+      label: t.allocate.safety,
       pct: pct.safety,
       color: warnSafety ? colors.tensionRed : colors.tensionRed,
     },
@@ -37,12 +44,19 @@ export function BottomAllocation({ allocation, onEdit }: Props) {
 
   return (
     <View style={styles.wrap} pointerEvents="box-none">
-      <View style={styles.box}>
+      {/* The whole strip is the tap target — earlier we only made the "EDIT
+          →" link pressable, but players were tapping the percentage segments
+          expecting that to open the editor. Now the entire box is a
+          Pressable; the EDIT text is kept as a visual cue only. */}
+      <Pressable
+        ref={targetHook.ref}
+        onLayout={targetHook.onLayout}
+        onPress={onEdit}
+        style={styles.box}
+      >
         <View style={styles.header}>
-          <Text style={styles.title}>TOKEN ALLOCATION</Text>
-          <Pressy onPress={onEdit}>
-            <Text style={styles.editLink}>EDIT →</Text>
-          </Pressy>
+          <Text style={styles.title}>{t.allocate.barTitle}</Text>
+          <Text style={styles.editLink}>{t.allocate.edit} →</Text>
         </View>
 
         <View style={styles.bar}>
@@ -84,9 +98,9 @@ export function BottomAllocation({ allocation, onEdit }: Props) {
         </View>
 
         {warnSafety && (
-          <Text style={styles.warn}>⚠ SAFETY LOW · ALIGNMENT DEBT ACCRUING</Text>
+          <Text style={styles.warn}>{t.allocate.safetyLowBanner}</Text>
         )}
-      </View>
+      </Pressable>
     </View>
   );
 }
@@ -153,10 +167,10 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.25)",
   },
   segmentPct: {
-    fontFamily: fonts.bodyBold,
-    fontSize: 11,
+    fontFamily: fonts.mono,
+    fontSize: 13,
     color: colors.cream_hi,
-    letterSpacing: 0.5,
+    letterSpacing: 0,
   },
   labelRow: {
     flexDirection: "row",

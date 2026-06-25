@@ -10,6 +10,8 @@ import {
 import { getRound, LAST_ROUND_IDX } from "../core/rounds";
 import { useGame } from "../game/store";
 import * as audio from "../audio";
+import { transitionCueForRound } from "../audio";
+import { useStrings } from "../core/i18n";
 import { formatNumber } from "./formatNumber";
 import { ParticleBurst } from "./ParticleBurst";
 import { colors, fonts, PIXEL } from "./theme";
@@ -30,6 +32,7 @@ interface Props {
  * stays the same as the previous version; only the chrome was redesigned.
  */
 export function PrestigeModal({ visible, onClose }: Props) {
+  const t = useStrings();
   const run = useGame((s) => s.run);
   const prestige = useGame((s) => s.prestige);
 
@@ -65,17 +68,24 @@ export function PrestigeModal({ visible, onClose }: Props) {
   }, [visible]);
 
   const confirm = () => {
+    const closingRound = run.fundingRoundIdx;
     prestige();
     audio.play("fund_round_close");
+    // Era-appropriate transition stinger fires alongside the close beat —
+    // early/mid/late give the moment thematic weight as the player moves
+    // through the round buckets.
+    const stinger = transitionCueForRound(closingRound);
+    if (stinger) setTimeout(() => audio.play(stinger), 400);
     setBurst((n) => n + 1);
     // Let the confetti play before the modal fades. 720ms matches ParticleBurst's
     // default duration.
     setTimeout(onClose, 720);
   };
 
+  const localRoundName = t.roundNames[round.id as keyof typeof t.roundNames] ?? round.name;
   const closeCtaLabel = atFinalRound
-    ? "Loop AGI Singularity →"
-    : `Close ${round.name} →`;
+    ? `${t.prestige.loopAgi} →`
+    : `${t.prestige.closeVerb} ${localRoundName} →`;
 
   // Finale-first-close: stripped-down modal — ribbon + single OK. The full
   // payout / breakdown copy lives inside the EndgameModal that takes over
@@ -88,21 +98,21 @@ export function PrestigeModal({ visible, onClose }: Props) {
         <View style={styles.backdrop}>
           <View style={styles.frame}>
             <View style={styles.ribbon}>
-              <Text style={styles.ribbonText}>▲ AGI SINGULARITY CLOSED ▲</Text>
+              <Text style={styles.ribbonText}>{t.prestige.ribbonAgiClosed}</Text>
             </View>
             <View style={styles.section}>
-              <Text style={styles.eyebrow}>CLOSING ROUND {round.idx + 1}</Text>
-              <Text style={styles.roundName}>{round.name.toUpperCase()}</Text>
+              <Text style={styles.eyebrow}>{t.prestige.closingRound} {round.idx + 1}</Text>
+              <Text style={styles.roundName}>{localRoundName.toUpperCase()}</Text>
               <Text style={styles.recapMono}>
-                {formatNumber(tokens)} tokens · {overshootPct}% threshold
+                {formatNumber(tokens)} {t.prestige.tokens} · {overshootPct}{t.prestige.overshootSuffix}
               </Text>
               <Text style={[styles.eyebrow, { marginTop: 12, textAlign: "center" }]}>
-                INCOMING TRANSMISSION…
+                {t.prestige.incomingTransmission}
               </Text>
             </View>
             <View style={[styles.ctaRow, { justifyContent: "center" }]}>
               <Pressable onPress={confirm} style={[styles.btnPrimary, { flex: 0, paddingHorizontal: 48 }]}>
-                <Text style={styles.btnPrimaryText}>OK</Text>
+                <Text style={styles.btnPrimaryText}>{t.prestige.okBtn}</Text>
                 <ParticleBurst
                   trigger={burst}
                   count={28}
@@ -129,19 +139,19 @@ export function PrestigeModal({ visible, onClose }: Props) {
         <View style={styles.frame}>
           {/* Gold ribbon banner */}
           <View style={styles.ribbon}>
-            <Text style={styles.ribbonText}>▲ FUNDING ROUND COMPLETE ▲</Text>
+            <Text style={styles.ribbonText}>{t.prestige.ribbonFundingComplete}</Text>
           </View>
 
           {/* Current round recap */}
           <View style={styles.section}>
-            <Text style={styles.eyebrow}>CLOSING ROUND {round.idx + 1}</Text>
-            <Text style={styles.roundName}>{round.name.toUpperCase()}</Text>
+            <Text style={styles.eyebrow}>{t.prestige.closingRound} {round.idx + 1}</Text>
+            <Text style={styles.roundName}>{localRoundName.toUpperCase()}</Text>
             <Text style={styles.recapMono}>
-              {formatNumber(tokens)} tokens · {overshootPct}% threshold
+              {formatNumber(tokens)} {t.prestige.tokens} · {overshootPct}{t.prestige.overshootSuffix}
             </Text>
             {hypeDiscount > 0.005 && (
               <Text style={styles.hypeLine}>
-                HYPE DISCOUNT · -{Math.round(hypeDiscount * 100)}% threshold
+                {t.prestige.hypeDiscountLine} · -{Math.round(hypeDiscount * 100)}{t.prestige.overshootSuffix}
               </Text>
             )}
           </View>
@@ -149,7 +159,7 @@ export function PrestigeModal({ visible, onClose }: Props) {
           {/* Equity payout block — ink bg, gold number */}
           <View style={styles.sectionTight}>
             <View style={styles.equityBlock}>
-              <Text style={styles.equityLabel}>EQUITY EARNED</Text>
+              <Text style={styles.equityLabel}>{t.prestige.equityLabel}</Text>
               <Text style={styles.equityValue}>+ {formatNumber(award)}</Text>
               <Text style={styles.equityFormula}>
                 floor(150 × √(tokens / threshold) × {round.equityMult.toFixed(2)})
@@ -159,29 +169,29 @@ export function PrestigeModal({ visible, onClose }: Props) {
 
           {/* RESET / PERSISTS breakdown */}
           <View style={styles.section}>
-            <Text style={styles.subHeader}>WHAT HAPPENS NEXT</Text>
-            <ResetRow label="Tokens"          state="reset"   accent={colors.muted} />
-            <ResetRow label="Capital"         state="reset"   accent={colors.muted} />
-            <ResetRow label="Producers"       state="reset"   accent={colors.muted} />
-            <ResetRow label="Equity"          state="persist" accent={colors.gold} />
-            <ResetRow label="Research nodes"  state="persist" accent={colors.sage_2} />
-            <ResetRow label="Alignment debt"  state="persist" accent={colors.tensionRed} />
+            <Text style={styles.subHeader}>{t.prestige.whatHappens}</Text>
+            <ResetRow label={t.prestige.rowTokens}    state="reset"   accent={colors.muted} />
+            <ResetRow label={t.prestige.rowCapital}   state="reset"   accent={colors.muted} />
+            <ResetRow label={t.prestige.rowProducers} state="reset"   accent={colors.muted} />
+            <ResetRow label={t.prestige.rowEquity}    state="persist" accent={colors.gold} />
+            <ResetRow label={t.prestige.rowResearch}  state="persist" accent={colors.sage_2} />
+            <ResetRow label={t.prestige.rowDebt}      state="persist" accent={colors.tensionRed} />
           </View>
 
           {/* Next round preview — terracotta bg */}
           <View style={styles.sectionTight}>
             <View style={styles.nextBlock}>
-              <Text style={styles.nextLabel}>NEXT ROUND</Text>
+              <Text style={styles.nextLabel}>{t.prestige.nextRound}</Text>
               {atFinalRound ? (
                 <>
-                  <Text style={styles.nextName}>SINGULARITY LOOP</Text>
-                  <Text style={styles.nextMeta}>endgame · same threshold</Text>
+                  <Text style={styles.nextName}>{t.prestige.singularityLoop}</Text>
+                  <Text style={styles.nextMeta}>{t.prestige.singularitySub}</Text>
                 </>
               ) : (
                 <>
-                  <Text style={styles.nextName}>{nextRound.name.toUpperCase()}</Text>
+                  <Text style={styles.nextName}>{(t.roundNames[nextRound.id as keyof typeof t.roundNames] ?? nextRound.name).toUpperCase()}</Text>
                   <Text style={styles.nextMeta}>
-                    1e{nextRound.tokenThresholdLog10} tokens · ×{nextRound.equityMult.toFixed(2)} Equity
+                    1e{nextRound.tokenThresholdLog10} {t.prestige.nextThresholdSuffix} · ×{nextRound.equityMult.toFixed(2)} {t.prestige.nextEquityMult}
                   </Text>
                 </>
               )}
@@ -191,7 +201,7 @@ export function PrestigeModal({ visible, onClose }: Props) {
           {/* CTAs */}
           <View style={styles.ctaRow}>
             <Pressable onPress={onClose} style={styles.btnSecondary}>
-              <Text style={styles.btnSecondaryText}>Not yet</Text>
+              <Text style={styles.btnSecondaryText}>{t.prestige.notYet}</Text>
             </Pressable>
             <Pressable onPress={confirm} style={styles.btnPrimary}>
               <Text style={styles.btnPrimaryText}>{closeCtaLabel}</Text>
@@ -219,6 +229,7 @@ function ResetRow({
   state: "reset" | "persist";
   accent: string;
 }) {
+  const t = useStrings();
   const isReset = state === "reset";
   return (
     <View style={styles.resetRow}>
@@ -234,7 +245,7 @@ function ResetRow({
         ]}
       >
         <Text style={[styles.resetBadgeText, { color: isReset ? colors.muted : accent }]}>
-          {isReset ? "RESET" : "PERSISTS"}
+          {isReset ? t.prestige.resetTag : t.prestige.persistTag}
         </Text>
       </View>
     </View>
@@ -325,12 +336,12 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
   equityValue: {
-    fontFamily: fonts.display,
-    fontSize: 30,
+    fontFamily: fonts.mono,
+    fontSize: 36,
     color: colors.gold_hi,
-    lineHeight: 32,
+    lineHeight: 36,
     marginTop: 4,
-    letterSpacing: 1,
+    letterSpacing: 0,
   },
   equityFormula: {
     fontFamily: fonts.displayRegular,

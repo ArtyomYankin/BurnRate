@@ -119,6 +119,15 @@ export interface PersistentState {
   // the modal has never been shown; any positive value suppresses future
   // automatic re-opens (player can still re-trigger from the dev panel).
   endgameSeenAt: number;
+  // Has the player consumed the one-shot free Training Run that's given as
+  // a teaching aid (guaranteed Solid tier, no token cost)? Persists across
+  // prestige so the freebie is per-save, not per-run.
+  freeTrainingRunUsed: boolean;
+  // Set of per-panel hint banners the player has dismissed. Each panel
+  // (producers, allocate, research, vignettes, achievements) shows a
+  // compact one-shot hint on first visit; dismissing it pushes the key
+  // here so it never re-appears. Persists across prestige.
+  panelHintsSeen: string[];
 }
 
 export interface AccountState {
@@ -137,6 +146,10 @@ export interface AccountState {
    *  JA / ZH). Only "EN" is actually wired — others are GDD §12 i18n stubs
    *  so the switcher feels real to the player. */
   language: string;
+  /** Persisted audio preferences. Were transient zustand state; moving here
+   *  so the Settings toggles survive app launches. */
+  sfxMuted: boolean;
+  musicEnabled: boolean;
 }
 
 // v5 → v6: PersistentState gains unlockedVignettes + unreadVignettes for the
@@ -162,7 +175,23 @@ export interface AccountState {
 // so the migration remaps them through OLD_TO_NEW_ROUND and clamps.
 // v12 → v13: PersistentState gains `endgameSeenAt` so the AGI Singularity
 // finale modal fires exactly once per save. Backfill 0 for existing players.
-export const SCHEMA_VERSION = 13 as const;
+// v13 → v14: PersistentState gains `freeTrainingRunUsed` — the one-shot
+// freebie that teaches the Training Run gacha mechanic. Backfill false so
+// existing players also get the teaching freebie (the bonus is small).
+// v14 → v15: AccountState gains `sfxMuted` + `musicEnabled` so audio prefs
+// persist across launches. Defaults: SFX on, music off (same as the
+// transient defaults that the AudioStore had before).
+// v15 → v16: onboardingStep semantics shifted again — a new "Research
+// tutorial" was inserted at step 8 (between Ready and done). Old saves at
+// step 8 (= done) get bumped to 9 (= done in the new layout) so they don't
+// see a stale tutorial chip.
+// v16 → v17: PersistentState gains `panelHintsSeen` — set of panel keys
+// the player has dismissed the compact-hint banner on. Backfill empty
+// array so veterans see the hints once and they vanish after dismissal.
+// v17 → v18: onboardingStep shifts AGAIN. Three new forced-walkthrough
+// chips were inserted: "Open ALLOCATE" (step 5), "Open INBOX" (step 10),
+// "Open ACHIEVEMENTS" (step 11). Cumulative shift in save.ts.
+export const SCHEMA_VERSION = 18 as const;
 
 export interface SaveBlob {
   schemaVersion: typeof SCHEMA_VERSION;

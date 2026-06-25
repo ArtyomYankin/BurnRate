@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -6,9 +6,10 @@ import {
   Text,
   View,
 } from "react-native";
-import { DEFAULT_ALLOCATION } from "../core/math";
 import { Allocation } from "../core/types";
 import { selectAllocation, useGame } from "../game/store";
+import { PanelHelpModal, PanelHint, PanelInfoButton } from "./PanelHelp";
+import { useStrings } from "../core/i18n";
 import { colors, fonts, PIXEL } from "./theme";
 
 interface Props {
@@ -21,69 +22,65 @@ const STEP_PCT = 5;
 
 type RowMeta = {
   key: keyof Allocation;
-  label: string;
-  sub: string;
   color: string;
 };
 
+// Row colors only — label/sub localized via t.allocate.departments[key].
 const ROWS: ReadonlyArray<RowMeta> = [
-  { key: "rd",        label: "R&D",       sub: "→ Research Points",  color: colors.sage },
-  { key: "product",   label: "Product",   sub: "→ Capital, Users",   color: colors.terracotta },
-  { key: "marketing", label: "Marketing", sub: "→ Hype",             color: colors.gold },
-  { key: "safety",    label: "Safety",    sub: "→ Pay Down Debt",    color: colors.tensionRed },
+  { key: "rd",        color: colors.sage       },
+  { key: "product",   color: colors.terracotta },
+  { key: "marketing", color: colors.gold       },
+  { key: "safety",    color: colors.tensionRed },
 ];
 
 export function AllocateScreen({ onBack }: Props) {
+  const [infoOpen, setInfoOpen] = useState(false);
+  const t = useStrings();
   const stored = useGame(selectAllocation);
   const setAllocation = useGame((s) => s.setAllocation);
 
-  // Local draft as integer percentages 0..100. Easier to reason about for
-  // the proportional rebalance than fractional 0..1. Commit on Save.
-  const [draftPct, setDraftPct] = useState<Record<keyof Allocation, number>>({
+  // Snapshot of the allocation at mount — frozen so RESET returns the
+  // player to what they saw when they OPENED the screen, not to some global
+  // default. useMemo with no deps captures once; the `stored` reference
+  // updates if another screen modifies allocation, but we deliberately keep
+  // this stale to preserve the snapshot semantics.
+  const initialPct = useMemo<Record<keyof Allocation, number>>(() => ({
     rd:        Math.round(stored.rd * 100),
     product:   Math.round(stored.product * 100),
     marketing: Math.round(stored.marketing * 100),
     safety:    Math.round(stored.safety * 100),
-  });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
+
+  // Local draft as integer percentages 0..100. Player edits freely; the
+  // free pool (100 - sum) accumulates as they decrease slots, and they
+  // spend it back by tapping +. SAVE is gated on pool === 0.
+  const [draftPct, setDraftPct] = useState<Record<keyof Allocation, number>>(initialPct);
 
   const total =
     draftPct.rd + draftPct.product + draftPct.marketing + draftPct.safety;
-  const balanced = total === 100;
+  const pool = 100 - total;          // free points available to assign
+  const balanced = pool === 0;
   const safetyLow = draftPct.safety < 10;
 
-  // Bump one key by `delta`%, then proportionally take/give the inverse from
-  // the other three so the sum stays at 100. Matches design's algorithm.
+  // Plus/minus no longer auto-redistributes — minus releases STEP_PCT into
+  // the pool, plus consumes STEP_PCT from the pool. Reject the bump if the
+  // operation would over/underflow the [0..100] range OR drive pool < 0
+  // (i.e. plus when there's nothing to spend).
   function bump(key: keyof Allocation, delta: number) {
     setDraftPct((prev) => {
-      const next = Math.max(0, Math.min(100, prev[key] + delta));
-      const diff = next - prev[key];
-      const others = (Object.keys(prev) as (keyof Allocation)[]).filter((k) => k !== key);
-      const otherSum = others.reduce((s, k) => s + prev[k], 0);
-      const result = { ...prev, [key]: next };
-      if (otherSum > 0) {
-        let leftover = -diff;
-        others.forEach((k, i) => {
-          if (i === others.length - 1) {
-            // Soak any rounding error into the last sibling.
-            result[k] = Math.max(0, prev[k] + leftover);
-          } else {
-            const share = Math.round(-diff * (prev[k] / otherSum));
-            result[k] = Math.max(0, prev[k] + share);
-            leftover -= share;
-          }
-        });
-      }
-      return result;
+      const next = prev[key] + delta;
+      if (next < 0 || next > 100) return prev;
+      // delta > 0 (plus) needs pool >= delta. delta < 0 (minus) always frees
+      // points, but we still cap at 0 above.
+      const prevPool = 100 - (prev.rd + prev.product + prev.marketing + prev.safety);
+      if (delta > 0 && prevPool < delta) return prev;
+      return { ...prev, [key]: next };
     });
   }
 
   const reset = () => {
-    setDraftPct({
-      rd:        Math.round(DEFAULT_ALLOCATION.rd * 100),
-      product:   Math.round(DEFAULT_ALLOCATION.product * 100),
-      marketing: Math.round(DEFAULT_ALLOCATION.marketing * 100),
-      safety:    Math.round(DEFAULT_ALLOCATION.safety * 100),
-    });
+    setDraftPct(initialPct);
   };
 
   const save = () => {
@@ -99,7 +96,21 @@ export function AllocateScreen({ onBack }: Props) {
 
   return (
     <View style={styles.shell}>
-      <ScreenHeader title="Allocate" sub="Split each token across departments" onBack={onBack} />
+      <ScreenHeader
+        title={t.allocate.title}
+        sub={t.allocate.sub}
+        onBack={onBack}
+        right={<PanelInfoButton onPress={() => setInfoOpen(true)} />}
+      />
+
+      <PanelHint panelKey="allocate" text={t.allocate.hint} />
+
+      <PanelHelpModal
+        visible={infoOpen}
+        title={t.allocate.title}
+        sections={t.allocate.help}
+        onClose={() => setInfoOpen(false)}
+      />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Stacked-bar preview — visual mirror of the bottom-of-Home alloc strip */}
@@ -142,16 +153,22 @@ export function AllocateScreen({ onBack }: Props) {
                   <View style={[styles.swatch, { backgroundColor: warn ? colors.tensionRed : row.color }]} />
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text style={[styles.rowLabel, { color: warn ? colors.tensionRed : row.color }]}>
-                      {row.label}
+                      {t.allocate.departments[row.key].label}
                     </Text>
-                    <Text style={styles.rowSub} numberOfLines={1}>{row.sub}</Text>
+                    <Text style={styles.rowSub} numberOfLines={1}>
+                      {t.allocate.departments[row.key].sub}
+                    </Text>
                   </View>
                 </View>
 
-                {/* Minus stepper */}
+                {/* Minus stepper — disabled when slot is at zero. */}
                 <Pressable
                   onPress={() => bump(row.key, -STEP_PCT)}
-                  style={[styles.stepperBtn, { backgroundColor: colors.cream_2 }]}
+                  disabled={v < STEP_PCT}
+                  style={[
+                    styles.stepperBtn,
+                    { backgroundColor: v < STEP_PCT ? colors.disabled : colors.cream_2 },
+                  ]}
                   hitSlop={6}
                 >
                   <Text style={styles.stepperBtnText}>−</Text>
@@ -165,10 +182,15 @@ export function AllocateScreen({ onBack }: Props) {
                   </Text>
                 </View>
 
-                {/* Plus stepper — colored to match the dept */}
+                {/* Plus stepper — colored to match the dept; greyed out
+                    when there's nothing left in the pool to spend. */}
                 <Pressable
                   onPress={() => bump(row.key, +STEP_PCT)}
-                  style={[styles.stepperBtn, { backgroundColor: row.color }]}
+                  disabled={pool < STEP_PCT}
+                  style={[
+                    styles.stepperBtn,
+                    { backgroundColor: pool < STEP_PCT ? colors.disabled : row.color },
+                  ]}
                   hitSlop={6}
                 >
                   <Text style={[styles.stepperBtnText, { color: colors.cream_hi }]}>+</Text>
@@ -178,22 +200,30 @@ export function AllocateScreen({ onBack }: Props) {
           })}
         </View>
 
-        {/* Status line: total + warn/ok */}
+        {/* Status line: free pool + balance hint. Pool drives both the "to
+            assign" indicator AND whether SAVE is enabled. */}
         <View style={styles.statusRow}>
-          <Text style={styles.statusTotal}>TOTAL · {total}%</Text>
-          {!balanced && (
-            <Text style={[styles.statusWarn, { color: colors.tensionRed }]}>
-              ⚠ MUST SUM TO 100%
+          <Text
+            style={[
+              styles.statusTotal,
+              pool > 0 && { color: colors.gold_2, fontFamily: fonts.bodyBold, fontSize: 12, letterSpacing: 0.5 },
+            ]}
+          >
+            {pool > 0 ? `${t.allocate.pool}: ${pool}%` : `${t.allocate.barTitle} · ${total}%`}
+          </Text>
+          {pool > 0 && (
+            <Text style={[styles.statusWarn, { color: colors.gold_2 }]}>
+              {t.allocate.toAssign}
             </Text>
           )}
           {balanced && safetyLow && (
             <Text style={[styles.statusWarn, { color: colors.tensionRed }]}>
-              ⚠ ALIGNMENT DEBT WILL ACCRUE
+              {t.allocate.debtWarn}
             </Text>
           )}
           {balanced && !safetyLow && (
             <Text style={[styles.statusWarn, { color: colors.sage_2 }]}>
-              ✓ BALANCED
+              {t.allocate.balanced}
             </Text>
           )}
         </View>
@@ -202,7 +232,7 @@ export function AllocateScreen({ onBack }: Props) {
       {/* Sticky CTA row at bottom */}
       <View style={styles.ctaRow}>
         <Pressable onPress={reset} style={[styles.btn, { backgroundColor: colors.cream_2 }]}>
-          <Text style={[styles.btnText, { color: colors.ink }]}>RESET</Text>
+          <Text style={[styles.btnText, { color: colors.ink }]}>{t.common.reset.toUpperCase()}</Text>
         </Pressable>
         <Pressable
           onPress={save}
@@ -214,7 +244,7 @@ export function AllocateScreen({ onBack }: Props) {
           ]}
         >
           <Text style={styles.btnText}>
-            {balanced ? "SAVE ALLOCATION" : `OFF BY ${total - 100 > 0 ? "+" : ""}${total - 100}%`}
+            {balanced ? t.allocate.saveBalanced : `${t.allocate.assignSuffix} ${pool}%`}
           </Text>
         </Pressable>
       </View>
@@ -223,7 +253,14 @@ export function AllocateScreen({ onBack }: Props) {
 }
 
 // ─── ScreenHeader (same pattern as ProducersScreen) ──────────────────────
-function ScreenHeader({ title, sub, onBack }: { title: string; sub?: string; onBack(): void }) {
+function ScreenHeader({
+  title, sub, onBack, right,
+}: {
+  title: string;
+  sub?: string;
+  onBack(): void;
+  right?: React.ReactNode;
+}) {
   return (
     <View style={styles.header}>
       <Pressable onPress={onBack} hitSlop={12} style={styles.backBtn}>
@@ -236,6 +273,7 @@ function ScreenHeader({ title, sub, onBack }: { title: string; sub?: string; onB
         <Text style={styles.title}>{title}</Text>
         {sub && <Text style={styles.sub}>{sub}</Text>}
       </View>
+      {right}
     </View>
   );
 }
@@ -366,9 +404,9 @@ const styles = StyleSheet.create({
     minWidth: 50,
   },
   pct: {
-    fontFamily: fonts.bodyBold,
-    fontSize: 22,
-    lineHeight: 22,
+    fontFamily: fonts.mono,
+    fontSize: 26,
+    lineHeight: 26,
   },
   pctSign: {
     fontFamily: fonts.displayRegular,

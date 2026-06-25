@@ -46,7 +46,7 @@ describe("store.resolveVignette", () => {
     expect(s.run.activeEffects.length).toBe(0);
   });
 
-  it("debuff pick (welcome[2]) applies a negative mult for 60s", () => {
+  it("debuff pick (welcome[2]) applies a negative mult for 30 min", () => {
     const { resolveVignette } = useGame.getState();
     const ok = resolveVignette("welcome", 2);
     expect(ok).toBe(true);
@@ -54,8 +54,8 @@ describe("store.resolveVignette", () => {
     expect(s.run.activeEffects.length).toBe(1);
     const eff = s.run.activeEffects[0];
     expect(eff.effect).toEqual({ type: "hype_mult", value: 0.90 });
-    // 60s default duration for debuffs (soft sting, design pick).
-    expect(eff.expiresAt - eff.appliedAt).toBe(60_000);
+    // 30 min default for debuffs — long enough to actually feel.
+    expect(eff.expiresAt - eff.appliedAt).toBe(1_800_000);
   });
 
   it("is idempotent — re-resolving the same vignette returns false and adds no extra effect", () => {

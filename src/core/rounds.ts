@@ -28,17 +28,26 @@ import { FundingRoundDef } from "./types";
 // but 10^24 / 10^15 = 10^9 seconds = ~30 years to close one round. With
 // +3 the player's actual production growth (~1-2 OOM per new tier
 // purchased + prestige bonus) keeps pace with the threshold.
+// Round names follow the SCENE the player sees, not financial-VC jargon
+// (was Seed / Series A / B / IPO / Secondary / Acquisition / Sovereign /
+// Bailout / Civilizational / AGI). Scene-themed names give the player a
+// concrete sense of where they are in the world; financial labels were
+// thematically interesting but read as flavor noise after round 3 or so.
+// IDs stay stable so saves keep migrating cleanly.
+//
+// Localized names come from i18n.roundNames; the `name` field here is the
+// EN fallback used when no translation exists for an id.
 export const FUNDING_ROUNDS: FundingRoundDef[] = [
-  { id: "seed",               idx: 0, name: "Seed",                  tokenThresholdLog10: 3,   equityMult:  1.00, offlineCapHours:  3 },
-  { id: "series_a",           idx: 1, name: "Series A",              tokenThresholdLog10: 6,   equityMult:  1.50, offlineCapHours:  6.5 },
-  { id: "series_b",           idx: 2, name: "Series B",              tokenThresholdLog10: 10,  equityMult:  2.25, offlineCapHours:  9 },
-  { id: "ipo",                idx: 3, name: "IPO",                   tokenThresholdLog10: 14,  equityMult:  4.50, offlineCapHours: 13.5 },
-  { id: "secondary",          idx: 4, name: "Secondary",             tokenThresholdLog10: 17,  equityMult:  8.50, offlineCapHours: 18 },
-  { id: "acquisition",        idx: 5, name: "Acquisition",           tokenThresholdLog10: 20,  equityMult: 14.00, offlineCapHours: 24 },
-  { id: "sovereign_wealth",   idx: 6, name: "Sovereign Wealth Round",tokenThresholdLog10: 23,  equityMult: 22.00, offlineCapHours: 24 },
-  { id: "government_bailout", idx: 7, name: "Government Bailout",    tokenThresholdLog10: 26,  equityMult: 34.00, offlineCapHours: 24 },
-  { id: "civilizational",     idx: 8, name: "Civilizational Round",  tokenThresholdLog10: 29,  equityMult: 52.00, offlineCapHours: 24 },
-  { id: "agi_singularity",    idx: 9, name: "AGI Singularity Round", tokenThresholdLog10: 32,  equityMult: 80.00, offlineCapHours: 24 },
+  { id: "seed",               idx: 0, name: "Garage",          tokenThresholdLog10: 3,   equityMult:  1.00, offlineCapHours:  2 },
+  { id: "series_a",           idx: 1, name: "Bootstrap",       tokenThresholdLog10: 6,   equityMult:  1.50, offlineCapHours:  4 },
+  { id: "series_b",           idx: 2, name: "Coworking",       tokenThresholdLog10: 10,  equityMult:  2.25, offlineCapHours:  6 },
+  { id: "ipo",                idx: 3, name: "Startup Office",  tokenThresholdLog10: 14,  equityMult:  4.50, offlineCapHours:  8 },
+  { id: "secondary",          idx: 4, name: "Megacorp",        tokenThresholdLog10: 17,  equityMult:  8.50, offlineCapHours: 10 },
+  { id: "acquisition",        idx: 5, name: "Big Tech",        tokenThresholdLog10: 20,  equityMult: 14.00, offlineCapHours: 12 },
+  { id: "sovereign_wealth",   idx: 6, name: "Campus",          tokenThresholdLog10: 23,  equityMult: 22.00, offlineCapHours: 12 },
+  { id: "government_bailout", idx: 7, name: "Datacenter",      tokenThresholdLog10: 26,  equityMult: 34.00, offlineCapHours: 12 },
+  { id: "civilizational",     idx: 8, name: "Planetary",       tokenThresholdLog10: 29,  equityMult: 52.00, offlineCapHours: 12 },
+  { id: "agi_singularity",    idx: 9, name: "AGI Singularity", tokenThresholdLog10: 32,  equityMult: 80.00, offlineCapHours: 12 },
 ];
 
 // M+2 opens the full AGI arc: all 12 rounds through the AGI Singularity are

@@ -23,12 +23,14 @@ interface Props {
 }
 
 /**
- * Developer cheat panel. Hidden in release builds — App.tsx wraps this in a
- * `__DEV__` check so the file isn't even imported on production bundles.
+ * Developer cheat panel. Available in ALL builds (including release) via
+ * the secret 7-taps-in-3-seconds gesture on the BURN·RATE wordmark in
+ * TopHUD. In __DEV__ builds, also surfaced via a visible DEV chip in the
+ * top-right of HomeScreen.
  *
- * Opens via long-press on the BURN·RATE wordmark in HomeScreen. Inside:
- * grouped sections of one-tap actions, each calling an underlying
- * `__dev*` function from devActions.ts.
+ * Living in release lets us debug live test-flight builds (full restart,
+ * skip round, etc.) without baking debug UI into the player path. The
+ * gesture is invisible to a player who doesn't know about it.
  *
  * Visual language: pixel chrome to match the rest of the game, but with a
  * loud terracotta DEV stripe across the top so screenshots can't be

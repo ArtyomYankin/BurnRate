@@ -6,7 +6,9 @@ import {
   MUSIC_SOURCES,
   MusicTrack,
   musicTrackForRound,
+  transitionCueForRound,
 } from "./registry";
+export { transitionCueForRound };
 
 /**
  * Audio singleton. Per GDD §14:
@@ -27,30 +29,72 @@ import {
 interface AudioState {
   sfxMuted: boolean;
   musicEnabled: boolean;
+  /** Round the music engine should follow. Set by `setMusicForRound` so a
+   *  toggle-on can immediately resolve the correct scene track without the
+   *  caller threading the round through. */
+  currentRoundIdx: number;
   setSfxMuted(muted: boolean): void;
   toggleSfx(): void;
   setMusicEnabled(enabled: boolean): void;
   toggleMusic(): void;
 }
 
-export const useAudioStore = create<AudioState>((set) => ({
+export const useAudioStore = create<AudioState>((set, get) => ({
   // SFX defaults ON (it's the feedback layer). Music defaults OFF per the
-  // GDD line about playing in public spaces.
+  // GDD line about playing in public spaces. These are the IN-MEMORY mirror
+  // of `account.sfxMuted` / `account.musicEnabled` — sync on app boot in
+  // App.tsx and on every toggle below so a restart preserves the player's
+  // pick.
   sfxMuted: false,
   musicEnabled: false,
-  setSfxMuted: (muted) => set({ sfxMuted: muted }),
-  toggleSfx: () => set((s) => ({ sfxMuted: !s.sfxMuted })),
+  currentRoundIdx: 0,
+  setSfxMuted: (muted) => {
+    set({ sfxMuted: muted });
+    persistAudioSetting("sfxMuted", muted);
+  },
+  toggleSfx: () => {
+    const next = !get().sfxMuted;
+    set({ sfxMuted: next });
+    persistAudioSetting("sfxMuted", next);
+  },
   setMusicEnabled: (enabled) => {
     set({ musicEnabled: enabled });
-    if (!enabled) stopMusic();
+    persistAudioSetting("musicEnabled", enabled);
+    if (enabled) {
+      // Pre-warmed players exist after ensureInit, so kicking the scene
+      // track here starts playback within one frame instead of waiting for
+      // the next setMusicForRound call (which only fires on round change).
+      ensureInit();
+      startMusicNow();
+    } else {
+      stopMusic();
+    }
   },
-  toggleMusic: () =>
-    set((s) => {
-      const next = !s.musicEnabled;
-      if (!next) stopMusic();
-      return { musicEnabled: next };
-    }),
+  toggleMusic: () => {
+    const next = !get().musicEnabled;
+    set({ musicEnabled: next });
+    persistAudioSetting("musicEnabled", next);
+    if (next) {
+      ensureInit();
+      startMusicNow();
+    } else {
+      stopMusic();
+    }
+  },
 }));
+
+/** Persist an audio preference into the game-store AccountState. Lazy import
+ *  to avoid a circular module-load with src/game/store (which itself imports
+ *  this audio module transitively). */
+function persistAudioSetting(key: "sfxMuted" | "musicEnabled", value: boolean) {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { useGame } = require("../game/store");
+  const state = useGame.getState();
+  // Only write if the game store has finished hydrating from disk; otherwise
+  // the audio toggle could overwrite a fresh `freshSave()` blob.
+  if (!state.hydrated) return;
+  useGame.setState({ account: { ...state.account, [key]: value } });
+}
 
 // ─── Internal player pool ────────────────────────────────────────────────
 
@@ -70,8 +114,13 @@ let initialized = false;
 function ensureInit() {
   if (initialized) return;
   initialized = true;
-  // GDD §14: respect iOS hardware mute switch.
-  setAudioModeAsync({ playsInSilentMode: false }).catch(() => {
+  // Background music must play even when the device is in silent mode —
+  // iPads don't have a hardware ringer switch but DO have a Control Center
+  // "Mute" toggle that's often left on by default. With playsInSilentMode
+  // false, players who enable music in our Settings would still hear
+  // nothing on tablet. The player's explicit Settings choice is authority
+  // for BGM; OS silent mode shouldn't silently second-guess it.
+  setAudioModeAsync({ playsInSilentMode: true }).catch(() => {
     /* best effort — leave the SDK on its default mode */
   });
   for (const [cue, source] of Object.entries(CUE_SOURCES)) {
@@ -126,6 +175,9 @@ export function play(cue: CueId) {
  * — calling with the already-playing track is a no-op.
  */
 export function setMusicForRound(roundIdx: number) {
+  // Remember the round so a music-on toggle later can pick the right track
+  // without the caller threading it through.
+  useAudioStore.setState({ currentRoundIdx: roundIdx });
   const wanted = useAudioStore.getState().musicEnabled
     ? musicTrackForRound(roundIdx)
     : null;
@@ -142,6 +194,33 @@ export function setMusicForRound(roundIdx: number) {
   } catch {
     /* swallow */
   }
+}
+
+/** Kick off the right scene track for the current round. Used by the
+ *  music-enable toggle so toggling on starts playback immediately instead
+ *  of waiting for the next setMusicForRound from a round change. */
+function startMusicNow() {
+  const { currentRoundIdx, musicEnabled } = useAudioStore.getState();
+  if (!musicEnabled) return;
+  const wanted = musicTrackForRound(currentRoundIdx);
+  if (!wanted || wanted === currentMusic) return;
+  stopMusic();
+  const p = musicPlayers[wanted];
+  if (!p) return;
+  try {
+    p.seekTo(0);
+    p.play();
+    currentMusic = wanted;
+  } catch {
+    /* swallow */
+  }
+}
+
+/** Eagerly preload sfx + music players. Call from app boot so the first
+ *  music-enable toggle starts playback instantly instead of being gated on
+ *  expo-audio's async file load. Idempotent — safe to call multiple times. */
+export function preloadAll() {
+  ensureInit();
 }
 
 function stopMusic() {
