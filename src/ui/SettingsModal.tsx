@@ -1,30 +1,29 @@
 import React from "react";
-import { Linking, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useGame } from "../game/store";
 import { useAudioStore } from "../audio";
-import {
-  getNotificationPermissionStatus,
-  NotifPermStatus,
-  requestPushPermission,
-} from "../game/notifications";
+import { LAST_ROUND_IDX } from "../core/rounds";
 import { colors, fonts, PIXEL } from "./theme";
 import { useStrings } from "../core/i18n";
+import {
+  cancelScheduledReturn,
+  requestPushPermission,
+  scheduleReengagement,
+} from "../game/notifications";
 
 /**
- * Settings menu — port of design v12 SettingsModal. Three sections:
+ * Settings menu — port of design v12 SettingsModal. Sections:
  *
  *   1. Sound FX toggle (sage swatch) — wired to audioStore.sfxMuted
  *   2. Music toggle (terracotta swatch) — wired to audioStore.musicEnabled
- *   3. Language switcher — EN + DE (full localization rolling out — only
- *      Settings copy is currently translated; rest of the UI follows in a
- *      dedicated i18n pass). Earlier 6-language stub array (ES/FR/JA/ZH)
- *      was removed — it advertised support that wasn't actually being
- *      delivered.
- *   4. Notifications — status + Enable button. Test push button removed
- *      (was dev-only diagnostic, not useful in player path).
+ *   3. Language switcher — EN + DE (full localization wired through i18n).
+ *   4. Restart row — wipe save + fresh seed (two-tap confirm).
  *
  * Sits at the App root, shown when settingsOpen state is true (controlled
- * by the gear button in HomeScreen).
+ * by the gear button in HomeScreen). The earlier Notifications section
+ * (status indicator + Enable button) was removed — push opt-in still happens
+ * via the auto PushOptInModal flow on session 3+, but Settings is now
+ * focused on the player's day-to-day audio/language/restart controls.
  */
 interface Props {
   visible: boolean;
@@ -34,28 +33,49 @@ interface Props {
 const LANGS = [
   { code: "EN", name: "English" },
   { code: "DE", name: "Deutsch" },
+  { code: "PL", name: "Polski" },
 ];
 
 export function SettingsModal({ visible, onClose }: Props) {
   const language = useGame((s) => s.account.language ?? "EN");
   const setLanguage = useGame((s) => s.setLanguage);
   const restartGame = useGame((s) => s.restartGame);
+  // "Raise a new seed" is gated behind actually CLOSING the finale — being
+  // on AGI Singularity isn't enough, the player must have crossed the
+  // threshold at least once (prestige from LAST_ROUND_IDX ⇒ totalPrestiges
+  // becomes LAST_ROUND_IDX + 1 = 10). Rationale: restart is a "new game+"
+  // choice, and it only makes narrative + design sense after the player
+  // has seen the ending. Two-tap confirm still gates the destructive
+  // action so a mis-hit post-finale can't nuke progress either.
+  const totalPrestiges = useGame((s) => s.persistent.totalPrestiges);
+  const canRestart = totalPrestiges > LAST_ROUND_IDX;
   const sfxMuted = useAudioStore((s) => s.sfxMuted);
   const toggleSfx = useAudioStore((s) => s.toggleSfx);
   const musicEnabled = useAudioStore((s) => s.musicEnabled);
   const toggleMusic = useAudioStore((s) => s.toggleMusic);
+  // Notifications toggle — reads pushOptedIn from persisted account
+  // state. Turning ON runs the iOS permission ask (idempotent if already
+  // granted) and immediately seeds the 4-slot re-engagement queue so the
+  // next backgrounding fires nudges without needing a full app cycle.
+  // Turning OFF wipes the queue and clears the opted-in flag so no
+  // future backgrounding schedules more.
+  const pushOptedIn = useGame((s) => s.account.pushOptedIn);
+  const recordPushPromptResult = useGame((s) => s.recordPushPromptResult);
+  const toggleNotifications = React.useCallback(async () => {
+    if (pushOptedIn) {
+      recordPushPromptResult(false);
+      await cancelScheduledReturn().catch(() => {});
+      return;
+    }
+    const granted = await requestPushPermission().catch(() => false);
+    recordPushPromptResult(granted);
+    if (granted) {
+      // Seed the queue so the very next backgrounding kicks off nudges.
+      await scheduleReengagement(useGame.getState()).catch(() => {});
+    }
+  }, [pushOptedIn, recordPushPromptResult]);
 
   const [confirmRestart, setConfirmRestart] = React.useState(false);
-
-  // Live notification permission status — refreshed every time the modal
-  // opens so we reflect the current iOS state even if the player just
-  // toggled it in iOS Settings.
-  const recordPushPrompt = useGame((s) => s.recordPushPromptResult);
-  const [notifStatus, setNotifStatus] = React.useState<NotifPermStatus>("undetermined");
-  React.useEffect(() => {
-    if (!visible) return;
-    getNotificationPermissionStatus().then(setNotifStatus);
-  }, [visible]);
 
   const t = useStrings();
   const L = { ...t.settings, on: t.common.on, off: t.common.off, done: t.common.done };
@@ -78,6 +98,14 @@ export function SettingsModal({ visible, onClose }: Props) {
       color: colors.terracotta,
       on: musicEnabled,
       onToggle: toggleMusic,
+    },
+    {
+      key: "notifications" as const,
+      label: L.notifications,
+      sub: L.notificationsSub,
+      color: colors.gold,
+      on: pushOptedIn,
+      onToggle: toggleNotifications,
     },
   ];
 
@@ -172,55 +200,10 @@ export function SettingsModal({ visible, onClose }: Props) {
             </View>
           </View>
 
-          {/* Notifications — status + Enable / Test buttons. Exists so the
-              player can verify the push pipeline works without waiting 22h
-              for the real re-engagement scheduler, and so they have a way
-              to manually grant permission if they missed the auto-prompt. */}
-          <View style={styles.notifSection}>
-            <View style={styles.notifHeader}>
-              <Text style={styles.notifHeaderText}>🔔  {L.notifSection.toUpperCase()}</Text>
-              <View style={styles.notifHeaderRule} />
-            </View>
-            <Pressable
-              style={styles.notifStatusRow}
-              onPress={() => {
-                if (notifStatus === "denied") Linking.openSettings();
-              }}
-            >
-              <View
-                style={[
-                  styles.notifStatusDot,
-                  {
-                    backgroundColor:
-                      notifStatus === "granted" ? colors.sage_2 :
-                      notifStatus === "denied"  ? colors.tensionRed :
-                      colors.muted,
-                  },
-                ]}
-              />
-              <Text style={styles.notifStatusText}>
-                {notifStatus === "granted" ? L.notifGranted
-                  : notifStatus === "denied" ? L.notifDenied + " ›"
-                  : L.notifAsk}
-              </Text>
-            </Pressable>
-            {notifStatus !== "granted" && (
-              <Pressable
-                style={styles.notifBtn}
-                onPress={async () => {
-                  const ok = await requestPushPermission();
-                  recordPushPrompt(ok);
-                  setNotifStatus(ok ? "granted" : "denied");
-                }}
-              >
-                <Text style={styles.notifBtnText}>{L.notifEnable.toUpperCase()}</Text>
-              </Pressable>
-            )}
-          </View>
-
           {/* Restart row — wipe save + fresh seed. Two-step (tap once to
-              arm, tap "Yes" to confirm) so a misclick can't nuke a long run. */}
-          <View style={styles.restartSection}>
+              arm, tap "Yes" to confirm) so a misclick can't nuke a long run.
+              Hidden entirely before the finale — see canRestart above. */}
+          {canRestart && <View style={styles.restartSection}>
             {confirmRestart ? (
               <View style={styles.restartConfirmRow}>
                 <Text style={styles.restartConfirmText}>{L.restartConfirm}</Text>
@@ -251,7 +234,7 @@ export function SettingsModal({ visible, onClose }: Props) {
                 <Text style={styles.restartTriggerText}>↻ {L.restart.toUpperCase()}</Text>
               </Pressable>
             )}
-          </View>
+          </View>}
 
           {/* Footer — Done button */}
           <View style={styles.footer}>
@@ -412,10 +395,10 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   langBtn: {
-    // EN + DE only — 2 columns. flex:1 in the row's flexWrap container
+    // EN + DE + PL — 3 columns. flex:1 in the row's flexWrap container
     // would not split cleanly, so go with a percent that leaves room for
-    // the 6px gap. 48.5% × 2 + 6px gap ≈ 100% of available width.
-    width: "48.5%",
+    // the 6px gap. 31.3% × 3 + 2×6px gap ≈ 100% of available width.
+    width: "31.3%",
     height: 50, // fixed, not minHeight — language switches must not resize the grid
     paddingHorizontal: 4,
     paddingVertical: 8,
@@ -443,62 +426,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bodyBold,
     fontSize: 10,
     color: colors.cream_hi,
-  },
-  notifSection: {
-    paddingHorizontal: 12,
-    paddingTop: 4,
-    paddingBottom: 4,
-  },
-  notifHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginTop: 4,
-    marginBottom: 6,
-  },
-  notifHeaderText: {
-    fontFamily: fonts.display,
-    fontSize: 9,
-    color: colors.muted,
-    letterSpacing: 1.5,
-  },
-  notifHeaderRule: {
-    flex: 1,
-    height: 1,
-    backgroundColor: colors.cream_4,
-    marginLeft: 4,
-  },
-  notifStatusRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingVertical: 4,
-  },
-  notifStatusDot: {
-    width: 8,
-    height: 8,
-    borderWidth: 1,
-    borderColor: colors.ink,
-  },
-  notifStatusText: {
-    fontFamily: fonts.body,
-    fontSize: 12,
-    color: colors.ink,
-    flex: 1,
-  },
-  notifBtn: {
-    marginTop: 6,
-    paddingVertical: 8,
-    alignItems: "center",
-    backgroundColor: colors.gold,
-    borderWidth: 1,
-    borderColor: colors.ink,
-  },
-  notifBtnText: {
-    fontFamily: fonts.display,
-    fontSize: 10,
-    color: colors.ink,
-    letterSpacing: 1.5,
   },
   restartSection: {
     paddingHorizontal: 12,

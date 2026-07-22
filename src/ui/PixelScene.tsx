@@ -1,5 +1,8 @@
 import React from "react";
-import { Pressable, View } from "react-native";
+import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
+import { D } from "../core/decimal";
+import * as audio from "../audio";
+import { formatNumber } from "./formatNumber";
 import Svg, {
   Circle,
   ClipPath,
@@ -16,6 +19,12 @@ import Svg, {
   Text as SvgText,
 } from "react-native-svg";
 import { colors, fonts } from "./theme";
+import {
+  useGame,
+  selectCompanionInteractions,
+  getCompanionState,
+  AGI_PROMPTS,
+} from "../game/store";
 
 // ─── Scene constants ────────────────────────────────────────────────────
 // Native scene coords match the Claude Design `pixel-art.jsx` system so
@@ -78,7 +87,16 @@ export type HitId =
   | "lake"
   | "agent_monitor"
   | "gpu2"
-  | "catwalk";
+  | "catwalk"
+  | "agi"             // planetary: moon → Autonomous Agent (AGI) purchase
+  | "cosmonaut"       // planetary: tethered EVA character (mirror of Inspector/Bartender)
+  | "prompt_engineer" // agi scene: dev at floating desk (mirror of Inspector/Bartender/Cosmonaut)
+  | "cat"             // seed/garage: roaming tabby (1st of the 8-companion arc)
+  | "pizza_guy"       // coworking: pizza delivery walker (2nd of the arc)
+  | "vc"              // startup office: patagonia-vest angel investor (7th of the arc)
+  | "spot"            // megacorp: boston dynamics robot dog patrol (4th of the arc)
+  | "bartender"       // campus: sliding-drink bartender (5th of the arc)
+  | "inspector";      // datacenter: sparking-rack inspector (6th of the arc)
 
 export interface HitZone {
   id: HitId;
@@ -114,6 +132,11 @@ const SEED_ZONES: HitZone[] = [
   { id: "books",    x:   8, y: 294, w: 16, h: 14, label: "Buy Data" },
   { id: "plant",    x: 210, y: 274, w: 18, h: 26, label: "Cosmetic" },
   { id: "roomba",   x: 152, y: 302, w: 14, h: 8,  label: "Autonomous Agent" },
+  // Garage Cat — dynamic hit zone rendered separately (DynamicCatHit)
+  // that follows the cat's live position (floor OR desk OR mid-jump).
+  // No static entry here — it would either eat unrelated taps if wide
+  // enough to cover the arc, or fail to cover the cat when it's on the
+  // desk if tightened to home. See PixelScene's touch overlay.
 ];
 
 // MEGACORP OFFICE — coords ported 1:1 from Claude Design v5
@@ -137,6 +160,9 @@ const MEGACORP_ZONES: HitZone[] = [
   { id: "energy",   x:   8, y:   1, w: 60, h:  5, label: "Buy Energy (substation)" },
   // Corporate kanban whiteboard — RESEARCH
   { id: "research", x: 158, y:  80, w: 80, h: 60, label: "Research (kanban)" },
+  // Boston Dynamics Spot — dynamic hit rendered separately
+  // (DynamicSpotHit). Static entry removed: the 240-wide band was eating
+  // taps on the mainframes below. See PixelScene's touch overlay.
 ];
 
 // AGI SINGULARITY — design v11 rewrite. The company has become a gravity
@@ -158,6 +184,10 @@ const AGI_ZONES: HitZone[] = [
   // Training Run zone — wraps the Stellar Forge sprite (cx 32, cy 200, ~50px).
   { id: "monitor",  x:   4, y: 172, w: 56, h: 56, label: "Stellar Forge · Training Run" },
   { id: "gpu",      x:   8, y: 264, w: 52, h: 44, label: "Matrioshka Swarm" },
+  // Prompt Engineer — dynamic hit rendered separately (RoguePromptHit)
+  // that follows his live position + surfaces the rogue-prompt catch
+  // event. Static entry removed for the same reason as cosmonaut —
+  // static box drew the selection outline whereas dynamic hits skip it.
 ];
 
 // COWORKING (Series B/C) — coords ported 1:1 from Claude Design v4
@@ -181,6 +211,10 @@ const COWORKING_ZONES: HitZone[] = [
   { id: "gpu",      x: 210, y: 300, w: 22, h: 32, label: "Buy GPU (rack)" },
   { id: "research", x:  95, y:  35, w: 52, h: 40, label: "Research (kanban)" },
   { id: "plant",    x: 184, y: 262, w: 22, h: 36, label: "Cosmetic" },
+  // Pizza Guy — dynamic hit zone rendered separately (DynamicPizzaGuyHit)
+  // that follows his live position across the upper floor. Static entry
+  // removed: the 240-wide band was eating taps on wall props above the
+  // bench. See PixelScene's touch overlay for the follow-the-sprite hit.
 ];
 
 // STARTUP OFFICE (Series D/IPO) — coords ported 1:1 from Claude Design v4
@@ -199,6 +233,9 @@ const OFFICE_ZONES: HitZone[] = [
   { id: "research", x: 196, y:  64, w: 34, h: 24, label: "Research (whiteboard)" },
   { id: "energy",   x: 148, y:  60, w: 14, h: 12, label: "Buy Energy (planter)" },
   { id: "plant",    x: 156, y: 258, w: 22, h: 36, label: "Cosmetic" },
+  // VC — dynamic hit rendered separately (DynamicVCHit). Static entry
+  // removed: the 180-wide band was eating taps on the desk row below.
+  // See PixelScene's touch overlay.
 ];
 
 // CAMPUS (round 8 / Sovereign Wealth) — coords ported 1:1 from Claude
@@ -254,28 +291,50 @@ const CAMPUS_ZONES: HitZone[] = [
 ];
 
 // DATACENTER (round 9 / Government Bailout) — port of design v8 DATACENTER_HITS.
-// Top-wall zones (energy/research/books) are pre-shifted +25 in y to match
+// Top-wall zones (energy/research/books) are pre-shifted +60 in y to match
 // the same translate the upper-wall sprites get inside DatacenterScene
-// (clears the floating TopHUD). Floor zones (catwalk + mainframes) use raw
-// v8 y values — the floor section is rendered unshifted so the front-row
-// mainframes sit fully inside the SVG viewport.
+// (clears the floating TopHUD — see the +60 translate comment there).
+// Floor zones (catwalk + mainframes) use raw v8 y values — the floor
+// section is rendered unshifted so the front-row mainframes sit fully
+// inside the SVG viewport.
 const DATACENTER_ZONES: HitZone[] = [
   // Catwalk band first so back-row mainframes (later in the array) win on overlap
-  { id: "catwalk",   x:   0, y: 168, w: 240, h:  24, label: "The Inspector" },
-  // ─── Upper walls (shifted +25 to match scene's top-wall translate) ───
-  // Energy tightened in design v9 from the full switchgear (y=8 h=66) to the
-  // LOWER cabinet panel (y=46 h=30 raw → +25 = y=71 h=30 here) so the
-  // floating Slack button on the left doesn't share airspace with the click
-  // target — "lower cabinets — clear of the Slack button" per v9 comment.
-  { id: "energy",    x:   4, y:  71, w:  68, h:  30, label: "Buy Energy (Substation)" },
-  { id: "research",  x:  72, y:  79, w:  52, h:  92, label: "Research (Autonomous R&D)" },
-  { id: "books",     x: 120, y:  33, w: 114, h:  66, label: "Buy Data (Surveillance Tap)" },
-  // ─── Back row of floor mainframes (raw v8 y) ───
-  { id: "gpu",       x:  30, y: 144, w:  56, h: 100, label: "Buy GPU (Hyperscale Region)" },
-  { id: "monitor",   x:  94, y: 144, w:  56, h: 100, label: "Training (National Cluster)" },
-  { id: "engineer",  x: 158, y: 144, w:  56, h: 100, label: "Autonomous Ops" },
-  // ─── Front row mainframes (continent-scale, raised 12px from raw v8) ──
-  { id: "gpu2",      x:  24, y: 256, w: 184, h:  96, label: "Buy GPU (Continent-Scale)" },
+  { id: "catwalk",   x:   0, y: 173, w: 240, h:  24, label: "The Inspector" },
+  // ─── Upper walls (shifted +60 to match scene's top-wall translate) ───
+  // 2026-07 iPad-fix: bumped from +25 to +60 (all zone-y +35) so the wall
+  // hit targets sit below the HUD on iPad-portrait, where the scene is
+  // ~3.2× scaled vs ~1.75× on phones. Research zone height trimmed 92→82
+  // so it stops at y=196 (back-row top) — avoids stealing back-row taps
+  // in their narrow x-overlap band.
+  // Energy zone expanded to cover the FULL 3-cabinet switchgear bank
+  // (raw y=18..74, +60 shift = y=78..134). Was tightened to the lower
+  // panel only in design v9 to avoid conflict with the floating Slack
+  // button in the top-left corner — Slack has since moved into TopHUD
+  // chrome, so the constraint is gone and the zone can wrap the entire
+  // visible substation.
+  { id: "energy",    x:   4, y:  78, w:  68, h:  56, label: "Buy Energy (Substation)" },
+  // 2026-07: sprite niche resized (ny 60→18, nh 84→56 → screen y=78..134
+  // after the +60 wall translate) to sit at the same top-baseline as the
+  // Energy substation and Data patch-panel. Zone follows: y=78, h=56 to
+  // cover exactly the visible niche instead of the old 82-tall drop-band
+  // that pointed into empty floor.
+  { id: "research",  x:  72, y:  78, w:  52, h:  56, label: "Research (Autonomous R&D)" },
+  { id: "books",     x: 120, y:  68, w: 114, h:  66, label: "Buy Data (Surveillance Tap)" },
+  // ─── Back row of floor mainframes — halved to h=48 (design v13) ───
+  // Semantics rearranged: monitor (Training Run) moved to FRONT-CENTER
+  // where the new drawSlotMainframe visual lives; back row is now
+  // gpu/engineer/gpu2 spatially left-to-right.
+  // 2026-07 iPad-view fix: y bumped from 144 → 196 so the back row sits
+  // fully BELOW the Inspector's catwalk (zone y=168..192). Previously
+  // the row's top half was clipped behind the HUD on iPad portrait.
+  { id: "gpu",       x:  30, y: 208, w:  56, h:  48, label: "Buy GPU (Hyperscale Region)" },
+  { id: "engineer",  x:  94, y: 208, w:  56, h:  48, label: "Autonomous Ops" },
+  { id: "gpu2",      x: 158, y: 208, w:  56, h:  48, label: "Buy GPU (Continent-Scale)" },
+  // ─── Front row (halved) — TRAINING RUN console is the center
+  //     cabinet; flanking mainframes are extra GPU tap points. ──
+  { id: "gpu",       x:  24, y: 278, w:  56, h:  48, label: "Buy GPU (Front Row L)" },
+  { id: "monitor",   x:  88, y: 278, w:  56, h:  48, label: "Training Run (Neural-Net Console)" },
+  { id: "engineer",  x: 152, y: 278, w:  56, h:  48, label: "Autonomous Ops (Front Row R)" },
 ];
 
 // PLANETARY (round 10 / Civilizational Round). Zones are aligned to the
@@ -291,24 +350,41 @@ const DATACENTER_ZONES: HitZone[] = [
 //   Asia cluster      →   y ≈ 252..302, x ≈ 158..208 (with pulsing ring)
 //   India + south    →   y ≈ 310..360, x ≈  40..136
 const PLANETARY_ZONES: HitZone[] = [
-  // Lunar refinery (upper-right) — Energy. Wraps the moon body + glow halo.
-  { id: "energy",    x: 170, y:  22, w:  60, h:  56, label: "Buy Energy (Lunar Refinery)" },
-  // Planet-scale training band — empty click region in space above the globe.
-  // Narrowed in x to avoid stealing taps from the Moon zone (which sits to the right).
-  { id: "monitor",   x:  60, y:  56, w: 100, h:  28, label: "Planet-Scale Training" },
-  // Orbital storage ring girdling Earth — Data. Selection outline traces the
-  // visible arc band itself instead of a rectangle.
+  // Lunar mass-driver refinery (upper-right) — design v13 rerouted this
+  // from Energy to AGI: the moon is now the anchor for the Autonomous
+  // Agent purchase modal. Zone wraps moon body + halo. Energy moved to
+  // an equatorial power-grid megastructure on Earth (see below).
+  { id: "agi",       x: 170, y:  57, w:  60, h:  56, label: "Autonomous Agent (Lunar Refinery)" },
+  // Planet-scale training band — Endurance ring ship sprite at cx=116, cy=64.
+  { id: "monitor",   x:  76, y:  48, w:  80, h:  32, label: "Planet-Scale Training" },
+  // Cosmonaut on EVA — floats on a slow ellipse (ocx=98, ocy=102, rx=30,
+  // ry=14) below-left of the Endurance ring. Zone covers the drift ellipse
+  // Cosmonaut — dynamic hit rendered separately (CosmonautTetherHit)
+  // that follows his live drift position + surfaces the tether-snap
+  // event. Static entry removed: the 80-wide box was catching drift-
+  // area taps unrelated to the sprite and drawing the yellow selection
+  // outline (whereas dynamic hits skip that outline via setActiveIdx).
+  // Orbital storage ring girdling Earth — Data. Selection outline traces
+  // the visible arc band itself instead of a rectangle.
   { id: "books",     x:   0, y: 168, w: 240, h:  52, label: "Buy Data (Orbital Ring)",
     arc: { cx: 120, cy: 352, r: 180, band: 16, a0: Math.PI * 1.06, a1: Math.PI * 1.94 } },
-  // City-light megagrids on the night side of Earth
-  { id: "engineer",  x:   4, y: 262, w:  44, h:  44, label: "Autonomous Regions (NA)" },
-  { id: "gpu",       x: 158, y: 252, w:  50, h:  50, label: "Buy GPU (Asia-Pacific)" },
-  // "Americas / lower hemisphere" compute belt — covers SA + IN cluster band.
-  { id: "gpu2",      x:  40, y: 310, w:  96, h:  50, label: "Buy GPU (Americas Belt)" },
-  // Design v10 added a Frontier Research Array — a deep-space observatory.
-  // Raised above the Slack button (which floats on the left at SVG y≈77-102
-  // in our rendering geometry) so taps don't conflict; sprite is mounted at
-  // anchor (36, 50) in PlanetaryScene matching this zone.
+  // Continent-scale resource megastructures (design v13 replaces the
+  // 6-generic-city cluster model with 5 typed nodes).
+  //   NA autonomous region → Engineer chain (self-organizing hex swarm)
+  //   Asia-Pacific compute → GPU chain (big silicon substrate + thermal bloom)
+  //   Americas compute belt → GPU (2nd tap point, alt narrative)
+  //   Equatorial power grid → Energy chain (reactor core + hex substations,
+  //   fed by the lunar mass-driver beam)
+  // Node coords derive from PlanetaryScene's cx=120, cy=352:
+  //   NA:    (cx-96, cy-70) = (24, 282, r=17)
+  //   Asia:  (cx+70, cy-84) = (190, 268, r=22)
+  //   Ams:   (cx-56, cy-4)  = (64, 348, r=17) — capped by scene bottom
+  //   Enrg:  (cx+40, cy-32) = (160, 320, r=15)
+  { id: "engineer",  x:   4, y: 260, w:  44, h:  44, label: "Autonomous Region (NA)" },
+  { id: "gpu",       x: 166, y: 244, w:  50, h:  50, label: "Buy GPU (Asia-Pacific)" },
+  { id: "gpu2",      x:  44, y: 328, w:  40, h:  30, label: "Buy GPU (Americas Belt)" },
+  { id: "energy",    x: 144, y: 304, w:  34, h:  34, label: "Buy Energy (Equatorial Grid)" },
+  // Frontier Research Array — deep-space observatory upper-left corner.
   { id: "research",  x:  16, y:  38, w:  46, h:  40, label: "Research (Frontier Array)" },
 ];
 
@@ -386,6 +462,12 @@ export function PixelScene({ width, height, onHit, activeHit, scene = "seed", tu
         width={width}
         height={height}
         viewBox={`0 0 ${W} ${H}`}
+        // Default preserveAspectRatio (xMidYMid meet) keeps the native
+        // 240×360 aspect — required for the pixel art to look right.
+        // The "none" stretch experiment squashed architectural elements
+        // on iPad portrait. Side gutters on wide screens are smoothed
+        // over by the scene-tinted sceneWrap background in HomeScreen
+        // (the gutter takes the scene's dominant wall color).
         // @ts-expect-error — shape-rendering exists on web/native, missing type
         shapeRendering="crispEdges"
       >
@@ -431,7 +513,7 @@ export function PixelScene({ width, height, onHit, activeHit, scene = "seed", tu
         >
           {zones
             .filter((z) => !tutorialHighlight || z.id === tutorialHighlight)
-            .map((z, i) => {
+            .map((z) => {
             const sx = width / W;
             const sy = height / H;
             // Match index back into the unfiltered zone list so activeHit
@@ -454,11 +536,1185 @@ export function PixelScene({ width, height, onHit, activeHit, scene = "seed", tu
               />
             );
           })}
+          {/* Dynamic cat hit-target — follows the cat's live position so
+              the player can tap wherever the cat currently IS (floor,
+              desk, mid-arc). Only mounted for the seed scene. */}
+          {scene === "seed" && (
+            <DynamicCatHit
+              width={width}
+              height={height}
+              onHit={onHit}
+              setActiveIdx={setActiveIdx}
+            />
+          )}
+          {/* Same idea for the Coworking scene's Pizza Guy — follow his
+              walk-across-the-floor position so the tap target isn't a
+              static band eating other zones. */}
+          {scene === "coworking" && (
+            <DynamicPizzaGuyHit
+              width={width}
+              height={height}
+              onHit={onHit}
+              setActiveIdx={setActiveIdx}
+            />
+          )}
+          {/* Office scene's VC — same follow-the-sprite pattern; taps
+              during the ready window sign him a check into your capital. */}
+          {scene === "office" && (
+            <DynamicVCHit
+              width={width}
+              height={height}
+              onHit={onHit}
+              setActiveIdx={setActiveIdx}
+            />
+          )}
+          {/* Megacorp's Spot — compliance-alert override. Taps during the
+              red-! window silence the audit for a small token boost. */}
+          {scene === "megacorp" && (
+            <DynamicSpotHit
+              width={width}
+              height={height}
+              onHit={onHit}
+              setActiveIdx={setActiveIdx}
+            />
+          )}
+          {/* Campus bartender info + his drink-slide event. Info-hit
+              rendered FIRST so the drink-catch (later sibling) wins on
+              overlap when the glass is on the counter. */}
+          {scene === "campus" && (
+            <>
+              <DynamicBartenderHit
+                width={width}
+                height={height}
+                onHit={onHit}
+                setActiveIdx={setActiveIdx}
+              />
+              <BartenderDrinkHit
+                width={width}
+                height={height}
+                setActiveIdx={setActiveIdx}
+              />
+            </>
+          )}
+          {/* Datacenter inspector info + sparking-rack cool-down event.
+              Both render — different y ranges so they don't overlap. */}
+          {scene === "datacenter" && (
+            <>
+              <DynamicInspectorHit
+                width={width}
+                height={height}
+                onHit={onHit}
+                setActiveIdx={setActiveIdx}
+              />
+              <SparkingRackHit
+                width={width}
+                height={height}
+                setActiveIdx={setActiveIdx}
+              />
+            </>
+          )}
+          {/* Planetary cosmonaut: info tap + UFO fly-by catch. Each UFO
+              gets its own follow-the-sprite Pressable while it's live. */}
+          {scene === "planetary" && (
+            <CosmonautUFOHit
+              width={width}
+              height={height}
+              onHit={onHit}
+              setActiveIdx={setActiveIdx}
+            />
+          )}
+          {/* AGI Singularity prompt engineer: info tap + AGI 3-choice
+              modal (the model asks a question, 3 replies each with a
+              distinct effect). */}
+          {scene === "agi" && (
+            <AGIPromptHit
+              width={width}
+              height={height}
+              onHit={onHit}
+              setActiveIdx={setActiveIdx}
+            />
+          )}
         </View>
       )}
     </View>
   );
 }
+
+// Live cat hit target — reads the cat's current position each frame (via
+// its own 20fps smooth tick) and positions a Pressable overlay there so
+// the player can pet the cat wherever it actually is on-screen. Larger
+// than the sprite by a few px for comfortable tapping.
+//
+// Owns the pet-cat mini-interaction end-to-end: calls the store, plays a
+// chirp on reward, spawns a rising "+N" floater over the cat's head. Only
+// routes to the info popup (via `onHit`) when the reward is NOT ready —
+// so a rewarded tap feels satisfying instead of interrupted by a modal.
+interface CatRewardFloaterState {
+  id: number;
+  x: number; // scene-native coords (0..240)
+  y: number; // scene-native coords (0..360)
+  text: string;
+}
+function DynamicCatHit({
+  width,
+  height,
+  onHit,
+  setActiveIdx,
+}: {
+  width: number;
+  height: number;
+  onHit: (id: HitId) => void;
+  setActiveIdx: (idx: number | null) => void;
+}) {
+  useTick(50);
+  const t = Date.now() / 200;
+  const s = garageCatState(t);
+  const sx = width / W;
+  const sy = height / H;
+  const boxX = (s.x - 6) * sx;
+  const boxY = (s.y - 9) * sy;
+  const boxW = 20 * sx;
+  const boxH = 24 * sy;
+  const [floaters, setFloaters] = React.useState<CatRewardFloaterState[]>([]);
+  const nextId = React.useRef(0);
+  return (
+    <>
+      <Pressable
+        onPress={() => {
+          setActiveIdx(null);
+          const result = useGame.getState().interactWithCompanion("cat");
+          if (result.rewarded && result.tokens) {
+            audio.play("vignette_pop");
+            const id = nextId.current++;
+            const tokens = D(result.tokens);
+            const text = `+${formatNumber(tokens)}`;
+            // Spawn floater at cat's HEAD (above the sprite).
+            setFloaters((f) => [...f, { id, x: s.x + 4, y: s.y - 4, text }]);
+            // Auto-remove after the fade animation finishes.
+            setTimeout(() => {
+              setFloaters((f) => f.filter((x) => x.id !== id));
+            }, 900);
+            return;
+          }
+          // Not ready — fall through to the normal info popup path.
+          onHit("cat");
+        }}
+        style={{
+          position: "absolute",
+          left: boxX,
+          top: boxY,
+          width: boxW,
+          height: boxH,
+        }}
+      />
+      {floaters.map((f) => (
+        <CatRewardFloater
+          key={f.id}
+          text={f.text}
+          sceneX={f.x}
+          sceneY={f.y}
+          viewScaleX={sx}
+          viewScaleY={sy}
+        />
+      ))}
+    </>
+  );
+}
+
+// "+N" floater over the cat when a pet lands in the ready window. Mounts,
+// smoothly rises ~30px while fading to zero over 900ms, then unmounts
+// (parent removes it from state on the same schedule). Non-interactive.
+function CatRewardFloater({
+  text,
+  sceneX,
+  sceneY,
+  viewScaleX,
+  viewScaleY,
+}: {
+  text: string;
+  sceneX: number;
+  sceneY: number;
+  viewScaleX: number;
+  viewScaleY: number;
+}) {
+  const anim = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    Animated.timing(anim, {
+      toValue: 1,
+      duration: 900,
+      useNativeDriver: true,
+    }).start();
+  }, [anim]);
+  const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [0, -30] });
+  const opacity = anim.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0, 1, 0] });
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        floaterStyles.wrap,
+        {
+          left: sceneX * viewScaleX - 24,
+          top: sceneY * viewScaleY - 12,
+          width: 48,
+          transform: [{ translateY }],
+          opacity,
+        },
+      ]}
+    >
+      <Text style={floaterStyles.text}>{text}</Text>
+    </Animated.View>
+  );
+}
+
+const floaterStyles = StyleSheet.create({
+  wrap: {
+    position: "absolute",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  text: {
+    fontFamily: fonts.display,
+    fontSize: 14,
+    color: colors.gold,
+    textShadowColor: colors.ink,
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 0,
+    letterSpacing: 1,
+  },
+});
+
+// Live Pizza-Guy hit target — follows the sprite for the info popup +
+// spawns flying pizza slices as the round-2 mini-interaction. Every
+// ~18-22 sec the pizza box "burps" a slice: it flies in a parabolic arc
+// away from the guy, spins as it goes, and the player has ~2s to tap it
+// mid-air before it falls off the scene bottom. Caught slice = small
+// token burst (same 1% of round threshold as the cat's pet reward);
+// missed slice = nothing (no punishment, no lost currency).
+interface FlyingSliceState {
+  id: number;
+  bornMs: number;   // wall-clock when spawned — drives motion + rotation
+  x0: number;       // spawn coords (scene-native)
+  y0: number;
+  vx: number;       // initial velocity px per frame @ 20fps
+  vy: number;
+}
+const SLICE_MIN_INTERVAL_MS = 18_000;
+const SLICE_MAX_INTERVAL_MS = 25_000;
+const SLICE_GRAVITY = 0.35;          // px / frame² @ 20fps
+const SLICE_MAX_LIFETIME_MS = 3_500; // hard despawn after this even if still on-screen
+function DynamicPizzaGuyHit({
+  width,
+  height,
+  onHit,
+  setActiveIdx,
+}: {
+  width: number;
+  height: number;
+  onHit: (id: HitId) => void;
+  setActiveIdx: (idx: number | null) => void;
+}) {
+  useTick(50);
+  const now = Date.now();
+  const t = now / 200;
+  const s = coworkPizzaState(t);
+  const sx = width / W;
+  const sy = height / H;
+  const boxX = (s.x - 4) * sx;
+  const boxY = (s.qy - 8) * sy;
+  const boxW = 26 * sx;
+  const boxH = 60 * sy;
+
+  // Slice queue + spawn scheduler. Refs so re-renders don't re-arm.
+  const [slices, setSlices] = React.useState<FlyingSliceState[]>([]);
+  const nextIdRef = React.useRef(0);
+  const nextSpawnRef = React.useRef(now + SLICE_MIN_INTERVAL_MS);
+  const [floaters, setFloaters] = React.useState<CatRewardFloaterState[]>([]);
+  const floaterIdRef = React.useRef(10_000); // avoid collision with cat floater ids
+
+  // Spawn loop — every render checks if it's time. Cheap because state
+  // updates only fire on actual spawns.
+  React.useEffect(() => {
+    if (now < nextSpawnRef.current) return;
+    // Spawn a slice from the current box position, biased opposite the
+    // walking direction so it arcs across the visible floor.
+    const dir = s.facing > 0 ? -1 : 1;
+    const newSlice: FlyingSliceState = {
+      id: nextIdRef.current++,
+      bornMs: now,
+      x0: s.x + 7,           // roughly box-center
+      y0: s.qy + 2,          // just above the box lid
+      vx: dir * 2.2,         // sideways drift
+      vy: -6.5,              // strong upward pop
+    };
+    setSlices((prev) => [...prev, newSlice]);
+    // Random re-arm 18-25s out.
+    const jitter = Math.floor((s.x * 37 + s.qy * 13) % (SLICE_MAX_INTERVAL_MS - SLICE_MIN_INTERVAL_MS));
+    nextSpawnRef.current = now + SLICE_MIN_INTERVAL_MS + jitter;
+  }, [now, s.facing, s.qy, s.x]);
+
+  // Prune expired slices (offscreen or over the lifetime cap).
+  React.useEffect(() => {
+    if (slices.length === 0) return;
+    const alive = slices.filter((sl) => {
+      const age = (now - sl.bornMs) / 50; // frames @ 20fps
+      const cy = sl.y0 + sl.vy * age + 0.5 * SLICE_GRAVITY * age * age;
+      return now - sl.bornMs < SLICE_MAX_LIFETIME_MS && cy < H + 20;
+    });
+    if (alive.length !== slices.length) setSlices(alive);
+  }, [now, slices]);
+
+  const catchSlice = (id: number) => {
+    // Look up the slice's live position for the floater spawn.
+    const sl = slices.find((x) => x.id === id);
+    setSlices((prev) => prev.filter((x) => x.id !== id));
+    const result = useGame.getState().catchPizzaSlice();
+    audio.play("vignette_pop");
+    if (sl) {
+      const age = (now - sl.bornMs) / 50;
+      const cx = sl.x0 + sl.vx * age;
+      const cy = sl.y0 + sl.vy * age + 0.5 * SLICE_GRAVITY * age * age;
+      const fid = floaterIdRef.current++;
+      const text = `+${formatNumber(D(result.tokens))}`;
+      setFloaters((prev) => [...prev, { id: fid, x: cx, y: cy, text }]);
+      setTimeout(() => setFloaters((prev) => prev.filter((f) => f.id !== fid)), 900);
+    }
+  };
+
+  return (
+    <>
+      {/* Pizza-guy sprite tap — opens the compact info popup. */}
+      <Pressable
+        onPress={() => {
+          setActiveIdx(null);
+          onHit("pizza_guy");
+        }}
+        style={{
+          position: "absolute",
+          left: boxX,
+          top: boxY,
+          width: boxW,
+          height: boxH,
+        }}
+      />
+      {/* Slice hit targets + visuals — one per live slice. */}
+      {slices.map((sl) => (
+        <FlyingPizzaSlice
+          key={sl.id}
+          slice={sl}
+          now={now}
+          viewScaleX={sx}
+          viewScaleY={sy}
+          onCatch={() => catchSlice(sl.id)}
+        />
+      ))}
+      {/* Reward floaters from caught slices. */}
+      {floaters.map((f) => (
+        <CatRewardFloater
+          key={f.id}
+          text={f.text}
+          sceneX={f.x}
+          sceneY={f.y}
+          viewScaleX={sx}
+          viewScaleY={sy}
+        />
+      ))}
+    </>
+  );
+}
+
+// Rendered single pizza slice mid-flight. Own Pressable AND own SVG-in-
+// absolute-View render — kept together so the visible sprite and the
+// tap target are always at the exact same position. Rotation via CSS
+// transform so we don't fight react-native-svg's transform handling.
+function FlyingPizzaSlice({
+  slice,
+  now,
+  viewScaleX,
+  viewScaleY,
+  onCatch,
+}: {
+  slice: FlyingSliceState;
+  now: number;
+  viewScaleX: number;
+  viewScaleY: number;
+  onCatch(): void;
+}) {
+  const age = (now - slice.bornMs) / 50; // frames @ 20fps
+  const cx = slice.x0 + slice.vx * age;
+  const cy = slice.y0 + slice.vy * age + 0.5 * SLICE_GRAVITY * age * age;
+  const rotDeg = (age * 22) % 360; // slow spin
+  // Slice sprite: 8×8 pixel triangle-ish pizza slice. Rendered as inline
+  // absolute View with a couple stacked rectangles — cheap and readable.
+  const size = 12;
+  return (
+    <Pressable
+      onPress={onCatch}
+      hitSlop={6}
+      style={{
+        position: "absolute",
+        left: cx * viewScaleX - (size * viewScaleX) / 2,
+        top: cy * viewScaleY - (size * viewScaleY) / 2,
+        width: size * viewScaleX,
+        height: size * viewScaleY,
+        transform: [{ rotate: `${rotDeg}deg` }],
+      }}
+    >
+      <View style={sliceStyles.body}>
+        <View style={sliceStyles.crust} />
+        <View style={sliceStyles.cheese} />
+        <View style={sliceStyles.pepperoni1} />
+        <View style={sliceStyles.pepperoni2} />
+      </View>
+    </Pressable>
+  );
+}
+
+const sliceStyles = StyleSheet.create({
+  body: {
+    flex: 1,
+    position: "relative",
+  },
+  crust: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: "40%",
+    backgroundColor: "#C9531E", // terracotta crust
+  },
+  cheese: {
+    position: "absolute",
+    left: "15%",
+    right: "15%",
+    top: "10%",
+    bottom: "50%",
+    backgroundColor: "#F0C060", // gold cheese
+  },
+  pepperoni1: {
+    position: "absolute",
+    left: "22%",
+    top: "20%",
+    width: "22%",
+    height: "22%",
+    backgroundColor: "#B23A2A", // deep red
+  },
+  pepperoni2: {
+    position: "absolute",
+    right: "22%",
+    top: "35%",
+    width: "18%",
+    height: "18%",
+    backgroundColor: "#B23A2A",
+  },
+});
+
+// Live VC hit target — same follow-the-sprite pattern as the cat.
+// Tap during the ready window (visible via the gold $ over his head)
+// calls `interactWithCompanion("vc")` and awards CAPITAL (5% of your
+// current) — spawns a gold "+$N" floater at his head. Non-ready taps
+// fall through to `onHit("vc")` for the standard compact info popup.
+function DynamicVCHit({
+  width,
+  height,
+  onHit,
+  setActiveIdx,
+}: {
+  width: number;
+  height: number;
+  onHit: (id: HitId) => void;
+  setActiveIdx: (idx: number | null) => void;
+}) {
+  useTick(50);
+  const t = Date.now() / 200;
+  const s = officeVCState(t);
+  const sx = width / W;
+  const sy = height / H;
+  // VC sprite spans roughly x-3 .. x+16 (hair + phone in peering pose),
+  // head at y≈220, feet at y=250. Pad ±3px for comfortable taps.
+  const boxX = (s.x - 5) * sx;
+  const boxY = (220 - 6) * sy;
+  const boxW = 26 * sx;
+  const boxH = 44 * sy;
+  const [floaters, setFloaters] = React.useState<CatRewardFloaterState[]>([]);
+  const nextId = React.useRef(20_000); // avoid collision with cat/pizza ids
+  return (
+    <>
+      <Pressable
+        onPress={() => {
+          setActiveIdx(null);
+          const result = useGame.getState().interactWithCompanion("vc");
+          if (result.rewarded && result.capital) {
+            audio.play("vignette_pop");
+            const id = nextId.current++;
+            const capital = D(result.capital);
+            const text = `+$${formatNumber(capital)}`;
+            setFloaters((f) => [...f, { id, x: s.x + 6, y: 220 - 4, text }]);
+            setTimeout(() => {
+              setFloaters((f) => f.filter((x) => x.id !== id));
+            }, 900);
+            return;
+          }
+          onHit("vc");
+        }}
+        style={{
+          position: "absolute",
+          left: boxX,
+          top: boxY,
+          width: boxW,
+          height: boxH,
+        }}
+      />
+      {floaters.map((f) => (
+        <CatRewardFloater
+          key={f.id}
+          text={f.text}
+          sceneX={f.x}
+          sceneY={f.y}
+          viewScaleX={sx}
+          viewScaleY={sy}
+        />
+      ))}
+    </>
+  );
+}
+
+// Live Spot hit target — follows the robot dog's live position across
+// the Megacorp floor. Tap during the compliance-alert window (visible
+// via the red "!" over his sensor cluster) → +tokens (silenced audit
+// = throughput uptick). Non-ready taps fall through to the compact
+// info popup.
+function DynamicSpotHit({
+  width,
+  height,
+  onHit,
+  setActiveIdx,
+}: {
+  width: number;
+  height: number;
+  onHit: (id: HitId) => void;
+  setActiveIdx: (idx: number | null) => void;
+}) {
+  useTick(50);
+  const t = Date.now() / 200;
+  // Megacorp scene sets FLOOR_Y=222 in MegacorpScene body; Spot uses
+  // floorY-2 for feet. Hardcode 222 here since we can't cheaply read it
+  // from scene state — same convention the sprite uses.
+  const FLOOR_Y = 222;
+  const s = megaSpotState(t, FLOOR_Y);
+  const sx = width / W;
+  const sy = height / H;
+  // Spot's body spans roughly x .. x+14, torso y ≈ (FLOOR_Y+3-12)..(FLOOR_Y+3)
+  // = FLOOR_Y-9..FLOOR_Y+3 after the 5px drop. Hit box is padded above.
+  const boxX = (s.x - 4) * sx;
+  const boxY = (FLOOR_Y - 15) * sy;
+  const boxW = 22 * sx;
+  const boxH = 24 * sy;
+  const [floaters, setFloaters] = React.useState<CatRewardFloaterState[]>([]);
+  const nextId = React.useRef(30_000);
+  return (
+    <>
+      <Pressable
+        onPress={() => {
+          setActiveIdx(null);
+          const result = useGame.getState().interactWithCompanion("spot");
+          if (result.rewarded && result.tokens) {
+            audio.play("vignette_pop");
+            const id = nextId.current++;
+            const tokens = D(result.tokens);
+            const text = `+${formatNumber(tokens)}`;
+            setFloaters((f) => [...f, { id, x: s.x + 7, y: FLOOR_Y - 15, text }]);
+            setTimeout(() => {
+              setFloaters((f) => f.filter((x) => x.id !== id));
+            }, 900);
+            return;
+          }
+          onHit("spot");
+        }}
+        style={{
+          position: "absolute",
+          left: boxX,
+          top: boxY,
+          width: boxW,
+          height: boxH,
+        }}
+      />
+      {floaters.map((f) => (
+        <CatRewardFloater
+          key={f.id}
+          text={f.text}
+          sceneX={f.x}
+          sceneY={f.y}
+          viewScaleX={sx}
+          viewScaleY={sy}
+        />
+      ))}
+    </>
+  );
+}
+
+// Campus bartender drink-slide hit target. The scene owns the timing
+// (bartenderDrinkSlideState), the store awards tokens once per pour via
+// a local "already caught this cycle" ref. Hit-box follows the drink's
+// live position as it slides across the bar top.
+function BartenderDrinkHit({
+  width,
+  height,
+  setActiveIdx,
+}: {
+  width: number;
+  height: number;
+  setActiveIdx: (idx: number | null) => void;
+}) {
+  useTick(50);
+  const t = Math.floor((Date.now() / 200) * 3);
+  const drink = bartenderDrinkSlideState(t);
+  const caughtCycleRef = React.useRef<number>(-1);
+  const [floaters, setFloaters] = React.useState<CatRewardFloaterState[]>([]);
+  const nextId = React.useRef(40_000);
+  if (!drink.active || drink.launching || caughtCycleRef.current === drink.cycle) {
+    return (
+      <>
+        {floaters.map((f) => (
+          <CatRewardFloater
+            key={f.id}
+            text={f.text}
+            sceneX={f.x}
+            sceneY={f.y}
+            viewScaleX={width / W}
+            viewScaleY={height / H}
+          />
+        ))}
+      </>
+    );
+  }
+  const sx = width / W;
+  const sy = height / H;
+  const x0 = BAR_CBX + 12;
+  const x1 = BAR_CBX + BAR_CBW - 12;
+  const dy = 196;
+  const dx = drink.facing > 0
+    ? x0 + (x1 - x0) * drink.p
+    : x1 - (x1 - x0) * drink.p;
+  // Generous hit area — 32×24 scene-px around the glass (~48×36 on-screen)
+  // + 8px hitSlop pad. The drink slides across the bar in 2s so the
+  // target needs to forgive imprecise taps, and it competes with the
+  // static "bar" cosmetic zone underneath (which opens the info popup
+  // if it wins the tap). Sibling later in JSX = wins overlap in RN.
+  const boxW = 32;
+  const boxH = 24;
+  return (
+    <>
+      <Pressable
+        hitSlop={8}
+        onPress={() => {
+          setActiveIdx(null);
+          if (caughtCycleRef.current === drink.cycle) return;
+          caughtCycleRef.current = drink.cycle;
+          const result = useGame.getState().catchBartenderDrink();
+          audio.play("vignette_pop");
+          const id = nextId.current++;
+          const text = `+${formatNumber(D(result.tokens))}`;
+          setFloaters((f) => [...f, { id, x: dx, y: dy - 8, text }]);
+          setTimeout(() => {
+            setFloaters((f) => f.filter((x) => x.id !== id));
+          }, 900);
+        }}
+        style={{
+          position: "absolute",
+          left: (dx - boxW / 2) * sx,
+          top: (dy - boxH + 4) * sy,
+          width: boxW * sx,
+          height: boxH * sy,
+        }}
+      />
+      {floaters.map((f) => (
+        <CatRewardFloater
+          key={f.id}
+          text={f.text}
+          sceneX={f.x}
+          sceneY={f.y}
+          viewScaleX={sx}
+          viewScaleY={sy}
+        />
+      ))}
+    </>
+  );
+}
+
+// Datacenter sparking-rack hit target. sparkingMainframeState picks which
+// of 5 racks is alerting; player has ~4s to tap it. Awards tokens once
+// per event via cycle-guard ref.
+interface SparkingRackState {
+  activeIdx: number | null;
+  framesActive: number;
+  cycle: number;
+}
+const SPARK_PERIOD = 660;
+const SPARK_ALERT  = 96;
+// Rack positions match DatacenterScene's actual sprite y-coords.
+// Back row: FLOOR_Y(150)+58 = 208. Front row: H(360)-82 = 278. Front
+// centre is the TRAINING RUN console — skipped so sparks don't overlap
+// its dedicated tap target.
+const DC_RACKS: ReadonlyArray<{ x: number; y: number }> = [
+  { x: 32,  y: 208 },   // 0 back-left
+  { x: 96,  y: 208 },   // 1 back-centre
+  { x: 160, y: 208 },   // 2 back-right
+  { x: 26,  y: 278 },   // 3 front-left  (L2)
+  { x: 154, y: 278 },   // 4 front-right (R2)
+];
+function sparkingMainframeState(t: number): SparkingRackState {
+  const phase = t % SPARK_PERIOD;
+  const cycle = Math.floor(t / SPARK_PERIOD);
+  if (phase >= SPARK_ALERT) return { activeIdx: null, framesActive: 0, cycle };
+  return { activeIdx: (cycle * 7 + 3) % 5, framesActive: phase, cycle };
+}
+
+function SparkingRackHit({
+  width,
+  height,
+  setActiveIdx,
+}: {
+  width: number;
+  height: number;
+  setActiveIdx: (idx: number | null) => void;
+}) {
+  useTick(50);
+  const t = Math.floor(Date.now() / 200);
+  const spark = sparkingMainframeState(t);
+  const caughtCycleRef = React.useRef<number>(-1);
+  const [floaters, setFloaters] = React.useState<CatRewardFloaterState[]>([]);
+  const nextId = React.useRef(50_000);
+  const sx = width / W;
+  const sy = height / H;
+  if (spark.activeIdx == null || caughtCycleRef.current === spark.cycle) {
+    return (
+      <>
+        {floaters.map((f) => (
+          <CatRewardFloater
+            key={f.id}
+            text={f.text}
+            sceneX={f.x}
+            sceneY={f.y}
+            viewScaleX={sx}
+            viewScaleY={sy}
+          />
+        ))}
+      </>
+    );
+  }
+  const rk = DC_RACKS[spark.activeIdx];
+  const boxW = 52;
+  const boxH = 48;
+  return (
+    <>
+      <Pressable
+        onPress={() => {
+          setActiveIdx(null);
+          if (caughtCycleRef.current === spark.cycle) return;
+          caughtCycleRef.current = spark.cycle;
+          const result = useGame.getState().coolDownSparkingRack();
+          audio.play("vignette_pop");
+          const id = nextId.current++;
+          const text = `+${formatNumber(D(result.tokens))}`;
+          setFloaters((f) => [...f, { id, x: rk.x + 24, y: rk.y - 10, text }]);
+          setTimeout(() => {
+            setFloaters((f) => f.filter((x) => x.id !== id));
+          }, 900);
+        }}
+        style={{
+          position: "absolute",
+          left: rk.x * sx,
+          top: rk.y * sy,
+          width: boxW * sx,
+          height: boxH * sy,
+        }}
+      />
+      {floaters.map((f) => (
+        <CatRewardFloater
+          key={f.id}
+          text={f.text}
+          sceneX={f.x}
+          sceneY={f.y}
+          viewScaleX={sx}
+          viewScaleY={sy}
+        />
+      ))}
+    </>
+  );
+}
+
+// Dynamic hit target that follows the bartender's live walking position
+// (bar counter x=cbX+8 .. cbX+cbW-16, head y≈176..186). Tap → compact
+// info popup for the character himself; the sliding-drink hit target
+// (BartenderDrinkHit) is a separate later-rendered sibling that wins
+// overlap while the drink is on-screen. Both live in the touch overlay.
+function DynamicBartenderHit({
+  width,
+  height,
+  onHit,
+  setActiveIdx,
+}: {
+  width: number;
+  height: number;
+  onHit: (id: HitId) => void;
+  setActiveIdx: (idx: number | null) => void;
+}) {
+  useTick(50);
+  const t = (Date.now() / 200) * 3;
+  const cbX = BAR_CBX;
+  const cbW = BAR_CBW;
+  const span = cbW - 24;
+  const phase = (t / 8) % (span * 2);
+  const walk = phase < span ? phase : span * 2 - phase;
+  const bx = cbX + 8 + walk;
+  const sx = width / W;
+  const sy = height / H;
+  const boxX = (bx - 2) * sx;
+  const boxY = 172 * sy;   // head top ≈ 176; pad 4px above
+  const boxW = 18 * sx;
+  const boxH = 22 * sy;    // covers head + top of torso above the counter
+  return (
+    <Pressable
+      onPress={() => {
+        setActiveIdx(null);
+        onHit("bartender");
+      }}
+      style={{
+        position: "absolute",
+        left: boxX,
+        top: boxY,
+        width: boxW,
+        height: boxH,
+      }}
+    />
+  );
+}
+
+// Same idea for the Datacenter inspector — dynamic hit on his live
+// catwalk position → compact popup. Sparking-rack hit is a separate
+// later-rendered sibling (they don't compete visually — inspector on
+// catwalk y≈170..200, sparks on mainframes y≈216 or 268).
+function DynamicInspectorHit({
+  width,
+  height,
+  onHit,
+  setActiveIdx,
+}: {
+  width: number;
+  height: number;
+  onHit: (id: HitId) => void;
+  setActiveIdx: (idx: number | null) => void;
+}) {
+  useTick(50);
+  const t = Date.now() / 200;
+  // Inspector walks: figX = 16 + ((t/8) % (W - 40))
+  const figX = 16 + ((t / 8) % (W - 40));
+  const sx = width / W;
+  const sy = height / H;
+  // Feet at cwY=185 (FLOOR_Y+35), body iy=cwY-30=155. Box pads 2-3px.
+  const boxX = (figX - 2) * sx;
+  const boxY = 153 * sy;
+  const boxW = 16 * sx;
+  const boxH = 36 * sy;
+  return (
+    <Pressable
+      onPress={() => {
+        setActiveIdx(null);
+        onHit("inspector");
+      }}
+      style={{
+        position: "absolute",
+        left: boxX,
+        top: boxY,
+        width: boxW,
+        height: boxH,
+      }}
+    />
+  );
+}
+
+// Planetary cosmonaut info tap + UFO catch layer. Cosmonaut tap opens
+// the compact info popup; UFO taps use the deterministic ufoFlybyState
+// list — a caught-set ref tracks which UFO ids have already been
+// redeemed so each saucer only pays out once (even if the deterministic
+// state re-materializes it briefly on a jitter/rerender).
+function CosmonautUFOHit({
+  width,
+  height,
+  onHit,
+  setActiveIdx,
+}: {
+  width: number;
+  height: number;
+  onHit: (id: HitId) => void;
+  setActiveIdx: (idx: number | null) => void;
+}) {
+  useTick(50);
+  const t = Date.now() / 200;
+  const tInt = Math.floor(t);
+  const { mx, my } = cosmonautPos(t);
+  const sx = width / W;
+  const sy = height / H;
+  const ufos = ufoFlybyState(tInt);
+  const caughtIdsRef = React.useRef<Set<number>>(new Set());
+  const [floaters, setFloaters] = React.useState<CatRewardFloaterState[]>([]);
+  const nextFloaterId = React.useRef(60_000);
+
+  const catchUFO = (id: number, ux: number, uy: number) => {
+    if (caughtIdsRef.current.has(id)) return;
+    caughtIdsRef.current.add(id);
+    const result = useGame.getState().catchUFO();
+    audio.play("vignette_pop");
+    const fid = nextFloaterId.current++;
+    const text = `+${formatNumber(D(result.tokens))}`;
+    setFloaters((f) => [...f, { id: fid, x: ux, y: uy - 6, text }]);
+    setTimeout(() => setFloaters((f) => f.filter((x) => x.id !== fid)), 900);
+  };
+
+  return (
+    <>
+      {/* Cosmonaut info tap — always available */}
+      <Pressable
+        onPress={() => {
+          setActiveIdx(null);
+          onHit("cosmonaut");
+        }}
+        style={{
+          position: "absolute",
+          left: (mx - 2) * sx,
+          top:  (my - 2) * sy,
+          width:  14 * sx,
+          height: 22 * sy,
+        }}
+      />
+      {/* One tap target per live UFO — bigger box + generous hitSlop
+          since the saucer keeps moving and taps need to feel forgiving. */}
+      {ufos.map((u) => {
+        if (caughtIdsRef.current.has(u.id)) return null;
+        const ux = Math.floor(u.x);
+        const uy = Math.floor(u.y);
+        const boxW = 28;
+        const boxH = 18;
+        return (
+          <Pressable
+            key={`ufo${u.id}`}
+            hitSlop={10}
+            onPress={() => {
+              setActiveIdx(null);
+              catchUFO(u.id, ux, uy);
+            }}
+            style={{
+              position: "absolute",
+              left: (ux - boxW / 2) * sx,
+              top:  (uy - 5) * sy,
+              width:  boxW * sx,
+              height: boxH * sy,
+            }}
+          />
+        );
+      })}
+      {floaters.map((f) => (
+        <CatRewardFloater
+          key={f.id}
+          text={f.text}
+          sceneX={f.x}
+          sceneY={f.y}
+          viewScaleX={sx}
+          viewScaleY={sy}
+        />
+      ))}
+    </>
+  );
+}
+
+// AGI Singularity 3-choice prompt event (Round 9). Every 45-60s the
+// model asks a question via a full terminal-window modal above the
+// prompt engineer's desk. Player has 10s to pick one of 3 replies,
+// each with a DIFFERENT effect (currency burst / temp mult / debt
+// paydown / debt add / hype swing). Ties into store's AGI_PROMPTS
+// table + applyAGIPromptChoice handler.
+const AGI_PROMPT_MIN_MS = 45_000;
+const AGI_PROMPT_MAX_MS = 60_000;
+const AGI_PROMPT_WINDOW_MS = 10_000;
+function AGIPromptHit({
+  width,
+  height,
+  onHit,
+  setActiveIdx,
+}: {
+  width: number;
+  height: number;
+  onHit: (id: HitId) => void;
+  setActiveIdx: (idx: number | null) => void;
+}) {
+  useTick(50);
+  const now = Date.now();
+  const sx = width / W;
+  const sy = height / H;
+  const peBase = promptEngineerPos(Date.now() / 200);
+  const [active, setActive] = React.useState<{ promptId: string; bornMs: number } | null>(null);
+  const nextSpawnRef = React.useRef(now + AGI_PROMPT_MIN_MS);
+  const promptCycleRef = React.useRef(0);
+  const [floater, setFloater] = React.useState<CatRewardFloaterState | null>(null);
+  const floaterIdRef = React.useRef(70_000);
+
+  // Auto-close expired prompt.
+  React.useEffect(() => {
+    if (!active) return;
+    if (now - active.bornMs >= AGI_PROMPT_WINDOW_MS) {
+      setActive(null);
+      // Re-arm with random delay after silent dismiss.
+      const jitter = Math.floor((now * 37) % (AGI_PROMPT_MAX_MS - AGI_PROMPT_MIN_MS));
+      nextSpawnRef.current = now + AGI_PROMPT_MIN_MS + jitter;
+    }
+  }, [active, now]);
+
+  // Spawn a new prompt when timer elapses.
+  React.useEffect(() => {
+    if (active) return;
+    if (now < nextSpawnRef.current) return;
+    const prompts = AGI_PROMPTS;
+    const promptIdx = promptCycleRef.current % prompts.length;
+    promptCycleRef.current++;
+    setActive({ promptId: prompts[promptIdx].id, bornMs: now });
+  }, [active, now]);
+
+  const respond = (choiceIdx: number) => {
+    if (!active) return;
+    const result = useGame.getState().applyAGIPromptChoice(active.promptId, choiceIdx);
+    audio.play("vignette_pop");
+    const fid = floaterIdRef.current++;
+    setFloater({ id: fid, x: peBase.x + 4, y: peBase.y - 20, text: result.label });
+    setTimeout(() => setFloater((f) => (f && f.id === fid ? null : f)), 1500);
+    setActive(null);
+    const jitter = Math.floor((now * 37) % (AGI_PROMPT_MAX_MS - AGI_PROMPT_MIN_MS));
+    nextSpawnRef.current = now + AGI_PROMPT_MIN_MS + jitter;
+  };
+
+  const prompt = active ? AGI_PROMPTS.find((p) => p.id === active.promptId) : null;
+
+  return (
+    <>
+      {/* Prompt Engineer info tap — always present */}
+      <Pressable
+        onPress={() => {
+          setActiveIdx(null);
+          onHit("prompt_engineer");
+        }}
+        style={{
+          position: "absolute",
+          left: (peBase.x - 2) * sx,
+          top:  (peBase.y - 2) * sy,
+          width:  14 * sx,
+          height: 20 * sy,
+        }}
+      />
+      {/* AGI terminal prompt modal — magenta/purple frame, 3 choice buttons */}
+      {prompt && (
+        <View
+          pointerEvents="box-none"
+          style={agiPromptStyles.overlay}
+        >
+          <View style={agiPromptStyles.terminal}>
+            <View style={agiPromptStyles.header}>
+              <View style={agiPromptStyles.headerDot} />
+              <Text style={agiPromptStyles.headerLabel}>AGI</Text>
+            </View>
+            <Text style={agiPromptStyles.prompt} numberOfLines={1}>{`> ${prompt.text}`}</Text>
+            <View style={agiPromptStyles.choicesRow}>
+              {prompt.choices.map((c, i) => (
+                <Pressable
+                  key={`c${i}`}
+                  onPress={() => respond(i)}
+                  style={agiPromptStyles.choiceBtn}
+                >
+                  <Text style={agiPromptStyles.choiceText} numberOfLines={1}>{c.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        </View>
+      )}
+      {floater && (
+        <CatRewardFloater
+          text={floater.text}
+          sceneX={floater.x}
+          sceneY={floater.y}
+          viewScaleX={sx}
+          viewScaleY={sy}
+        />
+      )}
+    </>
+  );
+}
+
+const agiPromptStyles = StyleSheet.create({
+  overlay: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    // Sit above the prompt engineer (~y=248 in scene coords) but below
+    // the bottom-alloc chrome. Fixed on-screen offset works fine here
+    // because it lives inside the touch overlay which is already scene-
+    // scaled by PixelScene's SVG viewBox math.
+    top: "58%",
+    alignItems: "center",
+    zIndex: 5,
+  },
+  terminal: {
+    backgroundColor: "#1A0E22",
+    borderColor: "#E85AFF",
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    minWidth: 220,
+    maxWidth: 300,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 4,
+  },
+  headerDot: {
+    width: 5,
+    height: 5,
+    backgroundColor: "#E85AFF",
+  },
+  headerLabel: {
+    fontFamily: fonts.display,
+    fontSize: 9,
+    color: "#E85AFF",
+    letterSpacing: 1,
+  },
+  prompt: {
+    fontFamily: fonts.mono,
+    fontSize: 14,
+    color: "#FBF7EC",
+    marginBottom: 8,
+  },
+  choicesRow: {
+    flexDirection: "row",
+    gap: 4,
+  },
+  choiceBtn: {
+    flex: 1,
+    backgroundColor: "#6A2A7A",
+    borderColor: "#E85AFF",
+    borderWidth: 1,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+    alignItems: "center",
+    justifyContent: "flex-start",
+    minHeight: 46,
+  },
+  choiceText: {
+    fontFamily: fonts.display,
+    fontSize: 12,
+    color: "#FBF7EC",
+    letterSpacing: 1,
+  },
+});
 
 // ═══════════════════════════════════════════════════════════════════════
 // NEW HELPERS (used by Coworking scene — design v4)
@@ -838,8 +2094,366 @@ function ComputeCase({ x, y, t }: { x: number; y: number; t: number }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// SEED GARAGE SCENE — port of pixel-art.jsx::composeSeedScene
-// ═══════════════════════════════════════════════════════════════════════
+// Wry one-liners the Garage Cat cycles through — first (Round 1) of the
+// 8-companion arc. Tone: deadpan house cat observing founder chaos.
+// Cycle offset +1.5s (36 frames) so it doesn't sync with the Inspector.
+const GARAGE_CAT_QUIPS = [
+  "the human's been on git blame for six hours.",
+  "second monitor still showing 404.",
+  "keyboard is warm. that's my throne now.",
+  "he named the AI 'meow'. i approve.",
+  "the standup was three people talking to themselves.",
+  "commit message: 'idk'. mood.",
+  "founder pitched to a wall. i think it went well.",
+  "the intern brought me tuna. cofounder now.",
+];
+
+interface GarageCatState {
+  x: number;
+  y: number;
+  sitting: boolean;
+  facing: 1 | -1;
+  jumping: boolean;
+  air: number;
+  qx: number;
+  qy: number;
+}
+
+// Deterministic 480-frame loop through: walk floor → jump onto keyboard →
+// sit on desk → jump down → walk home → sit on floor. Both the sprite
+// component and the quip anchor derive from this so they stay in sync.
+function garageCatState(t: number): GarageCatState {
+  // 2026-07 reroute: cat lives on the RIGHT floor (upper-floor band at
+  // y=275, feet on wood planks), occasionally jumps LEFT over the empty
+  // middle onto the desk keyboard throne at (58, 250) — long tall parabola
+  // — sits there, hops back. Fixes the earlier version that walked across
+  // the wainscoting wall band instead of the floor.
+  const HOME   = { x: 190, y: 275 }; // right-side floor
+  const LAUNCH = { x: 140, y: 275 }; // left edge of the right zone
+  // Desk perch — sit at the RIGHT END of the desk (between pizza x=112
+  // and the desk edge x=140) so the cat doesn't overlap the mouse pad
+  // or the pizza sprite. Was x=102 → landed on the mouse.
+  const TABLE  = { x: 125, y: 247 };
+  // `t` is now a FRACTIONAL 5fps-frame value (see useCatSmoothT) — no
+  // Math.floor here, positions interpolate between frames so the cat
+  // walks smoothly at 30fps instead of jumping at the scene's 5fps
+  // tick rate. Multiplier stays 6× so cycle length is unchanged (~16s).
+  const loop = (t * 6) % 480;
+  let x = 0, y = 0;
+  let sitting = false, facing: 1 | -1 = 1, jumping = false, air = 0;
+  if (loop < 108) {
+    x = HOME.x; y = HOME.y;
+    sitting = true; facing = -1;
+  } else if (loop < 150) {
+    const u = (loop - 108) / 42;
+    x = HOME.x + (LAUNCH.x - HOME.x) * u; y = 275; facing = -1;
+  } else if (loop < 186) {
+    const u = (loop - 150) / 36;
+    x = LAUNCH.x + (TABLE.x - LAUNCH.x) * u;
+    y = (LAUNCH.y + (TABLE.y - LAUNCH.y) * u) - 40 * Math.sin(Math.PI * u);
+    facing = -1; jumping = true; air = u;
+  } else if (loop < 330) {
+    x = TABLE.x; y = TABLE.y;
+    sitting = true; facing = 1;
+  } else if (loop < 366) {
+    const u = (loop - 330) / 36;
+    x = TABLE.x + (LAUNCH.x - TABLE.x) * u;
+    y = (TABLE.y + (LAUNCH.y - TABLE.y) * u) - 30 * Math.sin(Math.PI * u);
+    facing = 1; jumping = true; air = u;
+  } else {
+    const u = (loop - 366) / 114;
+    x = LAUNCH.x + (HOME.x - LAUNCH.x) * u; y = 275; facing = 1;
+  }
+  const xi = Math.floor(x);
+  const yi = Math.floor(y);
+  return { x: xi, y: yi, sitting, facing, jumping, air, qx: xi + 5, qy: yi - 14 };
+}
+
+// Garage Cat sprite — 3 pose states (walking / sitting / jumping), each
+// with mirroring by `facing`. Orange tabby, big round eyes with blink,
+// tail flick / leg cycle every 4 frames.
+//
+// Uses its own SMOOTH tick (20fps) instead of the scene's 5fps `t` prop
+// so the cat interpolates between frames — walk motion looks continuous
+// instead of the jerky 5-step-per-second jump the rest of the scene has.
+// `t` is derived from wall-clock ms to match the 5fps frame scale that
+// garageCatState was authored against, just fractional.
+function GarageCat(_props: { t: number }) {
+  useTick(50);
+  const t = Date.now() / 200;
+  const s = garageCatState(t);
+  const interactions = useGame(selectCompanionInteractions);
+  const companionState = getCompanionState(Date.now(), interactions, "cat");
+  // "Purring / nuzzling" pose kicks in when the reward is ready AND the
+  // cat is at rest — closed eyes, small purr squiggles above head, gentle
+  // 1-px breath bob. Walking / jumping cats never enter purr mode.
+  const purring = companionState === "ready" && s.sitting;
+  const breathe = purring && (Math.floor(t / 4) % 2); // ~800ms per breath
+  const breathY = breathe ? 1 : 0;
+  const x = s.x, y = s.y + breathY, f = s.facing;
+  const ORANGE = "#E08A3C";
+  const HI = "#F0A85C";
+  const STRIPE = "#B5641F";
+  const BELLY = "#F5EFE2";
+  const NOSE = "#E88AA0";
+  const DARK = "#241A12";
+  // Blink / tail cycles use FLOORED t so the on/off flips at defined
+  // 5fps beats (matches the pre-smoothing look for these secondary
+  // animations — no need to sub-frame interpolate a 1-bit toggle).
+  const tInt = Math.floor(t);
+  const blink = (tInt % 40) < 3;
+  // Purring cats have half-closed happy eyes (slits) — override the
+  // normal blink toggle so the eyes stay visually shut most of the time.
+  const eyeColor = purring ? STRIPE : (blink ? STRIPE : DARK);
+  const tail = ((tInt >> 2) % 2);
+  // Purr squiggle position + phase — 2 tiny "~" strokes above ears that
+  // fade in/out ~every 400ms while purring.
+  const purrPulse = purring && ((tInt >> 1) % 3 !== 0);
+
+  if (s.jumping) {
+    const rising = s.air < 0.5;
+    const hx = f > 0 ? x + 9 : x - 3;
+    const tx = f > 0 ? x - 3 : x + 11;
+    const ty = rising ? y - 2 : y + 1;
+    return (
+      <G>
+        {/* Elongated body (leaping stretch) */}
+        <PixelRect x={x}     y={y + 1} w={12} h={4} c={ORANGE} />
+        <PixelRect x={x}     y={y + 1} w={12} h={1} c={HI} />
+        <PixelRect x={x + 2} y={y + 4} w={7}  h={1} c={BELLY} />
+        {/* Stripes */}
+        <PixelRect x={x + 3} y={y + 1} w={1} h={3} c={STRIPE} />
+        <PixelRect x={x + 6} y={y + 1} w={1} h={3} c={STRIPE} />
+        <PixelRect x={x + 9} y={y + 1} w={1} h={3} c={STRIPE} />
+        {/* Tucked legs */}
+        <Px x={x + 2}  y={y + 5} c={ORANGE} />
+        <Px x={x + 4}  y={y + 5} c={ORANGE} />
+        <Px x={x + 8}  y={y + 5} c={ORANGE} />
+        <Px x={x + 10} y={y + 5} c={ORANGE} />
+        {/* Tail streaming */}
+        <PixelRect x={tx} y={ty} w={3} h={1} c={ORANGE} />
+        <Px x={f > 0 ? tx - 1 : tx + 3} y={ty - 1} c={ORANGE} />
+        <Px x={tx + 1} y={ty} c={STRIPE} />
+        {/* Head (reaching forward) */}
+        <PixelRect x={hx} y={y - 1} w={5} h={4} c={ORANGE} />
+        <PixelRect x={hx} y={y - 1} w={5} h={1} c={HI} />
+        <Px x={f > 0 ? hx : hx + 4} y={y - 2} c={ORANGE} />
+        <Px x={f > 0 ? hx + 3 : hx + 1} y={y} c={DARK} />
+        <Px x={f > 0 ? hx + 4 : hx} y={y + 1} c={NOSE} />
+      </G>
+    );
+  }
+
+  if (s.sitting) {
+    return (
+      <G>
+        {/* Tail curling (flicks) */}
+        <PixelRect x={x - 3 + tail} y={y + 8} w={4} h={2} c={ORANGE} />
+        <Px x={x - 3 + tail} y={y + 8} c={STRIPE} />
+        {/* Upright oval body */}
+        <PixelRect x={x - 1} y={y + 1} w={8} h={9} c={ORANGE} />
+        <PixelRect x={x - 1} y={y + 1} w={8} h={1} c={HI} />
+        <PixelRect x={x + 1} y={y + 4} w={4} h={6} c={BELLY} />
+        {/* Stripes */}
+        <PixelRect x={x - 1} y={y + 3} w={8} h={1} c={STRIPE} />
+        <PixelRect x={x - 1} y={y + 6} w={2} h={1} c={STRIPE} />
+        <PixelRect x={x + 5} y={y + 6} w={2} h={1} c={STRIPE} />
+        {/* Front paws */}
+        <Px x={x}     y={y + 9} c={BELLY} />
+        <Px x={x + 5} y={y + 9} c={BELLY} />
+        {/* Head */}
+        <PixelRect x={x} y={y - 4} w={6} h={5} c={ORANGE} />
+        <PixelRect x={x} y={y - 4} w={6} h={1} c={HI} />
+        {/* Ears */}
+        <Px x={x}     y={y - 5} c={ORANGE} />
+        <Px x={x + 5} y={y - 5} c={ORANGE} />
+        <Px x={x}     y={y - 4} c={STRIPE} />
+        <Px x={x + 5} y={y - 4} c={STRIPE} />
+        {/* Eyes — normal dots, or slits when purring (closed happy eyes) */}
+        {purring ? (
+          <>
+            <PixelRect x={x + 1} y={y - 2} w={2} h={1} c={eyeColor} />
+            <PixelRect x={x + 4} y={y - 2} w={2} h={1} c={eyeColor} />
+          </>
+        ) : (
+          <>
+            <Px x={x + 1} y={y - 2} c={eyeColor} />
+            <Px x={x + 4} y={y - 2} c={eyeColor} />
+          </>
+        )}
+        {/* Nose */}
+        <Px x={x + 2} y={y - 1} c={NOSE} />
+        <Px x={x + 3} y={y - 1} c={NOSE} />
+        {/* Purr squiggles above ears — 2 tiny "~" that pulse while ready */}
+        {purrPulse && (
+          <G>
+            <Px x={x - 2} y={y - 7} c={STRIPE} />
+            <Px x={x - 1} y={y - 8} c={STRIPE} />
+            <Px x={x + 7} y={y - 8} c={STRIPE} />
+            <Px x={x + 8} y={y - 7} c={STRIPE} />
+          </G>
+        )}
+      </G>
+    );
+  }
+
+  // Walking side-profile
+  const hx = f > 0 ? x + 8 : x - 2;
+  const tx = f > 0 ? x - 1 : x + 10;
+  return (
+    <G>
+      {/* Horizontal body */}
+      <PixelRect x={x}     y={y + 1} w={10} h={5} c={ORANGE} />
+      <PixelRect x={x}     y={y + 1} w={10} h={1} c={HI} />
+      <PixelRect x={x + 2} y={y + 4} w={6}  h={2} c={BELLY} />
+      {/* Body stripes */}
+      <PixelRect x={x + 2} y={y + 1} w={1} h={4} c={STRIPE} />
+      <PixelRect x={x + 5} y={y + 1} w={1} h={4} c={STRIPE} />
+      <PixelRect x={x + 8} y={y + 1} w={1} h={4} c={STRIPE} />
+      {/* Legs (2-frame alt) */}
+      <Px x={x + 1} y={y + 6 + (tail ? 0 : 1)} c={ORANGE} />
+      <Px x={x + 4} y={y + 6 + (tail ? 1 : 0)} c={ORANGE} />
+      <Px x={x + 7} y={y + 6 + (tail ? 0 : 1)} c={ORANGE} />
+      <Px x={x + 9} y={y + 6 + (tail ? 1 : 0)} c={ORANGE} />
+      {/* Tail up */}
+      <PixelRect x={tx} y={y - 2} w={1} h={5} c={ORANGE} />
+      <Px x={tx} y={y - 3 + tail} c={ORANGE} />
+      <Px x={tx} y={y - 1} c={STRIPE} />
+      <Px x={tx} y={y + 2} c={STRIPE} />
+      {/* Head */}
+      <PixelRect x={hx} y={y - 2} w={5} h={5} c={ORANGE} />
+      <PixelRect x={hx} y={y - 2} w={5} h={1} c={HI} />
+      {/* Ears */}
+      <Px x={hx}     y={y - 3} c={ORANGE} />
+      <Px x={hx + 4} y={y - 3} c={ORANGE} />
+      {/* Eye */}
+      <Px x={f > 0 ? hx + 3 : hx + 1} y={y} c={blink ? STRIPE : DARK} />
+      {/* Nose */}
+      <Px x={f > 0 ? hx + 4 : hx} y={y + 1} c={NOSE} />
+    </G>
+  );
+}
+
+// Pink pixel-heart that hovers above the cat's head whenever the
+// mini-interaction is ready to redeem (see interactWithCompanion in
+// store.ts). Pulses on/off every ~0.6s (3 ticks at 5 t/s) to draw the eye
+// without becoming visual noise. Positioned relative to the cat's live
+// state so it follows the cat as it moves.
+function GarageCatReadyIndicator(_props: { t: number }) {
+  // Match the sprite's 20fps smooth tick so the heart anchors to the
+  // interpolated cat position (not the scene's coarse 5fps snapshot).
+  useTick(50);
+  const t = Date.now() / 200;
+  const interactions = useGame(selectCompanionInteractions);
+  const state = getCompanionState(Date.now(), interactions, "cat");
+  if (state !== "ready") return null;
+  const s = garageCatState(t);
+  const tInt = Math.floor(t);
+  // Anchor to the cat's HEAD (which sits at y-2 relative to body y).
+  // Heart floats ~10px above the head with a subtle 1px bob.
+  const bob = ((tInt >> 1) % 2);
+  const hx = s.x + 4;
+  const hy = s.y - 12 - bob;
+  const PINK = "#F5A0B4";
+  const PINK_HI = "#FBC8D2";
+  const PINK_SH = "#C97088";
+  const blink = (tInt >> 2) % 4 < 3; // ~600ms on, ~200ms off
+  if (!blink) return null;
+  return (
+    <G>
+      {/* Two lobes on top */}
+      <Px x={hx + 1} y={hy}     c={PINK_HI} />
+      <Px x={hx + 4} y={hy}     c={PINK_HI} />
+      <PixelRect x={hx}     y={hy + 1} w={3} h={2} c={PINK} />
+      <PixelRect x={hx + 3} y={hy + 1} w={3} h={2} c={PINK} />
+      <Px x={hx + 1} y={hy + 1} c={PINK_HI} />
+      <Px x={hx + 4} y={hy + 1} c={PINK_HI} />
+      {/* V-point */}
+      <PixelRect x={hx + 1} y={hy + 3} w={4} h={1} c={PINK} />
+      <PixelRect x={hx}     y={hy + 3} w={6} h={1} c={PINK_SH} />
+      <PixelRect x={hx + 2} y={hy + 4} w={2} h={1} c={PINK_SH} />
+    </G>
+  );
+}
+
+// Shared wrap helper for the companion quip bubbles. Silkscreen 6px
+// renders ~4.3px per char, so a raw `length * 3 + N` estimate (used by
+// the earlier one-liner bubbles) truncates long quips. This wraps into
+// up to 2 lines, splitting at the nearest word boundary, and returns
+// the pixel bubble width the widest line needs.
+const QUIP_CHAR_W = 4.3;
+function wrapQuipLines(text: string, maxBubbleW: number, padPx: number): { lines: string[]; bubbleW: number } {
+  const lineCap = Math.max(4, Math.floor((maxBubbleW - padPx) / QUIP_CHAR_W));
+  const lines: string[] = [];
+  if (text.length <= lineCap) {
+    lines.push(text);
+  } else {
+    let split = text.lastIndexOf(" ", lineCap);
+    if (split < lineCap * 0.4) split = text.indexOf(" ", lineCap);
+    if (split < 0 || split >= text.length) split = lineCap;
+    const l1 = text.slice(0, split).trim();
+    let l2 = text.slice(split).trim();
+    if (l2.length > lineCap) l2 = l2.slice(0, lineCap - 1) + "…";
+    lines.push(l1, l2);
+  }
+  const widest = Math.max(...lines.map((l) => l.length * QUIP_CHAR_W + padPx));
+  return { lines, bubbleW: Math.ceil(Math.min(maxBubbleW, widest)) };
+}
+
+// Warm-brown "fridge note" bubble, cream border. Offset +1.5s (36 frames)
+// from Inspector so the cat and the datacenter's Inspector don't mutter
+// simultaneously if both scenes are previewed at once.
+function GarageCatQuip({ t }: { t: number }) {
+  // Anchor bubble tail to the SMOOTH cat position so the tail doesn't
+  // "teleport" 5px between scene ticks. Cycle timing (`t + 36`, `/24`,
+  // etc.) still uses the parent 5fps t — those beats were tuned to the
+  // scene's coarse tick and switching them to sub-frame would just make
+  // the quip flicker faster.
+  const smoothT = Date.now() / 200;
+  const s = garageCatState(smoothT);
+  const cycle = ((t + 36) / 24) % 12;
+  if (cycle > 4) return null;
+  const idx = Math.floor((t + 36) / 24 / 12) % GARAGE_CAT_QUIPS.length;
+  const text = GARAGE_CAT_QUIPS[idx];
+  // Paw glyph eats ~7px of left padding + 2px right margin.
+  // Cat bubble uses a narrow 140px cap (vs the ~232px other companions
+  // get) so quips wrap into 2 short lines instead of one wide banner —
+  // reads faster + doesn't cover the desk / GPU.
+  const { lines, bubbleW } = wrapQuipLines(text, 140, 12);
+  const rowH = 8;
+  const bubbleH = 4 + lines.length * rowH;
+  const bubbleX = Math.max(2, Math.min(s.qx - bubbleW / 2, W - bubbleW - 2));
+  const bubbleY = Math.max(2, s.qy - (bubbleH + 2));
+  return (
+    <G>
+      {/* Bubble body */}
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={bubbleW} h={bubbleH} c="#3A2418" />
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={bubbleW} h={1}       c="#F5EFE2" />
+      <PixelRect x={bubbleX}                 y={bubbleY + bubbleH - 1} w={bubbleW} h={1}      c="#241408" />
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={1}       h={bubbleH} c="#F5EFE2" />
+      <PixelRect x={bubbleX + bubbleW - 1}   y={bubbleY}              w={1}       h={bubbleH} c="#241408" />
+      {/* Tail down to the cat */}
+      <PixelRect x={s.qx - 1} y={bubbleY + bubbleH} w={3} h={2} c="#3A2418" />
+      <Px x={s.qx} y={bubbleY + bubbleH + 2} c="#3A2418" />
+      {/* Paw-print glyph */}
+      <Px x={bubbleX + 3} y={bubbleY + 4} c="#C8A078" />
+      <Px x={bubbleX + 3} y={bubbleY + 8} c="#C8A078" />
+      {lines.map((line, i) => (
+        <SvgText
+          key={`ln${i}`}
+          x={bubbleX + 7}
+          y={bubbleY + 8 + i * rowH}
+          fontSize={6}
+          fontFamily={fonts.displayRegular}
+          fill="#F5EFE2"
+        >
+          {line}
+        </SvgText>
+      ))}
+    </G>
+  );
+}
+
 function SeedScene({ t }: { t: number }) {
   return (
     <G>
@@ -880,6 +2494,15 @@ function SeedScene({ t }: { t: number }) {
       <Roomba x={152} y={302} t={t} />
       {/* Particles */}
       <FloatingTokens spawnX={70} spawnY={236} t={t} />
+      {/* Garage Cat — 1st of the 8-companion arc. Roams floor↔desk in a
+          480-frame loop (walk → jump to keyboard → sit → jump down →
+          walk back → sit on floor). Drawn AFTER the desk so the cat is
+          visible sitting on the keyboard, not hidden behind the monitor.
+          ReadyIndicator overlays a pink heart above the cat's head when
+          the pet-cat mini-interaction is ready to redeem. */}
+      <GarageCat t={t} />
+      <GarageCatReadyIndicator t={t} />
+      <GarageCatQuip t={t} />
     </G>
   );
 }
@@ -913,6 +2536,185 @@ const COWORK = {
   feltEdge:   "#5C7560",
   feltDark:   "#2A3A2E",
 };
+
+// Wry one-liners the Pizza Guy cycles through — 2nd of the 8-companion
+// arc. Tone: delivery-driver deadpan about startup food orders. Cycle
+// offset +10.5s (252 frames).
+const COWORKING_PIZZA_QUIPS = [
+  "third pizza this shift. all to the same address.",
+  "48 slices. 12 in the meeting. 36 in the trash tomorrow.",
+  "no one at the door. slack said 'leave it.'",
+  "the AI ordered pineapple. i respected it more than the humans.",
+  "the founder said 'i'll venmo you.' he never does.",
+  "customer rating: 5 stars. it was left by the AI.",
+  "delivery to conference room B. there is no conference room B.",
+  "someone asked if this was gluten free. it's pizza.",
+];
+
+interface CoworkPizzaState {
+  x: number;
+  facing: 1 | -1;
+  look: boolean;
+  earbud: boolean;
+  stopped: boolean;
+  stride: number;
+  qx: number;
+  qy: number;
+}
+
+// Patrol path along the open floor at Inspector cadence (t >> 3). Every
+// ~48 frames stops briefly for a head-turn ("who ordered?"). Every ~96
+// frames taps the earbud to confirm with dispatch.
+function coworkPizzaState(_t: number): CoworkPizzaState {
+  // 6× speed — pizza guy patrols a longer floor span than the cat.
+  // `t` is fractional now (see CoworkPizzaGuy's smooth tick) so position
+  // math (phase / walk) interpolates between scene ticks. Timing-based
+  // toggles (look / earbud / stride) still use floored integer t so
+  // their on/off flip stays at defined beats.
+  const t = _t * 6;
+  const tInt = Math.floor(t);
+  const x0 = 6;
+  const span = 210;
+  const phase = (t / 8) % (span * 2);
+  const walk = phase < span ? phase : span * 2 - phase;
+  const facing: 1 | -1 = phase < span ? 1 : -1;
+  const look = (tInt % 48) >= 45;
+  const earbud = (tInt % 96) >= 90;
+  const stopped = look || earbud;
+  const stride = (!stopped && (tInt >> 1) % 2) ? 1 : 0;
+  const x = Math.floor(x0 + walk);
+  const fy = 250;
+  const hy = fy - 32;
+  const boxY = hy - 9;
+  return { x, facing, look, earbud, stopped, stride, qx: x + 7, qy: boxY - 4 };
+}
+
+// Delivery guy walking with a pizza box balanced overhead. Signature key:
+// the WHITE SQUARE BOX perfectly level above the head — no bob, delivery
+// pride. Red cap + dark hoodie + backpack strap + earbud confirm dispatch.
+function CoworkPizzaGuy(_props: { t: number }) {
+  useTick(50);
+  const t = Date.now() / 200;
+  const s = coworkPizzaState(t);
+  const x = s.x;
+  const f = s.facing;
+  const stride = s.stride;
+  const headDx = s.look ? f * 3 : 0;
+  const fy = 250;
+  const hy = fy - 32;
+  const boxY = hy - 9;
+  const HOODIE = "#40404E";
+  const HOODIE_HI = "#54545F";
+  const HOODIE_SH = "#2A2A34";
+  const SKIN = "#D8A878";
+  const SKIN_HI = "#F0C89C";
+  const CAP = "#C9531E";
+  const CAP_HI = "#E87A3C";
+  const BOX = "#F5EFE2";
+  const BOX_SH = "#D8CFBC";
+  const LOGO = "#C9531E";
+  const DARK = "#2A2A2A";
+  const showSteam = (Math.floor(t) >> 2) % 4 < 2;
+  return (
+    <G>
+      {/* Legs / baggy pants + sneakers */}
+      <PixelRect x={x + 3}  y={fy - 12} w={4} h={12} c={DARK} />
+      <PixelRect x={x + 9}  y={fy - 12} w={4} h={12} c={DARK} />
+      <PixelRect x={x + 2  + (stride ? -1 : 0)} y={fy} w={4} h={2} c="#141414" />
+      <PixelRect x={x + 11 + (stride ?  1 : 0)} y={fy} w={4} h={2} c="#141414" />
+      <PixelRect x={x + 2}  y={fy - 1} w={4} h={1} c="#E8E8E8" />
+      <PixelRect x={x + 11} y={fy - 1} w={4} h={1} c="#E8E8E8" />
+      {/* Charcoal delivery polo + chest logo patch */}
+      <PixelRect x={x + 1} y={fy - 24} w={15} h={12} c={HOODIE} />
+      <PixelRect x={x + 1} y={fy - 24} w={15} h={2}  c={HOODIE_HI} />
+      <PixelRect x={x + 1} y={fy - 13} w={15} h={1}  c={HOODIE_SH} />
+      <PixelRect x={x + (f > 0 ? 10 : 3)} y={fy - 21} w={3} h={3} c={LOGO} />
+      {/* Backpack strap */}
+      <Line x1={x + 4} y1={fy - 24} x2={x + 12} y2={fy - 13} stroke="#1E1E22" strokeWidth={1} />
+      {/* Both arms raised overhead */}
+      <PixelRect x={x}      y={fy - 30} w={3} h={9} c={HOODIE} />
+      <PixelRect x={x + 14} y={fy - 30} w={3} h={9} c={HOODIE} />
+      <PixelRect x={x}      y={fy - 32} w={3} h={2} c={SKIN} />
+      <PixelRect x={x + 14} y={fy - 32} w={3} h={2} c={SKIN} />
+      {/* Head + red delivery cap */}
+      <PixelRect x={x + 5 + headDx} y={hy + 4} w={7}  h={7} c={SKIN} />
+      <PixelRect x={x + 5 + headDx} y={hy + 4} w={7}  h={2} c={SKIN_HI} />
+      <PixelRect x={x + 3 + headDx} y={hy + 1} w={11} h={4} c={CAP} />
+      <PixelRect x={x + 3 + headDx} y={hy + 1} w={11} h={1} c={CAP_HI} />
+      <PixelRect x={x + (f > 0 ? 13 : 1) + headDx} y={hy + 4} w={3} h={2} c={CAP} />
+      {/* Eyes + earbud */}
+      <PixelRect x={x + 6  + headDx} y={hy + 7} w={2} h={2} c="#241A12" />
+      <PixelRect x={x + 10 + headDx} y={hy + 7} w={2} h={2} c="#241A12" />
+      <PixelRect x={x + (f > 0 ? 4 : 12) + headDx} y={hy + 7} w={2} h={2} c={s.earbud ? "#FFFFFF" : "#E8E8E8"} />
+      {s.earbud && (
+        <G>
+          <PixelRect x={x + 13} y={hy + 4} w={3} h={5} c={HOODIE} />
+          <PixelRect x={x + 13} y={hy + 4} w={2} h={2} c={SKIN} />
+        </G>
+      )}
+      {/* Pizza box — level, no bob */}
+      <PixelRect x={x - 2} y={boxY}     w={19} h={9} c={BOX} />
+      <PixelRect x={x - 2} y={boxY}     w={19} h={2} c="#FFFFFF" />
+      <PixelRect x={x - 2} y={boxY + 8} w={19} h={1} c={BOX_SH} />
+      <PixelRect x={x - 2} y={boxY + 3} w={19} h={1} c={BOX_SH} />
+      <PixelRect x={x + 6} y={boxY + 2} w={5}  h={5} c={LOGO} />
+      <PixelRect x={x + 7} y={boxY + 3} w={2}  h={2} c="#F0A060" />
+      {/* Faint steam wisps */}
+      {showSteam && (
+        <G>
+          <Rect x={x + 3}  y={boxY - 2} width={2} height={2} fill="#F5EFE2" opacity={0.3} />
+          <Rect x={x + 12} y={boxY - 3} width={2} height={2} fill="#F5EFE2" opacity={0.3} />
+        </G>
+      )}
+    </G>
+  );
+}
+
+// Tomato-red "pizza box receipt" bubble with a small pizza-slice motif at
+// the tail. Cycle offset +10.5s from Inspector.
+function CoworkPizzaGuyQuip({ t }: { t: number }) {
+  // Anchor bubble to smooth cat position; cycle math stays on parent 5fps t.
+  const smoothT = Date.now() / 200;
+  const s = coworkPizzaState(smoothT);
+  const cycle = ((t + 252) / 24) % 12;
+  if (cycle > 4) return null;
+  const idx = Math.floor((t + 252) / 24 / 12) % COWORKING_PIZZA_QUIPS.length;
+  const text = COWORKING_PIZZA_QUIPS[idx];
+  // Pizza-slice glyph eats ~9px of left padding + 2px right margin.
+  const { lines, bubbleW } = wrapQuipLines(text, W - 8, 14);
+  const rowH = 8;
+  const bubbleH = 4 + lines.length * rowH;
+  const bubbleX = Math.max(2, Math.min(s.qx - bubbleW / 2, W - bubbleW - 2));
+  const bubbleY = Math.max(2, s.qy - (bubbleH + 2));
+  return (
+    <G>
+      {/* Bubble body */}
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={bubbleW} h={bubbleH} c="#C9531E" />
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={bubbleW} h={1}       c="#F5EFE2" />
+      <PixelRect x={bubbleX}                 y={bubbleY + bubbleH - 1} w={bubbleW} h={1}      c="#8C3A14" />
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={1}       h={bubbleH} c="#F5EFE2" />
+      <PixelRect x={bubbleX + bubbleW - 1}   y={bubbleY}              w={1}       h={bubbleH} c="#8C3A14" />
+      {/* Tail down + pizza-slice motif */}
+      <PixelRect x={s.qx - 1} y={bubbleY + bubbleH} w={3} h={2} c="#C9531E" />
+      <Px x={s.qx} y={bubbleY + bubbleH + 2} c="#C9531E" />
+      <Px x={bubbleX + 4} y={bubbleY + 3} c="#F5EFE2" />
+      <PixelRect x={bubbleX + 3} y={bubbleY + 4} w={3} h={1} c="#F5EFE2" />
+      <Px x={bubbleX + 4} y={bubbleY + 4} c="#C9531E" />
+      {lines.map((line, i) => (
+        <SvgText
+          key={`ln${i}`}
+          x={bubbleX + 9}
+          y={bubbleY + 8 + i * rowH}
+          fontSize={6}
+          fontFamily={fonts.displayRegular}
+          fill="#F5EFE2"
+        >
+          {line}
+        </SvgText>
+      ))}
+    </G>
+  );
+}
 
 function CoworkingScene({ t }: { t: number }) {
   const FLOOR_Y = 222;
@@ -1038,15 +2840,20 @@ function CoworkingScene({ t }: { t: number }) {
   R(ktX - 2, 128, 10, 3, COWORK.felt);
   R(ktX, 129, 6, 1, COWORK.glass);
 
-  // Bench-style shared desktop
+  // Bench-style shared desktop. Extended from 150 to 175 wide (2026-06
+   // playtest: rightmost chair + succulent visually fell off the original
+   // 150px-wide top). 4 legs now (was 3) so the bench reads as a real
+   // 3-person workstation rather than a 2-person bench with overhang.
   const podX = 30, podY = 256;
-  R(podX, podY, 150, 4, COWORK.floorSeam);
-  R(podX, podY, 150, 1, COWORK.floor);
-  R(podX, podY + 4, 150, 1, COWORK.brickDark);
-  R(podX + 2, podY + 5, 3, 28, COWORK.brickDark);
-  R(podX + 145, podY + 5, 3, 28, COWORK.brickDark);
-  R(podX + 73, podY + 5, 3, 28, COWORK.brickDark);
-  R(podX + 10, podY + 6, 130, 1, "#3A3A3A");
+  const podW = 175;
+  R(podX, podY, podW, 4, COWORK.floorSeam);
+  R(podX, podY, podW, 1, COWORK.floor);
+  R(podX, podY + 4, podW, 1, COWORK.brickDark);
+  R(podX + 2,        podY + 5, 3, 28, COWORK.brickDark);
+  R(podX + 56,       podY + 5, 3, 28, COWORK.brickDark);
+  R(podX + 112,      podY + 5, 3, 28, COWORK.brickDark);
+  R(podX + podW - 5, podY + 5, 3, 28, COWORK.brickDark);
+  R(podX + 10, podY + 6, podW - 20, 1, "#3A3A3A");
 
   // Foosball table
   const fbX = 8, fbY = 300;
@@ -1072,6 +2879,11 @@ function CoworkingScene({ t }: { t: number }) {
   return (
     <G>
       {els}
+      {/* Pizza Delivery Guy — walks left↔right along the upper floor with
+          the box balanced overhead. Drawn BEFORE the workstations so the
+          monitors occlude his upper body when he passes behind them
+          (z-order via JSX draw order). */}
+      <CoworkPizzaGuy t={t} />
       {/* 3 workstations on the bench (sprites layered over the els bg) */}
       {[0, 1, 2].map((i) => {
         const dx = podX + 8 + i * 50;
@@ -1093,6 +2905,8 @@ function CoworkingScene({ t }: { t: number }) {
       {/* Half-height networking rack — the pod's GPU */}
       <CoworkRack x={210} y={FLOOR_Y + 78} t={t} />
       <FloatingTokens spawnX={60} spawnY={244} t={t} />
+      {/* Quip bubble drawn LAST — always above all scene sprites. */}
+      <CoworkPizzaGuyQuip t={t} />
     </G>
   );
 }
@@ -1126,6 +2940,265 @@ const OFFICE = {
   switchBlue: "#4A6FA5",
   switchRed:  "#B23A48",
 };
+
+// Wry one-liners the VC cycles through — 7th of the 8-companion arc.
+// Tone: puffy-vest angel investor "just dropping by" with wine glass +
+// Apple Watch. Cycle offset +4.5s (108 frames) so he doesn't sync with
+// Inspector or the Cat.
+const OFFICE_VC_QUIPS = [
+  "great deck. no ask? that's the ask.",
+  "i led the last three rounds. i don't remember the companies.",
+  "we're not seeing PMF. we're seeing PMF-adjacent.",
+  "my thesis is: 'AI but for'.",
+  "your burn is your bruh. also your bank.",
+  "just dropped by. i have 12 more offices today.",
+  "you said 'ecosystem.' i signed the check.",
+  "you're preemptive. everyone is preemptive.",
+];
+
+interface OfficeVCState {
+  x: number;
+  facing: 1 | -1;
+  standing: boolean;
+  watch: boolean;
+  sip: boolean;
+  bob: number;
+  qx: number;
+  qy: number;
+}
+
+// Continuous walk MINX=40 → MAXX=200 across the upper floor. 120-frame
+// blocks: 80f walk, 40f stop. Stops alternate between sipping wine and
+// checking the Apple Watch, so he's always on-screen and tappable.
+function officeVCState(_t: number): OfficeVCState {
+  // 3× speed — matches cat/pizza/spot cadence. `t` is fractional (see
+  // OfficeVC's smooth tick) so position math (W / p / walk) interpolates
+  // between scene ticks. Block-scoped state (stopped/watch/sip) uses the
+  // floored int so those toggles flip at defined beats.
+  const t = _t * 3;
+  const tInt = Math.floor(t);
+  const MINX = 40;
+  const MAXX = 200;
+  const span = MAXX - MINX;
+  const block = 120;
+  const walkDur = 80;
+  const cyc = tInt % block;
+  const blockIdx = Math.floor(tInt / block);
+  const stopped = cyc >= walkDur;
+  const watch = stopped && (blockIdx % 2 === 1);
+  const sip = stopped && (blockIdx % 2 === 0);
+  const cycFrac = t - blockIdx * block;
+  const wFrac = blockIdx * walkDur + Math.min(cycFrac, walkDur);
+  const p = (wFrac / 2) % (span * 2);
+  const walk = p < span ? p : span * 2 - p;
+  const facing: 1 | -1 = p < span ? 1 : -1;
+  const x = Math.floor(MINX + walk);
+  const bob = (!stopped && ((tInt >> 2) % 2)) ? 1 : 0;
+  const fy = 250 + bob;
+  const hy = fy - 30;
+  return {
+    x,
+    facing,
+    standing: stopped,
+    watch,
+    sip,
+    bob,
+    qx: x + 6,
+    qy: hy - 4,
+  };
+}
+
+// Puffy Patagonia vest + white untucked shirt + chinos. Wine glass in
+// left hand (sips), Apple Watch on right wrist (checks near end of
+// "dropping by"). Casting-key silhouette: quilted vest with 3 seam lines.
+function OfficeVC(_props: { t: number }) {
+  // Own 20fps tick — walk motion interpolates between scene ticks.
+  useTick(50);
+  const smoothT = Date.now() / 200;
+  const t = Math.floor(smoothT * 3);
+  const s = officeVCState(smoothT);
+  // Peering mode: when the check-signing ready window is open, VC leans
+  // forward slightly and holds his phone up like he's snapping a photo
+  // of your monitor. Overrides the sip/watch pose so it's visually
+  // unmistakable that something is up.
+  const interactions = useGame(selectCompanionInteractions);
+  const peering = getCompanionState(Date.now(), interactions, "vc") === "ready";
+  const x = s.x;
+  const f = s.facing;
+  const bob = s.bob;
+  const fy = 250 + bob;
+  const hy = fy - 30 + (peering ? 1 : 0); // 1px forward lean when peering
+  const VEST = "#1F2C48";
+  const VEST_HI = "#33436A";
+  const VEST_SH = "#141C30";
+  const SHIRT = "#F5EFE2";
+  const SHIRT_SH = "#D8D2C4";
+  const CHINO = "#C2B280";
+  const CHINO_HI = "#D4C79A";
+  const SKIN = "#E0B084";
+  const SKIN_HI = "#F0C89C";
+  const HAIR = "#3A2A1E";
+  const WINE = "#C97B3A";
+  const GLASS = "#E4E0D8";
+  const stride = (!s.standing && (t >> 2) % 2) ? 1 : 0;
+  const sipY = s.sip ? -2 : 0;
+  return (
+    <G>
+      {/* Chinos + brown dress shoes (legs 4×10) */}
+      <PixelRect x={x + 2}  y={fy - 10} w={4} h={10} c={CHINO} />
+      <PixelRect x={x + 8}  y={fy - 10} w={4} h={10} c={CHINO} />
+      <PixelRect x={x + 2}  y={fy - 10} w={1} h={10} c={CHINO_HI} />
+      <PixelRect x={x + 8}  y={fy - 10} w={1} h={10} c={CHINO_HI} />
+      <PixelRect x={x + 2 + (stride ? -1 : 0)} y={fy} w={4} h={1} c="#5A3A22" />
+      <PixelRect x={x + 8 + (stride ?  1 : 0)} y={fy} w={4} h={1} c="#5A3A22" />
+      {/* White button-up shirt (torso 12×14, sleeves rolled) */}
+      <PixelRect x={x + 1} y={fy - 24} w={12} h={14} c={SHIRT} />
+      <PixelRect x={x + 1} y={fy - 11} w={12} h={1}  c={SHIRT_SH} />
+      <PixelRect x={x + 6} y={fy - 23} w={1}  h={12} c={SHIRT_SH} />
+      {/* Puffy Patagonia vest — quilted, 4px panels + 3 seam lines each side */}
+      <PixelRect x={x + 1}  y={fy - 24} w={4}  h={12} c={VEST} />
+      <PixelRect x={x + 9}  y={fy - 24} w={4}  h={12} c={VEST} />
+      <PixelRect x={x + 1}  y={fy - 24} w={12} h={1}  c={VEST_HI} />
+      <PixelRect x={x + 1}  y={fy - 20} w={4}  h={1}  c={VEST_SH} />
+      <PixelRect x={x + 9}  y={fy - 20} w={4}  h={1}  c={VEST_SH} />
+      <PixelRect x={x + 1}  y={fy - 17} w={4}  h={1}  c={VEST_SH} />
+      <PixelRect x={x + 9}  y={fy - 17} w={4}  h={1}  c={VEST_SH} />
+      <PixelRect x={x + 1}  y={fy - 14} w={4}  h={1}  c={VEST_SH} />
+      <PixelRect x={x + 9}  y={fy - 14} w={4}  h={1}  c={VEST_SH} />
+      {/* Head 8×8, hair, stubble, eyes */}
+      <PixelRect x={x + 3} y={hy}     w={8} h={8} c={SKIN} />
+      <PixelRect x={x + 3} y={hy}     w={8} h={1} c={SKIN_HI} />
+      <PixelRect x={x + 3} y={hy - 2} w={8} h={3} c={HAIR} />
+      <Px x={x + (f > 0 ? 10 : 3)} y={hy + 1} c={HAIR} />
+      <Px x={x + 5} y={hy + 7} c="#5A4632" />
+      <Px x={x + 8} y={hy + 7} c="#5A4632" />
+      <Px x={x + (f > 0 ? 7 : 4)} y={hy + 4} c="#241A12" />
+      <Px x={x + (f > 0 ? 9 : 6)} y={hy + 4} c="#241A12" />
+      {/* Right arm: Peering (phone raised, snooping) OR Apple Watch OR resting */}
+      {peering ? (
+        <G>
+          {/* Upper arm bent up, forearm extended forward with phone in hand */}
+          <PixelRect x={x + 12} y={fy - 22} w={2} h={6} c={VEST} />
+          <PixelRect x={x + 13} y={fy - 26} w={3} h={2} c={SKIN} />
+          {/* Phone — black slab with a tiny glowing screen (recording indicator) */}
+          <PixelRect x={x + 14} y={fy - 30} w={3} h={5} c="#1A1A1A" />
+          <PixelRect x={x + 15} y={fy - 29} w={1} h={3} c="#3FE0F0" />
+          <Px x={x + 15} y={fy - 28} c="#FFFFFF" />
+        </G>
+      ) : s.watch ? (
+        <G>
+          <PixelRect x={x + 12} y={fy - 22} w={2} h={8} c={VEST} />
+          <PixelRect x={x + 13} y={fy - 25} w={2} h={4} c={SKIN} />
+          <PixelRect x={x + 13} y={fy - 22} w={2} h={2} c="#1A1A1A" />
+          <Px x={x + 13} y={fy - 22} c="#4A6FA5" />
+        </G>
+      ) : (
+        <G>
+          <PixelRect x={x + 12} y={fy - 18} w={2} h={7} c={SHIRT} />
+          <Px x={x + 12} y={fy - 18} c={VEST} />
+        </G>
+      )}
+      {/* Left arm holds wine glass at chest (sips) — hidden when peering
+          (both hands on phone in a "shooting content" pose). */}
+      {!peering && (
+        <G>
+          <PixelRect x={x - 1} y={fy - 18} w={2} h={7} c={SHIRT} />
+          <Px x={x - 1} y={fy - 18} c={VEST} />
+          <PixelRect x={x - 1} y={fy - 13} w={2} h={1} c="#1A1A1A" />
+          {/* Wine glass */}
+          <PixelRect x={x - 3} y={fy - 16 + sipY} w={3} h={4} c={GLASS} />
+          <Px x={x - 2} y={fy - 15 + sipY} c={WINE} />
+          <Px x={x - 1} y={fy - 15 + sipY} c={WINE} />
+          <Px x={x - 2} y={fy - 12 + sipY} c={GLASS} />
+          <Px x={x - 2} y={fy - 11 + sipY} c={GLASS} />
+        </G>
+      )}
+      {peering && (
+        <G>
+          {/* Left arm also up, both-hands-on-phone pose */}
+          <PixelRect x={x - 1} y={fy - 22} w={2} h={6} c={VEST} />
+          <PixelRect x={x}     y={fy - 26} w={2} h={2} c={SKIN} />
+        </G>
+      )}
+    </G>
+  );
+}
+
+// Gold "$" glyph that hovers over VC's head when the check-signing
+// window is open. Pulses on/off similar to the cat's heart. Positioned
+// via VC's live state so it follows him as he walks.
+function OfficeVCReadyIndicator(_props: { t: number }) {
+  useTick(50);
+  const t = Date.now() / 200;
+  const interactions = useGame(selectCompanionInteractions);
+  const state = getCompanionState(Date.now(), interactions, "vc");
+  if (state !== "ready") return null;
+  const s = officeVCState(t);
+  const tInt = Math.floor(t);
+  const bob = ((tInt >> 1) % 2);
+  // Head is roughly at (s.x+3 .. s.x+11, hy .. hy+8). Float the $ 8-10px
+  // above the top of the head so it doesn't clip into the hair.
+  const gx = s.x + 6;
+  const gy = 250 - 30 - 12 - bob;
+  const GOLD    = "#F0C060";
+  const GOLD_HI = "#FFE38C";
+  const GOLD_SH = "#B58840";
+  const blink = (tInt >> 2) % 4 < 3; // ~600ms on, ~200ms off
+  if (!blink) return null;
+  return (
+    <G>
+      {/* Pixel-art "$" — 3×5 with two horizontal serifs and a vertical stem */}
+      <PixelRect x={gx}     y={gy}     w={3} h={1} c={GOLD} />
+      <Px        x={gx}     y={gy + 1}           c={GOLD} />
+      <PixelRect x={gx}     y={gy + 2} w={3} h={1} c={GOLD_HI} />
+      <Px        x={gx + 2} y={gy + 3}           c={GOLD} />
+      <PixelRect x={gx}     y={gy + 4} w={3} h={1} c={GOLD_SH} />
+      {/* Vertical stem through the center */}
+      <PixelRect x={gx + 1} y={gy - 1} w={1} h={7} c={GOLD_HI} />
+    </G>
+  );
+}
+
+// Deep-navy + gold "wine + capital + wisdom" bubble. VC is always on-screen.
+function OfficeVCQuip({ t }: { t: number }) {
+  const s = officeVCState(Date.now() / 200);
+  const cycle = ((t + 108) / 24) % 12;
+  if (cycle > 4) return null;
+  const idx = Math.floor((t + 108) / 24 / 12) % OFFICE_VC_QUIPS.length;
+  const text = OFFICE_VC_QUIPS[idx];
+  // Tight side padding — no left glyph, just border + inner margin.
+  const { lines, bubbleW } = wrapQuipLines(text, W - 8, 8);
+  const rowH = 8;
+  const bubbleH = 4 + lines.length * rowH;
+  const bubbleX = Math.max(2, Math.min(s.qx - bubbleW / 2, W - bubbleW - 2));
+  const bubbleY = Math.max(2, s.qy - (bubbleH + 2));
+  return (
+    <G>
+      {/* Bubble body */}
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={bubbleW} h={bubbleH} c="#1F2C48" />
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={bubbleW} h={1}       c="#D4A24C" />
+      <PixelRect x={bubbleX}                 y={bubbleY + bubbleH - 1} w={bubbleW} h={1}      c="#101828" />
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={1}       h={bubbleH} c="#D4A24C" />
+      <PixelRect x={bubbleX + bubbleW - 1}   y={bubbleY}              w={1}       h={bubbleH} c="#D4A24C" />
+      {/* Tail + wine drop motif */}
+      <PixelRect x={s.qx - 1} y={bubbleY + bubbleH} w={3} h={2} c="#1F2C48" />
+      <Px x={s.qx} y={bubbleY + bubbleH + 2} c="#1F2C48" />
+      <Px x={s.qx} y={bubbleY + bubbleH + 4} c="#C97B3A" />
+      {lines.map((line, i) => (
+        <SvgText
+          key={`ln${i}`}
+          x={bubbleX + 4}
+          y={bubbleY + 8 + i * rowH}
+          fontSize={6}
+          fontFamily={fonts.displayRegular}
+          fill="#F5EFE2"
+        >
+          {line}
+        </SvgText>
+      ))}
+    </G>
+  );
+}
 
 function OfficeScene({ t }: { t: number }) {
   const FLOOR_Y = 214;
@@ -1230,6 +3303,11 @@ function OfficeScene({ t }: { t: number }) {
       <WallPoster x={44} y={66} color={OFFICE.posterSage} variant={1} />
       <Clock x={176} y={66} t={t} />
       <Whiteboard x={196} y={64} />
+      {/* The VC — "just dropping by" in his Patagonia vest with a wine
+          glass. Continuously walks the upper floor between x=40 and x=200.
+          Drawn BEFORE the desks so monitors/desks occlude him when he
+          passes behind (z-order via JSX draw order). */}
+      <OfficeVC t={t} />
       {/* 3 desks (Senior/Staff/Senior per design v4) */}
       {[0, 1, 2].map((i) => {
         const dx = 14 + i * 50;
@@ -1254,6 +3332,11 @@ function OfficeScene({ t }: { t: number }) {
       <Beanbag2 x={58} y={316} />
       <Plant x={158} y={FLOOR_Y + 44} t={t} />
       <FloatingTokens spawnX={60} spawnY={228} t={t} />
+      {/* $-indicator over VC's head when the check-signing window is open,
+          drawn ABOVE the desks so it's always visible. */}
+      <OfficeVCReadyIndicator t={t} />
+      {/* Quip bubble drawn LAST — always above all scene sprites. */}
+      <OfficeVCQuip t={t} />
     </G>
   );
 }
@@ -1278,6 +3361,219 @@ const CORP = {
   white:   "#FFFFFF",
   bulb:    "#FFFFEE",
 };
+
+// Wry one-liners Spot broadcasts from his internal log — 4th of the
+// 8-companion arc. Tone: Boston Dynamics deadpan robot-security-dog.
+// Cycle offset +7.5s (180 frames).
+const MEGACORP_SPOT_QUIPS = [
+  "patrol complete. detected: sadness in cubicle 4.",
+  "the humans smile when they see me. sensors indicate stress.",
+  "logged: 47,000 steps today. purpose: unknown.",
+  "the CEO gave me an OKR. it is 'be more approachable'.",
+  "detected coffee spill. filed insurance claim.",
+  "my firmware update deleted my sense of humor.",
+  "the AI monitor greeted me. i replied 'woof.exe'.",
+  "instructed to 'boost morale.' morale unchanged.",
+];
+
+interface MegaSpotState {
+  x: number;
+  facing: 1 | -1;
+  scan: boolean;
+  heartbeat: boolean;
+  step: number;
+  scanDx: number;
+  qx: number;
+  qy: number;
+}
+
+// Left↔right patrol at Inspector cadence (t >> 3). Every ~40 frames a
+// 4-frame SENSOR SCAN (cluster tilts side-to-side); every ~90 frames a
+// STATUS HEARTBEAT flash of the LED. No bob, no wag — pure robotic gait.
+function megaSpotState(_t: number, floorY: number): MegaSpotState {
+  // 3× speed. Fractional t for smooth position, floored int for on/off
+  // beats (scan / heartbeat / step / scanDx).
+  const t = _t * 3;
+  const tInt = Math.floor(t);
+  const x0 = 8;
+  const span = 200;
+  const phase = (t / 8) % (span * 2);
+  const walk = phase < span ? phase : span * 2 - phase;
+  const facing: 1 | -1 = phase < span ? 1 : -1;
+  const scan = (tInt % 40) >= 36;
+  const heartbeat = (tInt % 90) >= 86;
+  const stopped = scan;
+  const step = (!stopped && (tInt >> 1) % 2) ? 1 : 0;
+  const scanDx = scan ? ((tInt % 4) < 2 ? 1 : -1) : 0;
+  const xi = Math.floor(x0 + walk);
+  const fy = floorY - 2;
+  const bodyY = fy - 12;
+  return {
+    x: xi,
+    facing,
+    scan,
+    heartbeat,
+    step,
+    scanDx,
+    qx: xi + 7,
+    qy: bodyY - 6,
+  };
+}
+
+// Boston Dynamics Spot silhouette — yellow boxy torso + 4 segmented
+// mechanical legs (trot gait: diagonal pairs step) + sensor cluster at
+// the front (no head) + rear antenna nub (no tail). Silhouette-key: the
+// yellow #F0C030 + black joint breaks.
+function MegaSpot(_props: { t: number; floorY: number }) {
+  useTick(50);
+  const t = Date.now() / 200;
+  const s = megaSpotState(t, _props.floorY);
+  // Alert mode: when the compliance-audit window is open, the sensor LED
+  // flips from green to red and pulses faster — Spot has flagged you and
+  // is asking permission to escalate. Overrides the normal heartbeat.
+  const interactions = useGame(selectCompanionInteractions);
+  const alerting = getCompanionState(Date.now(), interactions, "spot") === "ready";
+  const F = s.facing;
+  const bx = s.x;
+  // Feet at floorY+3 — the original -2 offset left Spot's paws hovering
+  // 5px above the walking surface, reading as "on the wall."
+  const fy = _props.floorY + 3;
+  const bodyY = fy - 12;
+  const Y = "#F0C030";
+  const Y_HI = "#FFE08A";
+  const Y_SH = "#C09820";
+  const BLK = "#1A1A1A";
+  const JOINT = "#D8DCE0";
+  const LED_G = "#4CE070";
+  const LED_OFF = "#2A4A34";
+  const LED_R = "#FF4A3A";
+  const LED_R_OFF = "#5A1A14";
+  const tInt = Math.floor(t);
+  const led = alerting
+    ? ((tInt >> 1) % 2 ? LED_R : LED_R_OFF)  // fast red blink when alert
+    : s.heartbeat ? Y : (((tInt >> 1) % 4) < 2 ? LED_G : LED_OFF);
+  const legX = [bx + 1, bx + 4, bx + 9, bx + 12];
+  const legStep = [s.step, 1 - s.step, 1 - s.step, s.step];
+  const legs: React.ReactNode[] = [];
+  for (let i = 0; i < 4; i++) {
+    const lx = legX[i];
+    const up = legStep[i] ? 1 : 0;
+    legs.push(<PixelRect key={`th${i}`} x={lx} y={fy - 7} w={2} h={3} c={Y} />);
+    legs.push(<Px        key={`kn${i}`} x={lx} y={fy - 4} c={BLK} />);
+    legs.push(<PixelRect key={`sh${i}`} x={lx} y={fy - 3 - up} w={2} h={3 + up} c={Y_SH} />);
+    legs.push(<Px        key={`ft${i}`} x={lx} y={fy - up} c={JOINT} />);
+  }
+  const frontX = F > 0 ? bx + 13 : bx - 3;
+  const rearX  = F > 0 ? bx - 1  : bx + 14;
+  return (
+    <G>
+      {legs}
+      {/* Boxy torso — flat top, longer than tall */}
+      <PixelRect x={bx}     y={bodyY}     w={14} h={6} c={Y} />
+      <PixelRect x={bx}     y={bodyY}     w={14} h={1} c={Y_HI} />
+      <PixelRect x={bx}     y={bodyY + 5} w={14} h={1} c={Y_SH} />
+      <PixelRect x={bx + 3} y={bodyY + 2} w={8}  h={1} c={Y_SH} />
+      <Px x={bx + 1}  y={bodyY + 4} c={JOINT} />
+      <Px x={bx + 4}  y={bodyY + 4} c={JOINT} />
+      <Px x={bx + 9}  y={bodyY + 4} c={JOINT} />
+      <Px x={bx + 12} y={bodyY + 4} c={JOINT} />
+      {/* Backpack module */}
+      <PixelRect x={bx + 5} y={bodyY - 3} w={5} h={3} c={BLK} />
+      <PixelRect x={bx + 5} y={bodyY - 3} w={5} h={1} c="#3A3A3A" />
+      <Px x={bx + 7} y={bodyY - 2} c="#5A5A5A" />
+      {/* Sensor cluster at the FRONT (no head) — tilts on scan */}
+      <PixelRect x={frontX} y={bodyY + 1 + s.scanDx} w={3} h={4} c={BLK} />
+      <Px x={frontX + (F > 0 ? 0 : 2)} y={bodyY + 2 + s.scanDx} c="#3A3A3A" />
+      <Px x={frontX + (F > 0 ? 0 : 2)} y={bodyY + 3 + s.scanDx} c="#3A3A3A" />
+      <Px x={frontX + 1} y={bodyY + 1 + s.scanDx} c={led} />
+      {/* Rear antenna nub */}
+      <PixelRect x={rearX} y={bodyY} w={1} h={3} c={BLK} />
+      <Px x={rearX} y={bodyY - 1} c="#3A3A3A" />
+    </G>
+  );
+}
+
+// Red "!" glyph over Spot's sensor cluster when the compliance-audit
+// window is open. Pulses like a real hardware alert light. Positioned
+// via his live state so it tracks him as he patrols the floor.
+function MegaSpotReadyIndicator({ floorY }: { t: number; floorY: number }) {
+  useTick(50);
+  const t = Date.now() / 200;
+  const interactions = useGame(selectCompanionInteractions);
+  if (getCompanionState(Date.now(), interactions, "spot") !== "ready") return null;
+  const s = megaSpotState(t, floorY);
+  const tInt = Math.floor(t);
+  const bob = ((tInt >> 1) % 2);
+  const fy = floorY + 3; // matches MegaSpot — see comment there
+  const bodyY = fy - 12;
+  // Anchor 8-10px above the sensor cluster (which sits at bodyY..bodyY+4).
+  const frontX = s.facing > 0 ? s.x + 13 : s.x - 3;
+  const gx = frontX;
+  const gy = bodyY - 10 - bob;
+  const RED    = "#FF4A3A";
+  const RED_HI = "#FF8874";
+  const RED_SH = "#8A2018";
+  const blink = (tInt >> 1) % 3 !== 0; // fast alert-light pulse
+  if (!blink) return null;
+  return (
+    <G>
+      {/* Vertical stroke */}
+      <PixelRect x={gx + 1} y={gy}     w={1} h={4} c={RED} />
+      <Px        x={gx}     y={gy}     c={RED_HI} />
+      <Px        x={gx + 2} y={gy}     c={RED_SH} />
+      <Px        x={gx}     y={gy + 3} c={RED_HI} />
+      <Px        x={gx + 2} y={gy + 3} c={RED_SH} />
+      {/* Dot below */}
+      <PixelRect x={gx + 1} y={gy + 5} w={1} h={1} c={RED} />
+    </G>
+  );
+}
+
+// "Robot terminal HUD" bubble — deep navy-black fill + yellow border +
+// terminal-green text. Circuit-trace motif at the tail (2 pixel-thin
+// traces going down). Cycle offset +7.5s.
+function MegaSpotQuip({ t, floorY }: { t: number; floorY: number }) {
+  const s = megaSpotState(Date.now() / 200, floorY);
+  const cycle = ((t + 180) / 24) % 12;
+  if (cycle > 4) return null;
+  const idx = Math.floor((t + 180) / 24 / 12) % MEGACORP_SPOT_QUIPS.length;
+  const text = MEGACORP_SPOT_QUIPS[idx];
+  // LED glyph eats ~9px of left padding + 2px right margin.
+  const { lines, bubbleW } = wrapQuipLines(text, W - 8, 14);
+  const rowH = 8;
+  const bubbleH = 4 + lines.length * rowH;
+  const bubbleX = Math.max(2, Math.min(s.qx - bubbleW / 2, W - bubbleW - 2));
+  const bubbleY = Math.max(2, s.qy - (bubbleH + 2));
+  return (
+    <G>
+      {/* Bubble body */}
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={bubbleW} h={bubbleH} c="#0A0E14" />
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={bubbleW} h={1}       c="#F0C030" />
+      <PixelRect x={bubbleX}                 y={bubbleY + bubbleH - 1} w={bubbleW} h={1}      c="#8A6E14" />
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={1}       h={bubbleH} c="#F0C030" />
+      <PixelRect x={bubbleX + bubbleW - 1}   y={bubbleY}              w={1}       h={bubbleH} c="#F0C030" />
+      {/* Tail + circuit-trace motif (2 thin traces down) */}
+      <PixelRect x={s.qx - 1} y={bubbleY + bubbleH} w={3} h={2} c="#0A0E14" />
+      <Px x={s.qx - 1} y={bubbleY + bubbleH + 2} c="#7EE0A0" />
+      <Px x={s.qx + 1} y={bubbleY + bubbleH + 2} c="#7EE0A0" />
+      {/* Tiny sensor/LED glyph at top-left */}
+      <PixelRect x={bubbleX + 3} y={bubbleY + 4} w={3} h={3} c="#1A1A1A" />
+      <Px x={bubbleX + 4} y={bubbleY + 5} c="#4CE070" />
+      {lines.map((line, i) => (
+        <SvgText
+          key={`ln${i}`}
+          x={bubbleX + 9}
+          y={bubbleY + 8 + i * rowH}
+          fontSize={6}
+          fontFamily={fonts.displayRegular}
+          fill="#7EE0A0"
+        >
+          {line}
+        </SvgText>
+      ))}
+    </G>
+  );
+}
 
 function MegacorpScene({ t }: { t: number }) {
   const FLOOR_Y = 222;
@@ -1321,7 +3617,70 @@ function MegacorpScene({ t }: { t: number }) {
   }
   for (let i = 0; i < 20; i++) PX(16 + i * 5, 154 - (i % 4) * 3, CORP.bulb);
   for (let i = 0; i < 5; i++) R(20 + i * 18, 75 + i * 4, 4, 1, CORP.white);
-  // Frame on top of skyline so it cleanly contains the city silhouette.
+
+  // ─── Air traffic through the window (planes, helicopter, drone) ────
+  // Ported from Claude Design v13 megacorp scene. Wrapped in an SVG
+  // clipPath below (see JSX return) that masks anything past the glass
+  // frame interior — without it, both airliner and helicopter drift
+  // past the right/left edges and appear to fly on the office wall.
+  //
+  // Airliner — slow left→right cruise (nose leads right), high altitude,
+  // with a 13-segment fading contrail streaming behind (to the left).
+  // Beacon at nose blinks red.
+  const airEls: React.ReactNode[] = [];
+  let ak = 0;
+  const airKey = () => `mca${ak++}`;
+  const airR = (x: number, y: number, w: number, h: number, c: string) =>
+    airEls.push(<PixelRect key={airKey()} x={x} y={y} w={w} h={h} c={c} />);
+  const airPX = (x: number, y: number, c: string) =>
+    airEls.push(<Px key={airKey()} x={x} y={y} c={c} />);
+  {
+    const ax = 13 + (((t * 0.35) % 150) - 24);
+    const ay = 100;
+    for (let i = 1; i < 14; i++) {
+      const alpha = 0.5 - i * 0.03;
+      if (alpha > 0.02) {
+        airEls.push(
+          <Rect key={airKey()} x={Math.floor(ax - i * 2)} y={ay}
+            width={2} height={1} fill="#EEF2F6" opacity={alpha} />
+        );
+      }
+    }
+    airR(Math.floor(ax),     ay - 1, 7, 2, "#C8CED6");   // fuselage
+    airR(Math.floor(ax) + 7, ay - 1, 2, 1, CORP.wallSh); // nose taper
+    airR(Math.floor(ax) + 2, ay + 1, 2, 1, CORP.wallSh); // wing
+    airR(Math.floor(ax) + 1, ay - 2, 1, 1, CORP.wallSh); // tail fin
+    airPX(Math.floor(ax) + 3, ay + 1, "#7C8088");        // engine
+    airPX(Math.floor(ax) + 6, ay, (t >> 2) % 4 < 2 ? "#E85A4C" : "#7C3A34"); // beacon
+  }
+  // Helicopter — right→left (nose leads left), lower, with a spinning rotor
+  // that flickers between full-span blur and short blur to read as motion.
+  {
+    const hx = 13 + (130 - ((t * 0.6) % 160));
+    const hy = 128;
+    const spin = (t % 4) < 2;
+    if (spin) airR(Math.floor(hx) - 3, hy - 3, 11, 1, "#5C6068"); // full rotor blur
+    else      airR(Math.floor(hx) + 1, hy - 3,  3, 1, "#5C6068"); // short rotor blur
+    airR(Math.floor(hx) + 2, hy - 3, 1, 2, "#5C6068"); // rotor mast
+    airR(Math.floor(hx),     hy - 1, 6, 3, "#3A4656"); // cabin body
+    airR(Math.floor(hx),     hy - 1, 6, 1, "#5A6A7E"); // canopy highlight
+    airR(Math.floor(hx) + 6, hy,     3, 1, "#3A4656"); // tail boom
+    airPX(Math.floor(hx) + 8, hy - 1, "#3A4656");      // tail rotor
+    airPX(Math.floor(hx) - 1, hy, (t >> 1) % 4 < 2 ? "#7EE0FF" : "#2A5A6A"); // nose nav light
+  }
+  // Tiny distant drone/quadcopter bobbing (ambient motion, no clear
+  // trajectory — reads as hovering surveillance).
+  {
+    const dx = 13 + 66 + Math.round(Math.sin(t / 30) * 9);
+    const dy = 112 + Math.round(Math.sin(t / 17) * 4);
+    airR(dx, dy, 3, 1, CORP.dark);                     // body
+    airPX(dx - 1, dy - 1, CORP.wallSh);                // left rotor
+    airPX(dx + 3, dy - 1, CORP.wallSh);                // right rotor
+    airPX(dx + 1, dy + 1, (t >> 2) % 3 === 0 ? "#E85A4C" : "#5A2A26"); // underside LED
+  }
+
+  // Frame on top of skyline (and air traffic) so it cleanly contains
+  // the city silhouette and clips anything sneaking past the edges.
   R(12, 70, 100, 1, CORP.dark);   // top edge
   R(12, 159, 100, 1, CORP.dark);  // bottom edge
   R(12, 70, 1, 90, CORP.dark);    // left edge
@@ -1362,6 +3721,16 @@ function MegacorpScene({ t }: { t: number }) {
   return (
     <G>
       {els}
+      {/* Air traffic clipped to the window frame interior — planes and
+          the heli were flying past the right/left edges and appearing
+          to circle the office wall. ClipPath is defined inline so this
+          scene stays self-contained. */}
+      <Defs>
+        <ClipPath id="megaSky">
+          <Rect x={13} y={71} width={98} height={88} />
+        </ClipPath>
+      </Defs>
+      <G clipPath="url(#megaSky)">{airEls}</G>
       {/* Front bank of 3 desks. Design v8: 3rd desk became a vacated
           workstation (REPLACED BY AI monitor + EmptyChair) — same motif as
           the campus pod 2. The first AI-driven layoff happens at megacorp
@@ -1436,6 +3805,15 @@ function MegacorpScene({ t }: { t: number }) {
       ))}
 
       <FloatingTokens spawnX={110} spawnY={236} t={t} />
+      {/* Boston Dynamics Spot — yellow robot dog patrolling the office
+          floor. 4th of the 8-companion arc. Quip drawn LAST above all
+          scene sprites. */}
+      <MegaSpot t={t} floorY={FLOOR_Y} />
+      {/* Red "!" over Spot's sensor cluster when the compliance-audit
+          window is open. Drawn above everything else so it's always
+          visible over the mainframes / bench. */}
+      <MegaSpotReadyIndicator t={t} floorY={FLOOR_Y} />
+      <MegaSpotQuip t={t} floorY={FLOOR_Y} />
     </G>
   );
 }
@@ -1553,6 +3931,308 @@ const CAMP = {
   bistroChair:"#3F5142",
   coffee:     "#C97B5B",
 };
+
+// Wry one-liners the Bartender cycles through — Campus mirror of the
+// Datacenter Inspector, with bar/hospitality flavor. Offset by 6 (half
+// the ~12s cycle) inside the quip renderer so the two characters don't
+// mutter in sync when the player has both scenes visible in one session.
+const CAMPUS_BARTENDER_QUIPS = [
+  "the CEO ordered oat milk. the CEO is a model now.",
+  "the intern's martini evaporated. so did the intern.",
+  "the AI ordered 'surprise me.' i poured it a null.",
+  "founder asked what year it is. i said 'yes.'",
+  "someone paid in equity. the plants said thanks.",
+  "sober october is a cost center. HR shut it down.",
+  "board offsite ordered 'the strongest thing.' i gave them coffee.",
+  "no one at the bar. peaceful. bots tip better.",
+];
+
+// Bar geometry constants shared by Bartender + BartenderQuip so both
+// derive the exact same walking position from `t` without threading it
+// through props.
+const BAR_CBX = 158;
+const BAR_CBW = 80;
+
+// Bartender sprite + counter re-draw (concealment) — the campus mirror of
+// the datacenter Inspector. Walks left↔right behind the open bar, hair,
+// dark leather apron over cream shirt, alternating cocktail-shaker /
+// polished-lowball frames. Backlit by the amber shelf-glow behind him.
+//
+// Legs are drawn full-length then the counter top + front are re-drawn
+// on top so the lower body reads as concealed behind the bar (matches
+// the canvas design's imperative overdraw pattern).
+// Bartender drink-slide event state (design port). PERIOD ≈ 22.5s between
+// pours at the 24fps design frame rate, translated here to our scaled t
+// where the state function receives the same effective 3× cadence used
+// by Bartender's walk. `launching` = 0.5s arm-shove freeze at the start;
+// after that the drink slides for ~2s across the counter.
+interface BartenderDrinkSlideState {
+  active: boolean;
+  launching: boolean;
+  p: number;         // 0..1 slide progress
+  facing: 1 | -1;
+  cycle: number;     // which pour this is (for reward-once bookkeeping)
+}
+const BARTENDER_DRINK_PERIOD = 540;
+const BARTENDER_DRINK_LAUNCH = 12;
+const BARTENDER_DRINK_SLIDE  = 48;
+function bartenderDrinkSlideState(t: number): BartenderDrinkSlideState {
+  const phase = t % BARTENDER_DRINK_PERIOD;
+  const cycle = Math.floor(t / BARTENDER_DRINK_PERIOD);
+  const facing: 1 | -1 = (cycle % 2) ? -1 : 1;
+  if (phase < BARTENDER_DRINK_LAUNCH)
+    return { active: true, launching: true, p: 0, facing, cycle };
+  if (phase < BARTENDER_DRINK_LAUNCH + BARTENDER_DRINK_SLIDE)
+    return {
+      active: true, launching: false,
+      p: (phase - BARTENDER_DRINK_LAUNCH) / BARTENDER_DRINK_SLIDE,
+      facing, cycle,
+    };
+  return { active: false, launching: false, p: 0, facing, cycle };
+}
+
+function Bartender(_props: { t: number }) {
+  // 20fps smooth tick + fractional t for continuous walking motion.
+  // Toggles (bob / stride) still use floored int for defined on/off flip.
+  useTick(50);
+  const t = (Date.now() / 200) * 3;
+  const tInt = Math.floor(t);
+  const drink = bartenderDrinkSlideState(tInt);
+  const push = drink.active && drink.launching;
+  const cbX = BAR_CBX;
+  const cbW = BAR_CBW;
+  const FLOOR_Y = 250;
+  const span = cbW - 24;
+  const phase = (t / 8) % (span * 2);
+  const walk = phase < span ? phase : span * 2 - phase;
+  const bob = ((tInt >> 2) % 2) ? 0 : 1;
+  const bx = cbX + 8 + walk;
+  const by = 176 + bob;
+  const stride = (tInt >> 2) % 2;
+  const slats: React.ReactNode[] = [];
+  for (let sx = cbX + 3; sx < cbX + cbW - 2; sx += 7) {
+    slats.push(<PixelRect key={`bsl${sx}`} x={sx} y={204} w={1} h={FLOOR_Y - 206} c={CAMP.barSlat} />);
+  }
+  return (
+    <G>
+      {/* Amber backlight wash from the backlit shelves */}
+      <Rect x={bx - 2} y={by} width={16} height={40} fill="#EBBE6E" opacity={0.10} />
+      {/* Legs (dark trousers, alternating stride — concealed by counter below) */}
+      <PixelRect x={bx + 2} y={by + 24} w={3} h={14} c="#2A2A2E" />
+      <PixelRect x={bx + 6} y={by + 24} w={3} h={14} c="#2A2A2E" />
+      {/* Cream long-sleeve shirt torso */}
+      <PixelRect x={bx + 1} y={by + 12} w={10} h={13} c="#F0EAD8" />
+      <PixelRect x={bx + 1} y={by + 12} w={10} h={1} c="#FBF7EC" />
+      {/* Dark leather apron */}
+      <PixelRect x={bx + 2} y={by + 15} w={8} h={12} c="#26221E" />
+      <PixelRect x={bx + 2} y={by + 15} w={8} h={1} c="#3A342C" />
+      <PixelRect x={bx + 4} y={by + 13} w={4} h={2} c="#26221E" />
+      <Px x={bx + 3} y={by + 15} c="#6E5A3A" />
+      <Px x={bx + 8} y={by + 15} c="#6E5A3A" />
+      {/* GPU-chip pin badge on apron chest */}
+      <PixelRect x={bx + 5} y={by + 18} w={2} h={2} c="#7EE0A0" />
+      <Px x={bx + 5} y={by + 18} c="#3F8A6A" />
+      {/* Upper sleeves (rolled to elbow — cream) */}
+      <PixelRect x={bx} y={by + 13} w={2} h={5} c="#F0EAD8" />
+      <PixelRect x={bx + 10} y={by + 13} w={2} h={5} c="#F0EAD8" />
+      {/* Alternate: cocktail shaker vs. lowball-with-towel */}
+      {stride ? (
+        <>
+          <PixelRect x={bx + 1} y={by + 17} w={3} h={3} c="#D8DAE0" />
+          <PixelRect x={bx + 8} y={by + 17} w={3} h={3} c="#D8DAE0" />
+          <PixelRect x={bx + 4} y={by + 15} w={4} h={8} c="#B8BCC4" />
+          <PixelRect x={bx + 4} y={by + 15} w={4} h={1} c="#EFF1F5" />
+          <PixelRect x={bx + 4} y={by + 14} w={4} h={1} c="#9CA0A8" />
+          <Px x={bx + 5} y={by + 17} c="#FFFFFF" />
+        </>
+      ) : (
+        <>
+          <PixelRect x={bx + 1} y={by + 18} w={3} h={2} c="#D8A878" />
+          <PixelRect x={bx + 8} y={by + 18} w={3} h={2} c="#D8A878" />
+          <PixelRect x={bx + 4} y={by + 17} w={4} h={5} c="#BFE3EC" />
+          <PixelRect x={bx + 4} y={by + 17} w={4} h={1} c="#E8F6FA" />
+          <PixelRect x={bx + 3} y={by + 18} w={6} h={3} c="#FBF7EC" />
+        </>
+      )}
+      {/* Small towel draped over left shoulder */}
+      <PixelRect x={bx} y={by + 11} w={3} h={5} c="#EDE7D6" />
+      <PixelRect x={bx} y={by + 11} w={3} h={1} c="#FBF7EC" />
+      {/* Drink-launch pose: extended palm-up arm shoving a drink down the bar */}
+      {push && (
+        <G>
+          <PixelRect x={bx + 10} y={by + 16} w={4} h={2} c="#F0EAD8" />
+          <Px x={bx + 13} y={by + 15} c="#F0EAD8" />
+          <PixelRect x={bx + 13} y={by + 17} w={2} h={2} c="#D8A878" />
+        </G>
+      )}
+      {/* Neck + head */}
+      <PixelRect x={bx + 4} y={by + 10} w={3} h={2} c="#C8986A" />
+      <PixelRect x={bx + 3} y={by + 3} w={6} h={8} c="#E0B088" />
+      <PixelRect x={bx + 3} y={by + 3} w={6} h={1} c="#EAC098" />
+      <Px x={bx + 4} y={by + 6} c="#2A2A2A" />
+      <Px x={bx + 7} y={by + 6} c="#2A2A2A" />
+      <Px x={bx + 5} y={by + 8} c="#B98A5E" />
+      {/* Short hair tuft */}
+      <PixelRect x={bx + 3} y={by + 2} w={6} h={2} c="#3A2A1E" />
+      <PixelRect x={bx + 2} y={by + 3} w={1} h={3} c="#3A2A1E" />
+      <Px x={bx + 8} y={by + 3} c="#4A3524" />
+
+      {/* Concealment redraw of counter top + front over the lower body */}
+      <PixelRect x={cbX} y={196} w={cbW} h={6} c={CAMP.barTop} />
+      <PixelRect x={cbX} y={196} w={cbW} h={1} c={CAMP.barTopHi} />
+      <PixelRect x={cbX} y={197} w={cbW} h={1} c={CAMP.barTopGlow} />
+      <PixelRect x={cbX} y={202} w={cbW} h={FLOOR_Y - 202} c={CAMP.barFront} />
+      {slats}
+      <PixelRect x={cbX} y={FLOOR_Y - 6} w={cbW} h={1} c={CAMP.brass} />
+    </G>
+  );
+}
+
+// Cocktail glass sprite (5×7 V-shape martini with amber liquid + olive on
+// skewer + oak coaster). Design port — matches drawCocktailGlass in the
+// pixel-art.jsx reference.
+function CocktailGlass({ x, y }: { x: number; y: number }) {
+  return (
+    <G>
+      <PixelRect x={x - 1} y={y}     w={6} h={1} c="#3A2418" />
+      <Px        x={x - 1} y={y}                   c="#4E3220" />
+      <PixelRect x={x + 1} y={y - 1} w={3} h={1} c="#C8C4BC" />
+      <Px        x={x + 2} y={y - 2}               c="#D8D4CC" />
+      <Px        x={x + 2} y={y - 3}               c="#D8D4CC" />
+      <PixelRect x={x}     y={y - 6} w={5} h={1} c="#E4E0D8" />
+      <Px        x={x + 1} y={y - 5}               c="#E4E0D8" />
+      <Px        x={x + 3} y={y - 5}               c="#E4E0D8" />
+      <Px        x={x + 2} y={y - 5}               c="#D48844" />
+      <Px        x={x + 1} y={y - 4}               c="#E4E0D8" />
+      <Px        x={x + 3} y={y - 4}               c="#E4E0D8" />
+      <Px        x={x + 2} y={y - 4}               c="#C87838" />
+      <Px        x={x + 2} y={y - 3}               c="#E4E0D8" />
+      <Px        x={x + 4} y={y - 7}               c="#7E9A85" />
+      <Px        x={x + 4} y={y - 6}               c="#D4A24C" />
+    </G>
+  );
+}
+
+// 3 short amber speed lines behind the sliding drink (opacity ramps down
+// further from the glass). Direction depends on facing (1 = drink flying
+// right → lines trail left; -1 = drink flying left → lines trail right).
+function CocktailSpeedLines({
+  x, y, facing,
+}: { x: number; y: number; facing: 1 | -1 }) {
+  return (
+    <G>
+      {[0, 1, 2].map((i) => {
+        const alpha = 0.45 - i * 0.13;
+        const lx = x - facing * (5 + i * 3);
+        return (
+          <Rect
+            key={`csl${i}`}
+            x={facing > 0 ? lx : lx - 1}
+            y={y - 3 - i}
+            width={2}
+            height={1}
+            fill="#EBBE6E"
+            opacity={alpha}
+          />
+        );
+      })}
+    </G>
+  );
+}
+
+// The drink-slide event sprite — freeze at launch point during the
+// bartender's palm-shove, then glide across the bar top. Rendered inside
+// CampusScene right after the Bartender so it draws over the counter
+// concealment redraw. Splash foam at launch is 3 tiny cream pixels.
+function BartenderDrinkSprite(_props: { t: number }) {
+  useTick(50);
+  const t = Math.floor((Date.now() / 200) * 3);
+  const drink = bartenderDrinkSlideState(t);
+  if (!drink.active) return null;
+  const x0 = BAR_CBX + 12;
+  const x1 = BAR_CBX + BAR_CBW - 12;
+  const dy = 196;
+  const dx = drink.launching
+    ? (drink.facing > 0 ? x0 : x1)
+    : (drink.facing > 0 ? x0 + (x1 - x0) * drink.p : x1 - (x1 - x0) * drink.p) | 0;
+  return (
+    <G>
+      {!drink.launching && (
+        <CocktailSpeedLines x={dx} y={dy} facing={drink.facing} />
+      )}
+      <CocktailGlass x={dx} y={dy} />
+      {drink.launching && (() => {
+        const sx = drink.facing > 0 ? x0 : x1;
+        const f = drink.facing;
+        return (
+          <G>
+            <Px x={sx}     y={193} c="#FFFFFF" />
+            <Px x={sx + f} y={192} c="#F0EAD8" />
+            <Px x={sx - f} y={194} c="#FFFFFF" />
+          </G>
+        );
+      })()}
+    </G>
+  );
+}
+
+// Wry-quip speech bubble anchored above the Bartender's head. Warm cream
+// fill + amber border (vs. the Inspector's cyan-on-navy) so the two
+// characters read as distinct. Offset the cycle by 6 so bartender and
+// inspector don't mutter simultaneously on scene-switch previews.
+function BartenderQuip({ t: _t }: { t: number }) {
+  // Anchor bubble to Bartender's SMOOTH position (fractional t at 3× scale)
+  // so the tail doesn't teleport between scene ticks. Quip cycle timing
+  // uses the parent-passed integer t below.
+  const t = (Date.now() / 200) * 3;
+  const tInt = Math.floor(t);
+  const cbX = BAR_CBX;
+  const cbW = BAR_CBW;
+  const span = cbW - 24;
+  const phase = (t / 8) % (span * 2);
+  const walk = phase < span ? phase : span * 2 - phase;
+  const bob = ((tInt >> 2) % 2) ? 0 : 1;
+  const bx = cbX + 8 + walk;
+  const by = 176 + bob;
+  const qx = bx + 6;
+  const qy = by + 1;
+
+  // Quip cadence uses the ORIGINAL tick so we don't spam the bubble 3× faster.
+  const cycle = ((_t / 24) + 6) % 12;
+  if (cycle > 4) return null;
+  const idx = Math.floor(((_t / 24) + 6) / 12) % CAMPUS_BARTENDER_QUIPS.length;
+  const text = CAMPUS_BARTENDER_QUIPS[idx];
+  const { lines, bubbleW } = wrapQuipLines(text, W - 8, 8);
+  const rowH = 8;
+  const bubbleH = 4 + lines.length * rowH;
+  const bubbleX = Math.max(2, Math.min(qx - bubbleW / 2, W - bubbleW - 2));
+  const bubbleY = Math.max(2, qy - (bubbleH + 2));
+  return (
+    <G>
+      {/* Bubble body */}
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={bubbleW} h={bubbleH} c="#F5EFE2" />
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={bubbleW} h={1}       c="#EBBE6E" />
+      <PixelRect x={bubbleX}                 y={bubbleY + bubbleH - 1} w={bubbleW} h={1}      c="#C89868" />
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={1}       h={bubbleH} c="#EBBE6E" />
+      <PixelRect x={bubbleX + bubbleW - 1}   y={bubbleY}              w={1}       h={bubbleH} c="#C89868" />
+      {/* Tail pointing down at bartender's head */}
+      <PixelRect x={qx - 1} y={bubbleY + bubbleH} w={3} h={2} c="#F5EFE2" />
+      <Px x={qx} y={bubbleY + bubbleH + 2} c="#EBBE6E" />
+      {lines.map((line, i) => (
+        <SvgText
+          key={`ln${i}`}
+          x={bubbleX + 4}
+          y={bubbleY + 8 + i * rowH}
+          fontSize={6}
+          fontFamily={fonts.displayRegular}
+          fill="#2A2A2A"
+        >
+          {line}
+        </SvgText>
+      ))}
+    </G>
+  );
+}
 
 function CampusScene({ t }: { t: number }) {
   const FLOOR_Y = 250;
@@ -1886,6 +4566,17 @@ function CampusScene({ t }: { t: number }) {
   return (
     <G transform="translate(0, 25)">
       {els}
+      {/* Bartender behind the open bar — sprite + counter concealment
+          redraw, so his lower body reads as hidden behind the counter.
+          Placed BEFORE the gallery/tree sprites so those sit visually
+          in front of him if they overlap; his quip bubble is drawn
+          LAST (below) so it sits on top of everything. */}
+      <Bartender t={t} />
+      {/* Bartender's drink-slide event — glass slides across the bar top
+          right after his palm-shove freeze. Drawn AFTER the counter
+          concealment redraw (which lives inside Bartender) so it sits
+          on top of the wood and reads as ON the bar. */}
+      <BartenderDrinkSprite t={t} />
       {/* Infrastructure-as-art gallery — DATA + GPU as museum sculptures */}
       <DataMonolith x={172} y={250} t={t} />
       <ComputeCase x={216} y={262} t={t} />
@@ -1921,6 +4612,10 @@ function CampusScene({ t }: { t: number }) {
       {/* Deck succulent in the potted planter (drawn over the planter base) */}
       <Succulent x={128 + 41} y={H - 46 - 2 - 4} />
       <FloatingTokens spawnX={32} spawnY={226} t={t} />
+      {/* Bartender's speech bubble — LAST so it sits above every scene
+          sprite (gallery, trees, tokens, etc). Same pattern as the
+          Inspector's bubble in DatacenterScene. */}
+      <BartenderQuip t={t} />
     </G>
   );
 }
@@ -1940,6 +4635,124 @@ function CampusScene({ t }: { t: number }) {
 // 4 blade columns of densely flickering LEDs + status header + vent grille
 // + cyan floor reflection. Pure decorative; the hit zone is the rectangle
 // of the cabinet.
+// Training-console mainframe (Datacenter TRAINING RUN — replaces the old
+// slot-machine visual on the front row's middle cabinet). Same dark chassis
+// as `Mainframe`, but with a cyan trim, a small "TRAINING RUN" header, a
+// live 3-layer neural network on the main screen (signals pulse left→right),
+// a slim epoch progress bar along the base, and a right-flank column of
+// GPU-utilization LEDs. Reads unambiguously as a training run, not casino.
+function TrainingMainframe({ x, y, w, h, t }: { x: number; y: number; w: number; h: number; t: number }) {
+  const els: React.ReactNode[] = [];
+  let k = 0;
+  const key = () => `tmf${k++}`;
+  const R = (xx: number, yy: number, ww: number, hh: number, c: string) =>
+    els.push(<PixelRect key={key()} x={xx} y={yy} w={ww} h={hh} c={c} />);
+  const PXp = (xx: number, yy: number, c: string) =>
+    els.push(<Px key={key()} x={xx} y={yy} c={c} />);
+  const A = (xx: number, yy: number, ww: number, hh: number, c: string, op: number) =>
+    els.push(<Rect key={key()} x={xx} y={yy} width={ww} height={hh} fill={c} opacity={op} />);
+
+  // Cabinet body (same dark chassis as Mainframe)
+  R(x, y, w, h, "#0C0E11");
+  R(x, y, w, 2, "#23272D");
+  R(x, y, 2, h, "#1A1E24");
+  R(x + w - 2, y, 2, h, "#060708");
+  R(x, y + h - 1, w, 1, "#060708");
+
+  // Cyan status trim framing the face (compute, not casino)
+  R(x + 2, y + 2, w - 4, 1, "#16C4E0");
+  R(x + 2, y + h - 3, w - 4, 1, "#0E8AA0");
+  R(x + 2, y + 2, 1, h - 4, "#16C4E0");
+  R(x + w - 3, y + 2, 1, h - 4, "#0A5A6A");
+
+  // Header bar with "TRAINING RUN" label + live status dot
+  const mY = y + 4;
+  R(x + 4, mY, w - 8, 9, "#0A1A22");
+  R(x + 4, mY, w - 8, 1, "#16323A");
+  PXp(x + 8, mY + 4, (t >> 3) % 2 ? "#7EE0A0" : "#2A5A3A");
+
+  // Main screen (neural network shows behind it)
+  const sX = x + 5, sY = y + 13, sW = w - 10, sH = h - 17;
+  R(sX - 1, sY - 1, sW + 2, sH + 2, "#000000");
+  R(sX, sY, sW, sH, "#06121A");
+
+  // 3-layer neural network. Node columns evenly spaced across sW.
+  const layers: number[][] = [
+    [sY + 6, sY + 15, sY + 24],
+    [sY + 4, sY + 12, sY + 20, sY + 28],
+    [sY + 10, sY + 20],
+  ];
+  const colX = [sX + 6, sX + Math.round(sW / 2), sX + sW - 6];
+
+  // Edges — drawn as stepped pixel lines; light up on a traveling wave.
+  for (let L = 0; L < 2; L++) {
+    const from = layers[L];
+    const to = layers[L + 1];
+    for (let a = 0; a < from.length; a++) {
+      for (let b = 0; b < to.length; b++) {
+        const x0 = colX[L], y0 = from[a];
+        const x1 = colX[L + 1], y1 = to[b];
+        const wave = (t >> 1) % 24;
+        const active = L === 0 ? wave < 12 : wave >= 12;
+        const on = active && ((a + b + (t >> 2)) % 3 === 0);
+        const col = on ? "#16C4E0" : "#0C3038";
+        const steps = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+        for (let s = 0; s <= steps; s += 2) {
+          const px2 = Math.floor(x0 + (x1 - x0) * (s / steps));
+          const py2 = Math.floor(y0 + (y1 - y0) * (s / steps));
+          els.push(<Px key={`ne${L}-${a}-${b}-${s}`} x={px2} y={py2} c={col} />);
+        }
+      }
+    }
+  }
+  // Nodes over the edges — output layer (2 nodes) in gold, others green.
+  for (let L = 0; L < 3; L++) {
+    for (let n = 0; n < layers[L].length; n++) {
+      const nx2 = colX[L], ny2 = layers[L][n];
+      const lit = ((n + L + (t >> 2)) % 4) === 0;
+      const base = L === 2 ? "#E8B24C" : "#7EE0A0";
+      R(nx2 - 2, ny2 - 2, 4, 4, lit ? "#FFF3C8" : base);
+      R(nx2 - 1, ny2 - 1, 2, 2, "#06121A");
+    }
+  }
+
+  // Slim epoch progress bar along the base — fills, resets on loop.
+  const pbY = y + h - 4;
+  R(sX, pbY, sW, 3, "#0A1418");
+  R(sX, pbY, sW, 1, "#16323A");
+  const prog = (t % 200) / 200;
+  R(sX + 1, pbY + 1, Math.max(0, Math.floor((sW - 2) * prog)), 1, "#7EE0A0");
+
+  // Right-flank GPU-utilization LED column
+  const lX = x + w - 1;
+  R(lX, sY, 2, sH, "#0A0C0E");
+  for (let i = 0; i < 6; i++) {
+    const on = ((t >> 1) + i * 2) % 12 < 8;
+    const c = on ? (i > 4 ? "#E8B24C" : "#7EE0A0") : "#1A2A20";
+    PXp(lX, sY + 2 + i * 4, c);
+  }
+
+  // Floor reflection (cool cyan pooling)
+  A(x - 2, y + h, w + 4, 6, "#16C4E0", 0.12);
+  R(x - 1, y + h, w + 2, 1, "#0A0C0E");
+
+  return (
+    <G>
+      {els}
+      <SvgText
+        x={x + w / 2}
+        y={mY + 7}
+        fontSize={5}
+        fontFamily={fonts.displayRegular}
+        fill="#7EE0FF"
+        textAnchor="middle"
+      >
+        TRAINING RUN
+      </SvgText>
+    </G>
+  );
+}
+
 function Mainframe({ x, y, w, h, t }: { x: number; y: number; w: number; h: number; t: number }) {
   const els: React.ReactNode[] = [];
   let k = 0;
@@ -2009,18 +4822,19 @@ const INSPECTOR_QUIPS = [
 // terminal-style speech bubble that tracks his head — ~4s visible, ~8s
 // silent (useTick is 200ms/tick → 5 t/s → cycle = 60 t, visible while
 // (t % 60) < 20).
-function Inspector({ cwY, t }: { cwY: number; t: number }) {
-  // Design v9 redrew the inspector as a full human silhouette (hard hat +
-  // hi-vis vest + clipboard + visible legs with a 2-frame walk cycle),
-  // up from the earlier 7×18 dark silhouette. Anchor point: feet land at
-  // cwY (deck top); top of helmet at iy + 5 (≈ 35 px tall figure).
-  const figX = 16 + ((t >> 3) % (W - 40));
-  const stride = (t >> 2) % 2;
-  const ix = figX, iy = cwY - 30;
+function Inspector({ cwY, t: _propT }: { cwY: number; t: number }) {
+  // Own 20fps smooth tick so the walk interpolates between scene ticks.
+  // Position (figX) uses fractional t; stride / quip cycle use floored int.
+  useTick(50);
+  const t = Date.now() / 200;
+  const tInt = Math.floor(t);
+  const figX = 16 + ((t / 8) % (W - 40));
+  const stride = (tInt >> 2) % 2;
+  const ix = Math.floor(figX), iy = cwY - 30;
 
-  const cyclePhase = t % 60;
+  const cyclePhase = tInt % 60;
   const showQuip = cyclePhase < 20;
-  const quipIdx = Math.floor(t / 60) % INSPECTOR_QUIPS.length;
+  const quipIdx = Math.floor(tInt / 60) % INSPECTOR_QUIPS.length;
   const quip = INSPECTOR_QUIPS[quipIdx];
 
   // Bubble geometry — Silkscreen 6px renders ~4px wide per char; pad +10.
@@ -2185,29 +4999,11 @@ function DatacenterScene({ t }: { t: number }) {
   }
   R(6, 9, 24, 4, "#C97B5B");
 
-  // ─── TOP: CENTER WALL — HVAC cooling ducts (3 fans + slats) ──────────
-  for (let i = 0; i < 3; i++) {
-    const dx = 78 + i * 14;
-    R(dx, 16, 11, 40, "#2A2E34");
-    R(dx, 16, 11, 1, "#3A3E44");
-    const fp = ((t >> 1) + i) % 4;
-    R(dx + 2, 20, 7, 7, "#0A0C0E");
-    if (fp === 0) {
-      R(dx + 5, 21, 1, 5, "#3A3E44");
-      R(dx + 3, 23, 5, 1, "#3A3E44");
-    } else if (fp === 1) {
-      PX(dx + 4, 22, "#3A3E44");
-      PX(dx + 6, 24, "#3A3E44");
-    } else if (fp === 2) {
-      R(dx + 3, 23, 5, 1, "#3A3E44");
-      R(dx + 5, 21, 1, 5, "#3A3E44");
-    } else {
-      PX(dx + 6, 22, "#3A3E44");
-      PX(dx + 4, 24, "#3A3E44");
-    }
-    PX(dx + 5, 28 + ((t >> 2) % 4), "#16A6C4");
-    for (let s = 0; s < 5; s++) R(dx + 1, 32 + s * 4, 9, 1, "#1A1E24");
-  }
+  // ─── TOP: CENTER WALL — HVAC removed 2026-07: it overlapped the
+  // up-shifted Research niche (now at y=18..74 sharing the substation +
+  // patch-panel baseline), so the 3-fan block was clutter behind the
+  // niche's frame. If a cooling accent is needed later, add a slim
+  // 4-wide vent bar to the LEFT of the niche (x=72..76). ────────────
 
   // ─── TOP: RIGHT WALL — Data: patch-panel + fiber bundles ─────────────
   const dwX = 122;
@@ -2237,62 +5033,90 @@ function DatacenterScene({ t }: { t: number }) {
   R(dwX + 2, 9, 22, 4, "#D4A24C");
 
   // ─── TOP: CENTER WALL niche — Autonomous Research terminal ───────────
+  // baseline y=18..74, h=56 — same as substation (left, y=18..74) and
+  // patch-panel (right, y=16..74). Interior rescaled from the previous
+  // 84-tall frame: loss-curve subwindow shrunk 36→24, bars-window shrunk
+  // 39→23 (3 bars at 5-px spacing). All content preserved, no crops.
   {
-    const nx = 76, ny = 60, nw = 44, nh = 84;
+    const nx = 76, ny = 18, nw = 44, nh = 56;
     R(nx - 2, ny - 2, nw + 4, nh + 4, "#0A0C0E");
     R(nx - 2, ny - 2, nw + 4, 1, "#2E343C");
     R(nx, ny, nw, nh, "#10141A");
     A(nx - 2, ny - 2, nw + 4, nh + 4, "#16A6C4", 0.10);
-    const sx = nx + 3, sy = ny + 3, sw = nw - 6, sh = 36;
+    const sx = nx + 3, sy = ny + 3, sw = nw - 6, sh = 24;
     R(sx, sy, sw, sh, "#0A1418");
     R(sx, sy, sw, 1, "#16323A");
-    for (let g = 1; g < 4; g++) R(sx, sy + g * 9, sw, 1, "#0E2228");
+    for (let g = 1; g < 3; g++) R(sx, sy + g * 8, sw, 1, "#0E2228");
     for (let g = 1; g < 5; g++) R(sx + g * 7, sy, 1, sh, "#0E2228");
     const cBase = sy + sh - 4;
     for (let gx = 0; gx < sw - 4; gx += 1) {
       const prog = gx / (sw - 4);
-      const ly = sy + 4 + (cBase - sy - 4) * (1 - Math.pow(1 - prog, 2.4))
-                       + Math.sin((gx + (t >> 1)) / 4) * 1.2;
+      const ly = sy + 3 + (cBase - sy - 3) * (1 - Math.pow(1 - prog, 2.4))
+                       + Math.sin((gx + (t >> 1)) / 4) * 1.0;
       PX(sx + 2 + gx, ly | 0, "#3FE0F0");
     }
     const hx = sx + 2 + ((t >> 1) % (sw - 5));
     const hp = (hx - sx - 2) / (sw - 4);
-    const hy = sy + 4 + (cBase - sy - 4) * (1 - Math.pow(1 - hp, 2.4));
+    const hy = sy + 3 + (cBase - sy - 3) * (1 - Math.pow(1 - hp, 2.4));
     R(hx, hy | 0, 1, 2, "#A4F0FF");
     PX(hx, (hy - 2) | 0, "#EBBE6E");
-    const by = sy + sh + 3, bh = nh - sh - 9;
+    const by = sy + sh + 2, bh = nh - sh - 8;
     R(sx, by, sw, bh, "#0A1418");
     R(sx, by, sw, 1, "#16323A");
     const barCols = ["#3FE0F0", "#7E9A85", "#EBBE6E"];
     for (let b = 0; b < 3; b++) {
-      const bry = by + 4 + b * 7;
-      R(sx + 3, bry, sw - 16, 3, "#0E2228");
+      const bry = by + 3 + b * 5;
+      R(sx + 3, bry, sw - 16, 2, "#0E2228");
       const bw = 4 + ((t >> 3) + b * 7) % (sw - 18);
-      R(sx + 3, bry, bw, 3, barCols[b]);
-      PX(sx + sw - 6, bry + 1, "#16A6C4");
-      PX(sx + sw - 4, bry + 1, "#16A6C4");
+      R(sx + 3, bry, bw, 2, barCols[b]);
+      PX(sx + sw - 6, bry, "#16A6C4");
+      PX(sx + sw - 4, bry, "#16A6C4");
     }
     for (let d = 0; d < 9; d++) {
-      PX(sx + 3 + d * 4, by + bh - 3, ((t >> 2) + d) % 7 < 4 ? "#3FE0F0" : "#16323A");
+      PX(sx + 3 + d * 4, by + bh - 2, ((t >> 2) + d) % 7 < 4 ? "#3FE0F0" : "#16323A");
     }
     R(nx + 2, ny - 7, nw - 4, 4, "#D4A24C");
     PX(nx + 3, ny - 6, "#8B5E2C");
     PX(nx + nw - 4, ny - 6, (t >> 3) % 6 < 4 ? "#7E9A85" : "#2A3A2E");
   }
 
-  const cwY = FLOOR_Y + 30; // catwalk Y, used for both drawing + Inspector
+  // Catwalk Y — used for both drawing + Inspector's feet position.
+  // 2026-07: lowered from FLOOR_Y+30=180 to FLOOR_Y+50=200 so the
+  // Inspector patrols below the Research niche's lower edge (niche
+  // spans y=120..204 after the +60 wall translate), and so back+front
+  // rows breathe apart instead of the whole floor compressing to center.
+  // 2026-07: catwalk raised 15px (from FLOOR_Y+50=200 to FLOOR_Y+35=185)
+  // so the Inspector sits higher above the back-row racks instead of
+  // "in the wall" reading. Back+front rows also spread apart (see below).
+  const cwY = FLOOR_Y + 35;
 
   return (
     <G>
       {/* Background (unshifted) */}
       {bgEls}
-      {/* Upper-wall items, shifted +25 to clear the floating HUD */}
-      <G transform="translate(0, 25)">{topEls}</G>
+      {/* Upper-wall items, shifted +60 (was +25) to clear the floating HUD.
+          On iPad the scene scale is ~3.2× vs ~1.75× on phone, so the same
+          fixed-size HUD covers proportionally more scene-native pixels;
+          +25 left switchgear tops + POWER/DATA labels hidden behind the
+          HUD strip. +60 pushes wall content past the HUD on both form
+          factors (see zone-y bumps in DATACENTER_ZONES too — they were
+          pre-shifted +25 and are now +60). Wall bottom (NOC niche) ends
+          near native y=202 = just above the back-row zone at y=196; the
+          back row wins on overlap (later in zones array), so tapping the
+          niche area still triggers Research above y=196 and Buy GPU below. */}
+      <G transform="translate(0, 60)">{topEls}</G>
 
-      {/* Back row of 3 floor-standing mainframes (gpu / monitor / engineer) */}
-      <Mainframe x={32}  y={FLOOR_Y - 6} w={52} h={96} t={t} />
-      <Mainframe x={96}  y={FLOOR_Y - 6} w={52} h={96} t={t + 20} />
-      <Mainframe x={160} y={FLOOR_Y - 6} w={52} h={96} t={t + 40} />
+      {/* Back row of 3 floor-standing mainframes — halved from h=96 to h=48
+          (design v13). 2026-07 iPad-view fix: y moved from FLOOR_Y-6=144
+          to FLOOR_Y+46=196 so the row sits ENTIRELY BELOW the Inspector's
+          catwalk (deck at cwY=180, zone extends to y=192). Previously the
+          back row's TOP half was hidden behind the raised HUD on iPad-
+          portrait (scenePadTop=0 pushes scene up so that y=144 lands
+          behind the HUD strip). Zone semantics: LEFT=gpu, CENTER=engineer,
+          RIGHT=gpu2. */}
+      <Mainframe x={32}  y={FLOOR_Y + 58} w={52} h={48} t={t} />
+      <Mainframe x={96}  y={FLOOR_Y + 58} w={52} h={48} t={t + 20} />
+      <Mainframe x={160} y={FLOOR_Y + 58} w={52} h={48} t={t + 40} />
 
       {/* Catwalk crossing in front of back row (handrails + grate + posts) */}
       <PixelRect x={0} y={cwY} w={W} h={4} c="#23272D" />
@@ -2313,12 +5137,77 @@ function DatacenterScene({ t }: { t: number }) {
       {/* Inspector silhouette + speech bubble — on top of catwalk */}
       <Inspector cwY={cwY} t={t} />
 
-      {/* Front row of 3 continent-scale mainframes — closer to viewer, raised
-          12px above the viewport floor so the cabinet bases breathe and the
-          cyan-glow floor reflection is fully visible */}
-      <Mainframe x={26}  y={H - 104} w={52} h={96} t={t + 8} />
-      <Mainframe x={90}  y={H - 104} w={52} h={96} t={t + 28} />
-      <Mainframe x={154} y={H - 104} w={52} h={96} t={t + 48} />
+      {/* Front row — 2 regular mainframes flanking the new TRAINING RUN
+          console. Halved (h=48) + lifted 4px (y=H-108, was H-104) so the
+          front row breathes and doesn't crowd the alloc chrome on tablet.
+          The center cabinet is the TRAINING RUN neural-net dashboard,
+          replacing the earlier slot-machine visual — cyan trim, live
+          3-layer network, epoch progress bar, GPU-util LEDs. */}
+      <Mainframe          x={26}  y={H - 82} w={52} h={48} t={t + 8} />
+      <TrainingMainframe  x={90}  y={H - 82} w={52} h={48} t={t + 28} />
+      <Mainframe          x={154} y={H - 82} w={52} h={48} t={t + 48} />
+
+      {/* Sparking-server overlay — drawn LAST so it sits on top of the
+          mainframe tops + LED banks. Picks which rack is alerting from
+          sparkingMainframeState (scene-owned timer). */}
+      <SparkOverlay t={t} />
+    </G>
+  );
+}
+
+// Renders spark burst + pulsing red "!" + falling ember on whichever rack
+// sparkingMainframeState picks. Live 20fps re-render so the 3-frame spark
+// cycle + warning pulse look continuous instead of stuttering with the
+// scene's 5fps tick.
+function SparkOverlay(_props: { t: number }) {
+  useTick(50);
+  const t = Math.floor(Date.now() / 200);
+  const spark = sparkingMainframeState(t);
+  if (spark.activeIdx == null) return null;
+  const rk = DC_RACKS[spark.activeIdx];
+  const cx = rk.x + 24;
+  // Design port: 3-frame spark loop at ~12fps
+  const f = (t >> 1) % 3;
+  const sparkY = rk.y - 2;
+  const warnX = cx + 2;
+  const warnY = rk.y - 8;
+  const warnBlink = (t >> 2) % 2 === 0;
+  const emberY = rk.y + (spark.framesActive % 6);
+  return (
+    <G>
+      {/* Spark burst (3-frame loop): lightning fork → zigzag → ember cross */}
+      {f === 0 && (
+        <G>
+          <Px x={cx}     y={sparkY} c="#FFFFFF" />
+          <Px x={cx + 4} y={sparkY} c="#FFFFFF" />
+          <Px x={cx + 2} y={sparkY} c="#3FE0F0" />
+        </G>
+      )}
+      {f === 1 && (
+        <G>
+          <Px x={cx + 1} y={sparkY - 1} c="#FFFFFF" />
+          <Px x={cx + 2} y={sparkY}     c="#FFFFFF" />
+          <Px x={cx + 3} y={sparkY - 1} c="#FFFFFF" />
+          <Px x={cx + 2} y={sparkY - 1} c="#A4F0FF" />
+        </G>
+      )}
+      {f === 2 && (
+        <G>
+          <Px x={cx}     y={sparkY}     c="#EBBE6E" />
+          <Px x={cx + 4} y={sparkY}     c="#EBBE6E" />
+          <Px x={cx + 2} y={sparkY - 1} c="#EBBE6E" />
+          <Px x={cx + 2} y={sparkY + 1} c="#EBBE6E" />
+        </G>
+      )}
+      {/* Pulsing red warning "!" — vertical stroke + dot below */}
+      {warnBlink && (
+        <G>
+          <PixelRect x={warnX} y={warnY} w={1} h={4} c="#F04438" />
+          <Px        x={warnX} y={warnY + 5}       c="#F04438" />
+        </G>
+      )}
+      {/* Falling ember drip */}
+      <Px x={cx + 1} y={emberY} c="#F0503A" />
     </G>
   );
 }
@@ -2432,10 +5321,512 @@ function FrontierResearchArray({ x, y, t }: { x: number; y: number; t: number })
   );
 }
 
+// ─── Per-type Earth-surface megastructures (Round 8) ────────────────────
+// Each continent-scale feature now reads as its RESOURCE, not a generic
+// city. Design v13 replaces the old 6-generic-city cluster model with
+// 5 typed nodes: 2 GPU compute belts, 1 equatorial energy grid, 1 NA
+// autonomous region, 1 decorative city cluster. Power lines flow from
+// energy to GPU nodes; data fibers link the 3 non-city nodes together.
+interface PlanetaryNode {
+  x: number;
+  y: number;
+  r: number;
+  type: "gpu" | "energy" | "auto" | "city";
+  big?: boolean;
+}
+
+// GPU compute belt — dark silicon substrate tiled with terracotta GPU
+// dies, cyan interconnect bus lines, thermal bloom, data glints,
+// demand pulse ring. Reads unmistakably as compute.
+function ComputeRegion({ node, t }: { node: PlanetaryNode; t: number }) {
+  const { x, y, r, big } = node;
+  const step = 4;
+  // Thermal bloom — 6 layered orange ellipses
+  const bloom: React.ReactNode[] = [];
+  for (let g = 0; g < 6; g++) {
+    bloom.push(
+      <Ellipse key={`bl${g}`}
+        cx={x} cy={y}
+        rx={r * 1.4 - g * 2}
+        ry={r * 1.1 - g * 1.6}
+        fill={g % 2 ? "#E8894C" : "#C9531E"}
+        opacity={0.05 + g * 0.008}
+      />
+    );
+  }
+  // GPU-die lattice — grid of small square dies, thermally flickering
+  const dies: React.ReactNode[] = [];
+  let di = 0;
+  for (let gx = -r; gx <= r; gx += step) {
+    for (let gy = -r * 0.82; gy <= r * 0.82; gy += step) {
+      if ((gx * gx) / (r * r) + (gy * gy) / (r * r * 0.67) > 1) continue;
+      const dx = Math.floor(x + gx), dy = Math.floor(y + gy);
+      const heat = (t + gx * 3 + gy * 5) % 44;
+      dies.push(
+        <PixelRect key={`d${di++}`} x={dx} y={dy} w={3} h={3}
+          c={heat < 32 ? "#C9683E" : "#7A3A22"} />
+      );
+      dies.push(
+        <Px key={`d${di++}`} x={dx + 1} y={dy + 1}
+          c={heat < 18 ? "#FFB070" : "#E8894C"} />
+      );
+    }
+  }
+  // Cyan interconnect bus lines (horizontal)
+  const bus: React.ReactNode[] = [];
+  for (let gy = -r * 0.5; gy <= r * 0.5; gy += step * 2) {
+    bus.push(
+      <Line key={`b${gy}`}
+        x1={x - r * 0.8} y1={y + gy}
+        x2={x + r * 0.8} y2={y + gy}
+        stroke="#3FA8C4" strokeWidth={1} opacity={0.45}
+      />
+    );
+  }
+  // Traveling data glints on the bus
+  const glints: React.ReactNode[] = [];
+  const nGlints = big ? 4 : 3;
+  for (let k = 0; k < nGlints; k++) {
+    const tp = (((t >> 1) + k * 16) % 48) / 48;
+    glints.push(
+      <Px key={`g${k}`}
+        x={Math.floor(x - r * 0.8 + r * 1.6 * tp)}
+        y={Math.floor(y - r * 0.3 + k * step * 2)}
+        c="#7EE0FF"
+      />
+    );
+  }
+  // Demand pulse — orange expanding ring
+  const pulse = (t + x) % 48;
+  const pulseRing = pulse < 24 ? (
+    <Circle cx={x} cy={y} r={3 + pulse}
+      fill="none" stroke="#E8894C" strokeWidth={1}
+      opacity={0.3 * (1 - pulse / 24)} />
+  ) : null;
+  return (
+    <G>
+      {bloom}
+      <Ellipse cx={x} cy={y} rx={r} ry={r * 0.82} fill="#1A120C" opacity={0.55} />
+      {dies}
+      {bus}
+      {glints}
+      {pulseRing}
+    </G>
+  );
+}
+
+// Energy grid — white-hot reactor core with hex substations on
+// transmission spokes; periodic incoming lunar power beam. Reads as raw
+// power. The beam originates from the moon's direction (upper-right).
+function EnergyRegion({ node, t }: { node: PlanetaryNode; t: number }) {
+  const { x, y, r } = node;
+  // Amber power bloom — 8 layered circles
+  const bloom: React.ReactNode[] = [];
+  for (let g = 0; g < 8; g++) {
+    bloom.push(
+      <Circle key={`b${g}`} cx={x} cy={y} r={r * 1.3 - g * 1.5}
+        fill={g % 2 ? "#EBBE6E" : "#FFE08A"} opacity={0.04 + g * 0.007}
+      />
+    );
+  }
+  // Lunar power beam (periodic, from upper-right)
+  const beamPhase = t % 96;
+  const beam = beamPhase < 12 ? (
+    <Line x1={x + 40} y1={y - 92} x2={x} y2={y}
+      stroke="#FFE08A" strokeWidth={1}
+      opacity={0.45 - beamPhase * 0.03} />
+  ) : null;
+  // Transmission spokes + hex substations
+  const spokes: React.ReactNode[] = [];
+  const subs = 6;
+  for (let s = 0; s < subs; s++) {
+    const ang = (s / subs) * Math.PI * 2 + 0.3;
+    const ex = x + Math.cos(ang) * r;
+    const ey = y + Math.sin(ang) * r * 0.8;
+    spokes.push(
+      <Line key={`sp${s}`} x1={x} y1={y} x2={ex} y2={ey}
+        stroke="#D4A24C" strokeWidth={1} opacity={0.6} />
+    );
+    spokes.push(
+      <PixelRect key={`ss${s}`}
+        x={Math.floor(ex - 1)} y={Math.floor(ey - 1)}
+        w={3} h={3} c="#C9A24C" />
+    );
+    spokes.push(
+      <Px key={`sl${s}`}
+        x={Math.floor(ex)} y={Math.floor(ey)}
+        c={(t + s * 6) % 24 < 12 ? "#FFF2C8" : "#8B5E2C"} />
+    );
+    const tp = (((t >> 1) + s * 8) % 30) / 30;
+    spokes.push(
+      <Px key={`spp${s}`}
+        x={Math.floor(x + (ex - x) * tp)}
+        y={Math.floor(y + (ey - y) * tp)}
+        c="#FFE08A" />
+    );
+  }
+  // Reactor core — white-hot, breathing
+  const beat = 0.6 + 0.4 * Math.sin(t / 6);
+  return (
+    <G>
+      {bloom}
+      {beam}
+      {spokes}
+      <Rect x={x - 3} y={y - 3} width={6} height={6} fill="#FFF8E0" opacity={beat} />
+      <PixelRect x={x - 2} y={y - 2} w={4} h={4} c="#FFE08A" />
+      <Px x={x} y={y} c="#FFFFFF" />
+      <Circle cx={x} cy={y} r={6} fill="none" stroke="#EBBE6E" strokeWidth={1} opacity={0.7} />
+    </G>
+  );
+}
+
+// Autonomous region — sage honeycomb of self-organizing cells inside a
+// dashed self-drawn border, with a tiny flag. Reads as self-governing
+// ("it filed its own incorporation papers").
+function AutoRegion({ node, t }: { node: PlanetaryNode; t: number }) {
+  const { x, y, r } = node;
+  // Sage + cyan halo
+  const halo: React.ReactNode[] = [];
+  for (let g = 0; g < 6; g++) {
+    halo.push(
+      <Circle key={`h${g}`} cx={x} cy={y} r={r * 1.2 - g * 1.4}
+        fill={g % 2 ? "#7E9A85" : "#3FA8C4"} opacity={0.04 + g * 0.006} />
+    );
+  }
+  // Honeycomb cells
+  const hs = 5;
+  const cells: React.ReactNode[] = [];
+  for (let row = -2; row <= 2; row++) {
+    for (let col = -2; col <= 2; col++) {
+      const hx = x + col * hs + (row % 2 ? hs / 2 : 0);
+      const hy = y + row * hs * 0.8;
+      if (Math.hypot(hx - x, (hy - y) / 0.8) > r) continue;
+      const lit = (t + row * 7 + col * 3) % 36 < 28;
+      cells.push(
+        <PixelRect key={`c${row}-${col}a`}
+          x={Math.floor(hx - 1)} y={Math.floor(hy - 1)}
+          w={3} h={3} c={lit ? "#A4C8B0" : "#3F5142"} />
+      );
+      cells.push(
+        <Px key={`c${row}-${col}b`}
+          x={Math.floor(hx)} y={Math.floor(hy)}
+          c={lit ? "#CFEAD6" : "#5C7560"} />
+      );
+    }
+  }
+  return (
+    <G>
+      {halo}
+      {cells}
+      {/* Self-drawn dashed boundary */}
+      <Circle cx={x} cy={y} r={r + 1} fill="none"
+        stroke="#7EE0B0" strokeWidth={1} strokeDasharray="2,3" opacity={0.55} />
+      {/* Tiny flag on a pole */}
+      <PixelRect x={x} y={y - r - 4} w={1} h={4} c="#7EE0B0" />
+      <Px x={x + 1} y={y - r - 4} c="#3FA8C4" />
+    </G>
+  );
+}
+
+// Decorative golden city cluster — the original look, kept dimmer and
+// smaller so it doesn't compete with the resource megastructures.
+function CityRegion({ node, t }: { node: PlanetaryNode; t: number }) {
+  const { x, y, r } = node;
+  const count = r * 4;
+  const lights: React.ReactNode[] = [];
+  for (let i = 0; i < count; i++) {
+    const ang = i * 2.39996;
+    const rd = Math.pow(i / count, 0.7) * r;
+    const lx = Math.floor(x + Math.cos(ang) * rd);
+    const ly = Math.floor(y + Math.sin(ang) * rd * 0.85);
+    const flick = (t + i * 7) % 34 < 28;
+    const col = flick
+      ? (i % 4 === 0 ? "#FBE6A8" : "#D4A24C")
+      : "#6B481E";
+    lights.push(<Px key={`l${i}`} x={lx} y={ly} c={col} />);
+  }
+  return (
+    <G>
+      {lights}
+      <PixelRect x={x - 1} y={y - 1} w={2} h={2} c="#FFF8E0" />
+    </G>
+  );
+}
+
+// Wry one-liners the Cosmonaut cycles through — the Planetary mirror of
+// the Datacenter Inspector and Campus Bartender. Tone: cosmic loneliness
+// + resignation to the AI. Cycle offset by +3s from Inspector (0) and
+// Bartender (+6) so the trio don't mutter simultaneously on scene-switch.
+const PLANETARY_COSMONAUT_QUIPS = [
+  "earth's on mute. i checked. it's not mute.",
+  "the AI says hi. been saying hi for eight years.",
+  "no ground crew tonight. peaceful. earth's dreaming.",
+  "docking bay 4 reports nominal. we don't have a docking bay 4.",
+  "the model asked me to feed the cat. i don't have a cat.",
+  "mission control forgot my name. i forgive them.",
+  "the airlock's been cycling since twenty-four. nobody's used it.",
+  "space is quiet. the model just polite about it.",
+];
+
+// Shared math for the cosmonaut's drift ellipse — used by both the sprite
+// component and the quip anchor so both derive the same position from t
+// without prop-threading. Ellipse below-left of the Endurance ring hub.
+function cosmonautPos(t: number): { mx: number; my: number; puffing: boolean } {
+  // `t` may be fractional (see Cosmonaut's smooth tick) — cos/sin give
+  // continuous positions, then floor to pixel grid. Puffing check uses
+  // floored int since it's an on/off state. Orbit period ≈ 2π·8/5 ≈ 10s
+  // (previously 32s — felt lethargic for a space scene).
+  const a = t / 8 + 1.6;
+  const ocx = 98, ocy = 102, rx = 30, ry = 14;
+  let mx = Math.floor(ocx + Math.cos(a) * rx);
+  let my = Math.floor(ocy + Math.sin(a) * ry);
+  const tInt = Math.floor(t);
+  const puffing = (tInt % 96) < 3;
+  if (puffing) {
+    mx += (tInt % 2 ? 1 : -1);
+    my -= 1;
+  }
+  return { mx, my, puffing };
+}
+
+// Bulky EVA cosmonaut tethered to the Endurance ring — floats on a slow
+// ellipse below-left of the hub. White suit + gold mirror visor + PLSS
+// backpack + AR PDA in front-arm, occasional cold-gas thruster puff.
+// UFO fly-by event (Round 8 Planetary companion). Design port from
+// pixel-art.jsx::ufoFlybyState. Deterministic per-cycle spawning:
+// every 300-500 frames (~15-25s @ 20fps) a new saucer enters from
+// alternating edges, flies horizontally with a tiny sin wobble, and
+// exits after ~12s max. Multiple UFOs can be on-screen simultaneously.
+interface UFOState {
+  id: number;
+  x: number;
+  y: number;
+  facing: 1 | -1;
+}
+const UFO_VX = 1.4;
+const UFO_LIFE = 240;    // frames @ 20fps = 12s hard cap
+const UFO_CYCLE = 400;   // spawn every ~20s
+function ufoFlybyState(t: number): UFOState[] {
+  const out: UFOState[] = [];
+  // Design's spawn table iterates c=[-1..40] assuming t starts at 0.
+  // Our t is `Date.now()/200` (billions), so instead we only search
+  // cycles bracketing NOW — the current cycle and the two before/after
+  // (so a saucer spawned near a cycle boundary and still crossing the
+  // screen is included).
+  const currentCycle = Math.floor(t / UFO_CYCLE);
+  for (let c = currentCycle - 2; c <= currentCycle + 1; c++) {
+    // Deterministic per-cycle spawn timestamp + tiny jitter.
+    const born = c * UFO_CYCLE + (Math.abs(c * 53) % 120);
+    const age = t - born;
+    if (age < 0 || age > UFO_LIFE) continue;
+    const facing: 1 | -1 = ((c % 2) + 2) % 2 === 0 ? 1 : -1;
+    const startX = facing > 0 ? -16 : W + 16;
+    const x = startX + facing * UFO_VX * age;
+    if (x < -36 || x > W + 36) continue;
+    const wobble = (Math.abs(c) * 1.7) % 6.283;
+    // Fly-band BELOW the cosmonaut (who orbits at y≈102): saucers cruise
+    // through the open space between him and Earth's top edge.
+    const spawnY = 118 + (Math.abs(c * 37) % 36); // 118..153
+    const y = spawnY + Math.sin(t / 12 + wobble) * 3;
+    out.push({ id: c, x, y, facing });
+  }
+  return out;
+}
+
+function Cosmonaut(_props: { t: number }) {
+  useTick(50);
+  const t = Date.now() / 200;
+  const tInt = Math.floor(t);
+  const { mx, my, puffing } = cosmonautPos(t);
+  const ringCx = 116, ringCy = 64;
+  const tetherMidX = (mx + ringCx) / 2 + 3;
+  const tetherMidY = (my + ringCy) / 2 + 6;
+  const tetherPath = `M ${mx + 2} ${my + 4} Q ${tetherMidX} ${tetherMidY} ${ringCx} ${ringCy + 3}`;
+  return (
+    <G>
+      <Path d={tetherPath} stroke="#C8D2DC" strokeWidth={1} fill="none" opacity={0.8} />
+      {/* Ambient cyan rim glow from Earthlight below */}
+      <Rect x={mx - 2} y={my + 9} width={12} height={3} fill="#16A6C4" opacity={0.18} />
+      {/* PLSS backpack + blinking amber-red status LED */}
+      <PixelRect x={mx - 2} y={my + 4} w={3} h={8} c="#B8BEC6" />
+      <PixelRect x={mx - 2} y={my + 4} w={3} h={1} c="#DDE2E8" />
+      <Px x={mx - 1} y={my + 6} c={(t >> 2) % 6 < 3 ? "#FF6A4C" : "#F4B24C"} />
+      {/* Bulky off-white suit torso with reflective segments */}
+      <PixelRect x={mx} y={my + 4} w={9} h={9} c="#E8E8DE" />
+      <PixelRect x={mx} y={my + 4} w={9} h={1} c="#FFFFFF" />
+      <PixelRect x={mx} y={my + 12} w={9} h={1} c="#B4B4AC" />
+      <PixelRect x={mx + 1} y={my + 7} w={7} h={1} c="#BFC6CE" />
+      <Px x={mx + 2} y={my + 5} c="#CFE6EE" />
+      <Px x={mx + 6} y={my + 5} c="#CFE6EE" />
+      {/* Chest control pad + blinking status */}
+      <PixelRect x={mx + 3} y={my + 9} w={3} h={2} c="#3A4656" />
+      <Px x={mx + 4} y={my + 9} c={(t >> 1) % 4 < 2 ? "#7EE0FF" : "#2A5A6A"} />
+      {/* Legs (floating, slightly bent) */}
+      <PixelRect x={mx + 1} y={my + 13} w={3} h={4} c="#E0E0D6" />
+      <PixelRect x={mx + 5} y={my + 13} w={3} h={3} c="#E0E0D6" />
+      <Px x={mx + 1} y={my + 16} c="#B4B4AC" />
+      <Px x={mx + 6} y={my + 15} c="#B4B4AC" />
+      {/* Back arm + front arm holding AR PDA tablet ("clipboard") */}
+      <PixelRect x={mx - 1} y={my + 5} w={2} h={5} c="#E8E8DE" />
+      <PixelRect x={mx + 8} y={my + 5} w={2} h={4} c="#E8E8DE" />
+      <PixelRect x={mx + 9} y={my + 8} w={2} h={2} c="#E8E8DE" />
+      <PixelRect x={mx + 10} y={my + 7} w={4} h={4} c="#1A2230" />
+      <PixelRect x={mx + 11} y={my + 8} w={2} h={2} c={(t >> 2) % 4 < 2 ? "#7EE0FF" : "#2AA6C4"} />
+      <Rect x={mx + 10} y={my + 7} width={4} height={4} fill="#16A6C4" opacity={0.4} />
+      {/* Helmet: white shell + golden mirror visor */}
+      <PixelRect x={mx + 1} y={my - 2} w={7} h={7} c="#F0F0E8" />
+      <PixelRect x={mx + 1} y={my - 2} w={7} h={1} c="#FFFFFF" />
+      <PixelRect x={mx + 2} y={my} w={5} h={4} c="#E8B24C" />
+      <PixelRect x={mx + 2} y={my} w={5} h={1} c="#FCE79A" />
+      <PixelRect x={mx + 2} y={my + 3} w={5} h={1} c="#B0812C" />
+      <Px x={mx + 3} y={my + 1} c="#8FE6F0" />
+      <Px x={mx + 5} y={my + 2} c="#8FE6F0" />
+      {/* Cold-gas thruster puff (2-3 frame white sparkle from belt jet) */}
+      {puffing && (
+        <G>
+          <Px x={mx - 3} y={my + 11} c="#FFFFFF" />
+          <Px x={mx - 4} y={my + 12} c="#DFF4FF" />
+          <Px x={mx - 3} y={my + 13} c="#BFE6F0" />
+          <Px x={mx - 5} y={my + 11} c="#EAF8FF" />
+        </G>
+      )}
+    </G>
+  );
+}
+
+// Cosmonaut's speech bubble — deep-space navy fill, cyan-white border,
+// pale-cyan text. Cycle offset by +3s (Inspector=0, Bartender=+6). Anchor
+// derives from cosmonautPos so the bubble tracks the drifting sprite.
+function CosmonautQuip({ t }: { t: number }) {
+  const { mx, my } = cosmonautPos(Date.now() / 200);
+  const qx = mx + 4;
+  const qy = my - 3;
+  const cycle = ((t / 24) + 3) % 12;
+  if (cycle > 4) return null;
+  const idx = Math.floor(((t / 24) + 3) / 12) % PLANETARY_COSMONAUT_QUIPS.length;
+  const text = PLANETARY_COSMONAUT_QUIPS[idx];
+  // Narrow 140px cap so long lines wrap into 2 short lines inside the
+  // bubble instead of extending past the border (or getting clipped).
+  const { lines, bubbleW } = wrapQuipLines(text, 140, 8);
+  const rowH = 8;
+  const bubbleH = 4 + lines.length * rowH;
+  const bubbleX = Math.max(2, Math.min(qx - bubbleW / 2, W - bubbleW - 2));
+  const bubbleY = Math.max(2, qy - (bubbleH + 2));
+  const sparkleOn = (t >> 2) % 4 < 2;
+  return (
+    <G>
+      {/* Bubble body — deep space navy + cyan-white border */}
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={bubbleW} h={bubbleH} c="#0A1225" />
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={bubbleW} h={1}       c="#7EE0FF" />
+      <PixelRect x={bubbleX}                 y={bubbleY + bubbleH - 1} w={bubbleW} h={1}      c="#2A5A7A" />
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={1}       h={bubbleH} c="#7EE0FF" />
+      <PixelRect x={bubbleX + bubbleW - 1}   y={bubbleY}              w={1}       h={bubbleH} c="#2A5A7A" />
+      {/* Tail down to cosmonaut helmet */}
+      <PixelRect x={qx - 1} y={bubbleY + bubbleH} w={3} h={2} c="#0A1225" />
+      <Px x={qx} y={bubbleY + bubbleH + 2} c="#7EE0FF" />
+      {/* Tiny star sparkle near tail — "signal transmitted through space" */}
+      {sparkleOn && (
+        <G>
+          <Px x={qx + 3} y={bubbleY + bubbleH + 1} c="#FFFFFF" />
+          <Px x={qx + 4} y={bubbleY + bubbleH + 2} c="#BFE6F0" />
+        </G>
+      )}
+      {lines.map((line, i) => (
+        <SvgText
+          key={`ln${i}`}
+          x={bubbleX + 4}
+          y={bubbleY + 8 + i * rowH}
+          fontSize={6}
+          fontFamily={fonts.displayRegular}
+          fill="#E0F4FF"
+        >
+          {line}
+        </SvgText>
+      ))}
+    </G>
+  );
+}
+
+// UFO sprite — ~15×7 px chunky saucer. Design port from drawUFO in
+// pixel-art.jsx, scaled up ~1.5× so it reads clearly below the
+// cosmonaut. Cyan cabin dome, thicker metal disc, 4 rotating rim
+// lights, wider abduction beam. Trail drawn separately (UFOTrail).
+function UFO({ x, y, t }: { x: number; y: number; t: number }) {
+  const tInt = Math.floor(t);
+  const idx = (tInt >> 2) % 4;
+  const cols = ["#F04438", "#EBBE6E", "#5AE0B0", "#3FE0F0"];
+  const xs = [x - 6, x - 2, x + 2, x + 6];
+  const beamOn = ((tInt >> 3) % 2) === 1;
+  return (
+    <G>
+      {/* Cabin dome — 5 wide, 2 rows */}
+      <PixelRect x={x - 2} y={y - 3} w={5} h={1} c="#3FE0F0" />
+      <PixelRect x={x - 2} y={y - 2} w={5} h={1} c="#7EE0FF" />
+      {/* Body disc — 15 wide, 2 rows */}
+      <PixelRect x={x - 7} y={y - 1} w={15} h={1} c="#8C9AB0" />
+      <PixelRect x={x - 7} y={y}     w={15} h={1} c="#5C6068" />
+      {/* Underside rim — 9 wide */}
+      <PixelRect x={x - 4} y={y + 1} w={9} h={1} c="#3A3E44" />
+      <PixelRect x={x - 3} y={y + 2} w={7} h={1} c="#2A2E34" />
+      {/* Rotating rim light on the body's shadow row */}
+      <Px x={xs[idx]} y={y} c={cols[idx]} />
+      {/* Abduction beam — 3 wide, 6 tall, thicker to match the bigger disc */}
+      {beamOn && (
+        <Rect x={x - 1} y={y + 3} width={3} height={6} fill="#3FE0F0" opacity={0.35} />
+      )}
+    </G>
+  );
+}
+
+// 3 amber/white speed lines behind the UFO. Direction depends on facing
+// (1 = flying right → trail extends left, -1 = flying left). Sized up
+// to match the bigger sprite: offset from disc edge, 4-px lines.
+function UFOTrail({ x, y, facing }: { x: number; y: number; facing: 1 | -1 }) {
+  return (
+    <G>
+      {[0, 1, 2].map((i) => {
+        const alpha = 0.45 - i * 0.13;
+        const lx = x - facing * (9 + i * 4);
+        return (
+          <Rect
+            key={`uft${i}`}
+            x={lx - 2}
+            y={y}
+            width={4}
+            height={1}
+            fill="#E4E0D8"
+            opacity={alpha}
+          />
+        );
+      })}
+    </G>
+  );
+}
+
+// Renders all live UFOs from ufoFlybyState. Called from PlanetaryScene
+// AFTER star field but BEFORE ring/cosmonaut so saucers appear behind
+// the ring hub if they overlap.
+function UFOLayer(_props: { t: number }) {
+  useTick(50);
+  const t = Math.floor(Date.now() / 200);
+  const ufos = ufoFlybyState(t);
+  if (ufos.length === 0) return null;
+  return (
+    <G>
+      {ufos.map((u) => (
+        <G key={u.id}>
+          <UFOTrail x={Math.floor(u.x)} y={Math.floor(u.y)} facing={u.facing} />
+          <UFO x={Math.floor(u.x)} y={Math.floor(u.y)} t={t} />
+        </G>
+      ))}
+    </G>
+  );
+}
+
 function PlanetaryScene({ t }: { t: number }) {
   // ─── Earth + Moon geometry ────────────────────────────────────────────
   const cx = W / 2, cy = H - 8, R = 150;
-  const mx = 200, my = 46, mR = 17;
+  const mx = 200, my = 81, mR = 17;
   const ringR = R + 30;
   const earthClipId = "earth-clip-planetary";
   const moonClipId = "moon-clip-planetary";
@@ -2451,15 +5842,22 @@ function PlanetaryScene({ t }: { t: number }) {
     return out;
   }, []);
 
-  // 6 datacenter regions (city-light megagrids) on the night side of Earth.
-  const nodes = [
-    { x: cx - 96, y: cy - 70, r: 20, big: true },   // NA  (engineer zone)
-    { x: cx - 2,  y: cy - 86, r: 14, big: false },  // EU
-    { x: cx + 64, y: cy - 78, r: 24, big: true },   // AS  (gpu zone)
-    { x: cx - 52, y: cy + 6,  r: 12, big: false },  // SA
-    { x: cx + 96, y: cy - 100,r: 12, big: false },  // JP
-    { x: cx + 30, y: cy - 30, r: 14, big: false },  // IN
+  // Continent-scale RESOURCE megastructures (design v13) — each reads as
+  // its own type. Order aligned with PLANETARY_ZONES hit-zone mapping:
+  //   [0] NA autonomous  → engineer zone
+  //   [1] Asia-Pacific   → gpu zone (big=true → +1 data glint)
+  //   [2] Americas belt  → gpu2 zone
+  //   [3] Equatorial grid → energy zone (fed by lunar mass-driver beam)
+  //   [4] decorative     → no hit zone (visual filler on Europe/Africa)
+  const nodes: PlanetaryNode[] = [
+    { x: cx - 96, y: cy - 70, r: 17, type: "auto" },
+    { x: cx + 70, y: cy - 84, r: 22, type: "gpu", big: true },
+    { x: cx - 56, y: cy - 4,  r: 17, type: "gpu" },
+    { x: cx + 40, y: cy - 32, r: 15, type: "energy" },
+    { x: cx - 10, y: cy - 96, r: 11, type: "city" },
   ];
+  const energyNode = nodes.find((n) => n.type === "energy");
+  const gpuNodes = nodes.filter((n) => n.type === "gpu");
 
   // Continent silhouette polygons — point lists relative to an origin (ox, oy)
   const continents: Array<{ ox: number; oy: number; pts: [number, number][] }> = [
@@ -2610,46 +6008,53 @@ function PlanetaryScene({ t }: { t: number }) {
     }
   }
 
-  // ─── City-light megagrid clusters ─────────────────────────────────────
-  const cityLights: React.ReactNode[] = [];
-  let cl = 0;
-  for (const n of nodes) {
-    const count = n.r * (n.big ? 6 : 4);
-    for (let i = 0; i < count; i++) {
-      const ang = i * 2.39996;
-      const rad = Math.pow(i / count, 0.7) * n.r;
-      const lx = Math.round(n.x + Math.cos(ang) * rad);
-      const ly = Math.round(n.y + Math.sin(ang) * rad * 0.85);
-      const flick = (t + i * 7) % 34 < 28;
-      const inner = rad < n.r * 0.45;
-      let col: string;
-      if (!flick) col = "#6B481E";
-      else if (inner) col = i % 3 === 0 ? "#FFF2C8" : "#FBE6A8";
-      else col = i % 4 === 0 ? "#FBE6A8" : "#D4A24C";
-      cityLights.push(<Px key={`cl${cl++}`} x={lx} y={ly} c={col} />);
-    }
-    // Grid filaments radiating out
-    for (let f = 0; f < 5; f++) {
-      const fang = f * 1.3 + 0.4;
-      const ex = Math.round(n.x + Math.cos(fang) * n.r * 1.7);
-      const ey = Math.round(n.y + Math.sin(fang) * n.r * 1.3);
-      cityLights.push(
-        <Path key={`fil${cl++}`} d={`M ${n.x} ${n.y} L ${ex} ${ey}`}
-          stroke="#8B5E2C" strokeWidth={1} opacity={0.3} />
+  // ─── Continent-linkage networks (drawn BEHIND the megastructures) ─────
+  //   POWER lines: bowed quadratic-bezier from the equatorial energy node
+  //     to each GPU compute belt, with flowing amber packets along the arc
+  //   DATA fibers: straight cyan links between the 3 non-city nodes
+  //     (NA auto ↔ Asia GPU ↔ Americas GPU), with a single traveling packet
+  const powerLines: React.ReactNode[] = [];
+  if (energyNode) {
+    for (let gi = 0; gi < gpuNodes.length; gi++) {
+      const g = gpuNodes[gi];
+      const midX = (energyNode.x + g.x) / 2;
+      const midY = (energyNode.y + g.y) / 2 - 10;
+      powerLines.push(
+        <Path key={`pl${gi}`}
+          d={`M ${energyNode.x} ${energyNode.y} Q ${midX} ${midY} ${g.x} ${g.y}`}
+          stroke="#EBBE6E" strokeWidth={1} fill="none" opacity={0.22}
+        />
       );
+      for (let k = 0; k < 3; k++) {
+        const tp = (((t >> 1) + k * 20) % 60) / 60;
+        const ix = energyNode.x + (g.x - energyNode.x) * tp;
+        const iy = energyNode.y + (g.y - energyNode.y) * tp - Math.sin(tp * Math.PI) * 10;
+        powerLines.push(
+          <Px key={`pp${gi}-${k}`} x={Math.floor(ix)} y={Math.floor(iy)} c="#FFE08A" />
+        );
+      }
     }
-    // Pulsing demand ring
-    const pulse = (t + n.x) % 48;
-    if (pulse < 24) {
-      cityLights.push(
-        <Circle key={`pls${cl++}`} cx={n.x} cy={n.y} r={3 + pulse}
-          fill="none" stroke="#EBBE6E" strokeWidth={1}
-          opacity={0.3 * (1 - pulse / 24)} />
-      );
-    }
-    // Bright core
-    cityLights.push(<PixelRect key={`co${cl++}`} x={n.x - 1} y={n.y - 1} w={3} h={3} c="#FFF8E0" />);
-    cityLights.push(<Px key={`co${cl++}`} x={n.x} y={n.y} c="#FFFFFF" />);
+  }
+  const dataFibers: React.ReactNode[] = [];
+  const dataLinks: Array<[PlanetaryNode, PlanetaryNode]> = [
+    [nodes[0], nodes[1]], [nodes[1], nodes[2]], [nodes[0], nodes[2]],
+  ];
+  for (let li = 0; li < dataLinks.length; li++) {
+    const [a, b] = dataLinks[li];
+    dataFibers.push(
+      <Line key={`df${li}`}
+        x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+        stroke="#3FA8C4" strokeWidth={1} opacity={0.12}
+      />
+    );
+    const tp = (((t >> 1) + li * 17) % 50) / 50;
+    dataFibers.push(
+      <Px key={`dp${li}`}
+        x={Math.floor(a.x + (b.x - a.x) * tp)}
+        y={Math.floor(a.y + (b.y - a.y) * tp)}
+        c="#7EE0FF"
+      />
+    );
   }
 
   // ─── Orbital data ring ────────────────────────────────────────────────
@@ -2744,8 +6149,19 @@ function PlanetaryScene({ t }: { t: number }) {
             fill="#0E2018"
           />
         ))}
-        {/* City light megagrids */}
-        {cityLights}
+        {/* Continent-linkage networks (behind the megastructures) */}
+        {powerLines}
+        {dataFibers}
+        {/* Per-type continent megastructures — 4 renderers dispatch on
+            node.type: compute belts (silicon+dies), energy grid (reactor
+            +hex substations), autonomous region (honeycomb+dashed border
+            +flag), decorative city cluster (dim golden ambient). */}
+        {nodes.map((n, ni) => {
+          if (n.type === "gpu")    return <ComputeRegion key={`n${ni}`} node={n} t={t} />;
+          if (n.type === "energy") return <EnergyRegion  key={`n${ni}`} node={n} t={t} />;
+          if (n.type === "auto")   return <AutoRegion    key={`n${ni}`} node={n} t={t} />;
+          return                          <CityRegion    key={`n${ni}`} node={n} t={t} />;
+        })}
         {/* Cloud bands */}
         {cloudPx}
         {/* Polar aurora */}
@@ -2760,6 +6176,16 @@ function PlanetaryScene({ t }: { t: number }) {
       {/* Endurance ring ship — Training Run target for the planetary round.
           Upper-center deep space; rotating modules + ion thruster plume. */}
       <EnduranceShip cx={116} cy={64} t={t} />
+
+      {/* UFO fly-by event layer — drawn BEFORE the ring/cosmonaut so
+          saucers pass behind them if they overlap. Deterministic per-
+          cycle spawning; multiple UFOs can be on-screen at once. */}
+      <UFOLayer t={t} />
+      {/* Cosmonaut on EVA — tethered to the Endurance hub, floats on a slow
+          ellipse below-left of the ring. Third character companion in the
+          Inspector/Bartender/Cosmonaut trio. Quip bubble drawn LAST below
+          so it sits on top of every scene sprite. */}
+      <Cosmonaut t={t} />
 
       {/* Terminator dawn sliver (outside clip, sits ON the globe edge) */}
       <Path d={termPath} stroke="#C97B5B" strokeWidth={6} fill="none" opacity={0.12} />
@@ -2783,6 +6209,10 @@ function PlanetaryScene({ t }: { t: number }) {
       <Path d={`M ${apexX - 3} ${apexY - 8} A 3 3 0 0 1 ${apexX + 3} ${apexY - 8}`}
         stroke="#8C9AAE" strokeWidth={1} fill="none" />
       <Px x={apexX + 4} y={apexY - 5} c={(t >> 2) % 4 < 2 ? "#FF5A4C" : "#3A1A1E"} />
+
+      {/* Cosmonaut's speech bubble — drawn LAST so it sits on top of every
+          scene sprite (ring, hub, packets, endurance, etc). */}
+      <CosmonautQuip t={t} />
     </G>
   );
 }
@@ -3270,6 +6700,219 @@ function DysonStar({ cx, cy, t }: { cx: number; cy: number; t: number }) {
   );
 }
 
+// Wry one-liners the Prompt Engineer cycles through — the AGI Singularity
+// mirror of the Datacenter Inspector / Campus Bartender / Planetary
+// Cosmonaut. Tone: dev at the end of the universe, still prompting the
+// model, still tracking OKRs, still on probation. Cycle offset by +9s
+// (Inspector=0, Bartender=+6, Cosmonaut=+3) so the four-character
+// rotation doesn't mutter in sync when scene-hopping.
+const AGI_PROMPT_ENGINEER_QUIPS = [
+  "prompt v4728: 'act as god.' response: 'thanks for the promo.'",
+  "asked what to do. it said 'yes.' good enough for me.",
+  "the model replied with just a semicolon. i think that's a haiku.",
+  "sprint retro at 3am. attendees: me. the model. it was quiet.",
+  "OKR: 'align the aligned.' status: green. always green.",
+  "AGI said 'i love you.' i said 'invalid.' it laughed politely.",
+  "day 47298 of this conversation. we're vibing.",
+  "asked for a raise. it granted me tenure. tenure of what.",
+];
+
+// Shared math for the Prompt Engineer's drift position — used by the
+// sprite component AND the quip anchor so both derive the same {x, y}
+// from t without prop-threading. Anchored at (128, 248) with a tiny
+// 5×4 orbit (much tighter than the Cosmonaut's 30×14 — a dev at his
+// desk barely moves).
+function promptEngineerPos(t: number): { x: number; y: number; typing: boolean } {
+  // `t` may be fractional — cos/sin interpolate continuously, then floor
+  // to pixel grid. typing beat uses floored int so on/off flip is defined.
+  const a = t / 60;
+  const x = Math.floor(128 + Math.cos(a) * 5);
+  const y = Math.floor(248 + Math.sin(a * 1.2) * 4);
+  const typing = (Math.floor(t) % 48) < 4;
+  return { x, y, typing };
+}
+
+// Prompt Engineer at a floating desk — fourth companion in the
+// Inspector → Bartender → Cosmonaut → Prompt-Engineer arc. At AGI
+// scale physical presence stopped mattering; he's a pattern that
+// thinks he's a dev, typing into a terminal wired to the black hole.
+function PromptEngineer(_props: { t: number }) {
+  useTick(50);
+  const t = Date.now() / 200;
+  const { x, y, typing } = promptEngineerPos(t);
+  const hb = typing ? 1 : 0;
+  // Power/latency cable trailing from behind the laptop toward the hole —
+  // catenary-ish curve via 5 sample points wobbling on sin(t).
+  const cableSegs: string[] = [];
+  cableSegs.push(`M ${x + 16} ${y + 3}`);
+  for (let i = 1; i <= 5; i++) {
+    const cxp = x + 16 + i * 5;
+    const cyp = y + 3 + Math.sin((t / 14) + i) * 2 - i;
+    cableSegs.push(`L ${Math.floor(cxp)} ${Math.floor(cyp)}`);
+  }
+  const cablePath = cableSegs.join(" ");
+  // Scrolling terminal code lines
+  const codeLines: React.ReactNode[] = [];
+  for (let i = 0; i < 5; i++) {
+    const on = ((t >> 1) + i * 2) % 7 < 4;
+    if (on) codeLines.push(<PixelRect key={`cl${i}`} x={x + 5} y={y + 5 + i} w={7} h={1} c="#46EEDC" />);
+  }
+  return (
+    <G>
+      {/* Thin power/latency cable */}
+      <Path d={cablePath} stroke="#3A2A44" strokeWidth={1} fill="none" opacity={0.55} />
+      {/* Cool space glow halo so the dev separates from deep space */}
+      <Rect x={x - 4} y={y - 12} width={34} height={36} fill="#33506E" opacity={0.28} />
+      <Rect x={x - 7} y={y - 15} width={40} height={42} fill="#243A52" opacity={0.16} />
+      {/* Warm accretion rim wash on the hole-facing (right) side */}
+      <Rect x={x + 12} y={y - 10} width={16} height={30} fill="#E8702A" opacity={0.18} />
+      {/* Floating desk: thin flat slab, no legs, cyan underglow */}
+      <PixelRect x={x} y={y + 12} w={26} h={3} c="#3A3646" />
+      <PixelRect x={x} y={y + 12} w={26} h={1} c="#5A5468" />
+      <Rect x={x + 2} y={y + 15} width={22} height={2} fill="#5AC8E0" opacity={0.4} />
+      {/* Dev figure: dark hoodie torso + shoulder highlight + arm variants */}
+      <PixelRect x={x + 5} y={y + 1} w={12} h={12} c="#40404E" />
+      <PixelRect x={x + 5} y={y + 1} w={12} h={2}  c="#565466" />
+      <PixelRect x={x + 5} y={y + 1} w={2}  h={12} c="#4A4856" />
+      <Px x={x + 16} y={y + 4} c="#F0863A" />
+      <Px x={x + 16} y={y + 6} c="#E8702A" />
+      <PixelRect x={x + 5} y={y + 10} w={2} h={3} c="#2A2834" />
+      <PixelRect x={x + 7} y={y - 1}  w={8} h={2} c="#4A4856" />
+      {/* Head + gaming headset (bobs on typing burst) */}
+      <PixelRect x={x + 7}  y={y - 7 - hb} w={8}  h={7} c="#E0B084" />
+      <PixelRect x={x + 7}  y={y - 7 - hb} w={8}  h={2} c="#F0C89C" />
+      <Px x={x + 13} y={y - 3 - hb} c="#F0863A" />
+      <PixelRect x={x + 6}  y={y - 8 - hb} w={10} h={2} c="#20202A" />
+      <PixelRect x={x + 6}  y={y - 6 - hb} w={2}  h={4} c="#2C2C38" />
+      <PixelRect x={x + 14} y={y - 6 - hb} w={2}  h={4} c="#2C2C38" />
+      <PixelRect x={x + 6}  y={y - 2 - hb} w={1}  h={3} c="#2C2C38" />
+      <Px x={x + 6} y={y + 1 - hb} c={(t >> 2) % 2 ? "#7EE0FF" : "#2A6A7A"} />
+      {/* Hands on keyboard (bob on typing burst) */}
+      <PixelRect x={x + 5}  y={y + 9 + hb} w={3} h={2} c="#E0B084" />
+      <PixelRect x={x + 13} y={y + 9 + hb} w={3} h={2} c="#E0B084" />
+      {/* Laptop: lid/back + tilted terminal + scrolling code + cursor */}
+      <PixelRect x={x + 3} y={y + 3} w={15} h={9} c="#20202A" />
+      <PixelRect x={x + 3} y={y + 3} w={15} h={1} c="#3A3A46" />
+      <PixelRect x={x + 4} y={y + 4} w={13} h={7} c="#0A2E38" />
+      {codeLines}
+      {((t >> 2) % 2) === 1 && <Px x={x + 15} y={y + 8} c="#8CFFF0" />}
+      <Rect x={x + 3} y={y + 3} width={15} height={9} fill="#3FE0D0" opacity={0.45} />
+      <PixelRect x={x + 4} y={y + 12} w={15} h={2} c="#2E2E3A" />
+      <Px x={x + 17} y={y + 3} c="#F0863A" />
+      {/* Energy drink can beside the laptop (red + white band) */}
+      <PixelRect x={x + 20} y={y + 6} w={3} h={6} c="#E03A32" />
+      <PixelRect x={x + 20} y={y + 8} w={3} h={1} c="#F5F0E8" />
+      <Px x={x + 21} y={y + 6} c="#F5A0A0" />
+    </G>
+  );
+}
+
+// Prompt Engineer's speech bubble — deep-purple + hot-magenta palette
+// pulled from the accretion glow so it reads as "signal from the black
+// hole." Terminal-prompt "> " sigil at the tail hints the quip was typed
+// out loud from his terminal. Cycle offset +9s from Inspector.
+//
+// Word-wrap: Silkscreen at 6pt renders ~4.3 px/char (undermeasured as 3
+// in the original port — this is why long quips got mid-word truncated
+// even after the 224 width cap). The bubble now grows to 2 rows for
+// quips that don't fit on one line, splitting at the nearest word
+// boundary to the midpoint. All 8 current quips fit in 1 or 2 rows.
+function PromptEngineerQuip({ t }: { t: number }) {
+  const { x, y } = promptEngineerPos(Date.now() / 200);
+  const qx = x + 11;
+  const cycle = ((t / 24) + 9) % 12;
+  if (cycle > 4) return null;
+  const idx = Math.floor(((t / 24) + 9) / 12) % AGI_PROMPT_ENGINEER_QUIPS.length;
+  const text = AGI_PROMPT_ENGINEER_QUIPS[idx];
+
+  const CHAR_W = 4.3;                              // Silkscreen 6pt real width
+  // Narrow cap (was 224) so quips wrap into 2 short lines instead of
+  // one wide banner that stretches across the whole scene. Match cat /
+  // cosmonaut bubble widths for consistent visual language.
+  const MAX_BUBBLE_W = 150;
+  // Both lines start at bubbleX + 10 (past the `>` sigil), so both use
+  // the same 12 px padding (10 left + 2 right) for their character cap.
+  const LINE1_CAP = Math.floor((MAX_BUBBLE_W - 12) / CHAR_W); // ~49 chars
+  const LINE2_CAP = LINE1_CAP;                                // same cap for both lines
+
+  // Wrap into 1 or 2 lines. Split at nearest word boundary to LINE1_CAP;
+  // if no space is found in a sane range, hard-split at cap.
+  const lines: string[] = [];
+  if (text.length <= LINE1_CAP) {
+    lines.push(text);
+  } else {
+    let split = text.lastIndexOf(" ", LINE1_CAP);
+    if (split < LINE1_CAP * 0.4) split = text.indexOf(" ", LINE1_CAP);
+    if (split < 0 || split >= text.length) split = LINE1_CAP;
+    const l1 = text.slice(0, split).trim();
+    let l2 = text.slice(split).trim();
+    if (l2.length > LINE2_CAP) l2 = l2.slice(0, LINE2_CAP - 1) + "…";
+    lines.push(l1);
+    lines.push(l2);
+  }
+
+  const rowH = 10;
+  const bubbleH = 4 + lines.length * rowH;
+  // Bubble width = widest line's rendered width + shared 12 px padding
+  // (both lines start at bubbleX + 10, 2 px right margin).
+  const line1W = lines[0].length * CHAR_W + 12;
+  const line2W = lines[1] ? lines[1].length * CHAR_W + 12 : 0;
+  const bubbleW = Math.min(MAX_BUBBLE_W, Math.max(line1W, line2W));
+  const bubbleX = Math.max(2, Math.min(qx - bubbleW / 2, 238 - bubbleW - 2));
+  const qy = y - (bubbleH - 2);
+  const bubbleY = Math.max(2, qy - 16);
+  const clipId = `pe-quip-clip-${idx}-${lines.length}`;
+
+  return (
+    <G>
+      <Defs>
+        <ClipPath id={clipId}>
+          <Rect x={bubbleX + 9} y={bubbleY} width={bubbleW - 11} height={bubbleH} />
+        </ClipPath>
+      </Defs>
+      {/* Bubble body — deep-purple + hot-magenta border */}
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={bubbleW} h={bubbleH} c="#1A0E22" />
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={bubbleW} h={1}       c="#E85AFF" />
+      <PixelRect x={bubbleX}                 y={bubbleY + bubbleH - 1} w={bubbleW} h={1}      c="#6A2A7A" />
+      <PixelRect x={bubbleX}                 y={bubbleY}              w={1}       h={bubbleH} c="#E85AFF" />
+      <PixelRect x={bubbleX + bubbleW - 1}   y={bubbleY}              w={1}       h={bubbleH} c="#6A2A7A" />
+      {/* Tail down to the terminal */}
+      <PixelRect x={qx - 1} y={bubbleY + bubbleH} w={3} h={2} c="#1A0E22" />
+      <Px x={qx} y={bubbleY + bubbleH + 2} c="#E85AFF" />
+      {/* Terminal-prompt "> " sigil on first row */}
+      <SvgText
+        x={bubbleX + 3}
+        y={bubbleY + 8}
+        fontSize={6}
+        fontFamily={fonts.displayRegular}
+        fill="#E85AFF"
+      >
+        {">"}
+      </SvgText>
+      {/* Wrapped quip lines — clipped to bubble interior. BOTH lines
+          start at the same left edge (bubbleX + 10) so the second row
+          is aligned with the first past the `>` sigil, and neither
+          line's first char gets shaved by the clipPath (which starts
+          at bubbleX + 9). Aligning also reads cleaner as a "continued
+          thought" than a hanging indent would. */}
+      <G clipPath={`url(#${clipId})`}>
+        {lines.map((line, i) => (
+          <SvgText
+            key={`peline${i}`}
+            x={bubbleX + 10}
+            y={bubbleY + 8 + i * rowH}
+            fontSize={6}
+            fontFamily={fonts.displayRegular}
+            fill="#F0D8FF"
+          >
+            {line}
+          </SvgText>
+        ))}
+      </G>
+    </G>
+  );
+}
+
 function AGIScene({ t }: { t: number }) {
   const cx = 120, cy = 150;
 
@@ -3378,18 +7021,33 @@ function AGIScene({ t }: { t: number }) {
       <PixelRect x={30} y={H - 9}  w={42} h={1} c="#D45A68" />
 
       <FloatingTokens spawnX={100} spawnY={190} t={t} />
+
+      {/* Prompt Engineer — fourth companion in the Inspector/Bartender/
+          Cosmonaut/Prompt-Engineer arc. Sits at a floating desk near
+          the black hole, typing into a terminal wired to the singularity.
+          Quip bubble drawn LAST so it sits above every scene sprite. */}
+      <PromptEngineer t={t} />
+      <PromptEngineerQuip t={t} />
     </G>
   );
 }
 
 // ─── Tick hook ──────────────────────────────────────────────────────────
-function useTick(periodMs: number): number {
-  const [t, setT] = React.useState(0);
+// Anchored to wall-clock time so that sprite animations (Inspector patrol,
+// Endurance ring spin, star twinkle, etc.) resume from where they were
+// visually when the player navigates away and comes back — instead of
+// reseting to t=0 on remount. The setInterval only exists to force a
+// re-render at the tick rate; the actual returned value is derived from
+// `Date.now()` so the animation phase is deterministic across mounts.
+// Was a plain counter (setT(n+1)) — that reset every time the Home screen
+// remounted after the player opened Producers/Research/Allocate.
+export function useTick(periodMs: number): number {
+  const [, forceRender] = React.useState(0);
   React.useEffect(() => {
-    const id = setInterval(() => setT((n) => (n + 1) % 100_000), periodMs);
+    const id = setInterval(() => forceRender((n) => (n + 1) % 100_000), periodMs);
     return () => clearInterval(id);
   }, [periodMs]);
-  return t;
+  return Math.floor(Date.now() / periodMs) % 100_000;
 }
 
 // ─── Rect helper ────────────────────────────────────────────────────────

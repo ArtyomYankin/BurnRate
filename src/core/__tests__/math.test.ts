@@ -550,10 +550,12 @@ describe("prestige math", () => {
   });
 
   it("Series A multiplier kicks in (x1.5)", () => {
+    // Round 1 (Bootstrap) threshold is 1e7 after the 2026-06 early-game
+    // pacing bump. At exactly threshold → equity = 150 × sqrt(1) × 1.5 = 225.
     const s = {
       ...freshRunState(),
       fundingRoundIdx: 1,
-      tokens: D(1e6).toString(),
+      tokens: D(1e7).toString(),
     };
     expect(equityFromPrestige(s).toNumber()).toBe(225);
   });

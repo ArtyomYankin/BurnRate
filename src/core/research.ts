@@ -28,9 +28,19 @@ export interface ResearchNode {
 
 // Steeper than GDD §8's 5×3^tier — that curve trivialized the whole tree by
 // round 3 (player closed everything in 2-3 prestiges). Bumped to 8×5^tier so
-// tier 4-5 nodes (≈5K and ≈25K equity) are actual long-term goals.
-//   tier 1 = 40, tier 2 = 200, tier 3 = 1000, tier 4 = 5000, tier 5 = 25000.
+// tier 4 nodes (~5K equity) are a real long-term goal.
+//   tier 1 = 40, tier 2 = 200, tier 3 = 1000, tier 4 = 5000, tier 5 = 15000.
+// Tier 5 (`rd_emergent`, Tokens ×10 — the only T5 node in the tree) softened
+// from 25K → 15K. Rationale: at 25K a player who reaches AGI Singularity
+// (last round) with typical overshoot could NOT afford T5 even after
+// closing Planetary — it took another 2-3 AGI prestige cycles. That reads
+// as "unreachable" once you've beaten the game and creates the design
+// smell of a capstone node that only kicks in on the loop after the loop.
+// 15K puts it in reach at the exact moment the player enters AGI (single
+// Planetary close with ×3-5 overshoot = ~15-25K equity), matching the
+// intent of "T5 = your reward for beating the game."
 export function nodeCost(tier: ResearchNode["tier"]): number {
+  if (tier === 5) return 15000;
   return 8 * Math.pow(5, tier);
 }
 

@@ -26,10 +26,10 @@ import { BottomAllocation } from "./BottomAllocation";
 import { BuffsModal } from "./BuffsModal";
 import { HelpModal } from "./HelpModal";
 import { SettingsModal } from "./SettingsModal";
-import { SlackButton } from "./SlackButton";
-import { formatNumber, formatRate } from "./formatNumber";
+import { formatNumber, formatRate, formatMoney } from "./formatNumber";
 import { ItemPopup, PopupContent } from "./ItemPopup";
 import { HitId, PixelScene, sceneForRound } from "./PixelScene";
+import { SceneGutter } from "./SceneGutter";
 import { Onboarding, tutorialHighlightForStep } from "./Onboarding";
 import { useTutorialTargetMeasure } from "./TutorialSpotlight";
 import { useStrings, getStrings } from "../core/i18n";
@@ -124,23 +124,28 @@ export function HomeScreen({
   // overflowing the bottom chrome. Phones keep the original behavior:
   // width-capped at 420px, scene height free to overflow (gets clipped
   // gracefully behind the floating HUD strip).
+  // Aspect ratio of the native art is 2:3 (240×360); we keep it locked so
+  // architectural elements don't squash on wide containers. On tablets
+  // the resulting side gutters are tinted with the scene's wall color
+  // (sceneWrap backgroundColor below) so they read as "room continues
+  // off-canvas" rather than a cream gap. Chrome reserve trimmed to 130
+  // (was 190) — scene extends slightly under TopHUD / alloc bar but
+  // those have their own opaque chrome, so the overlap is invisible.
+  // Chrome reserve v3 (2026-07 iPad-portrait fix, revised): only the top
+  // half of the fix survived — HUD must overlap the empty top-wall strip
+  // (so scene content lands right under the HUD, not 90 px below it),
+  // AND the scene should fill down to the alloc-bar top with NO empty
+  // cream band between the scene's bottom and the ACH/DBT chip row.
+  // Alloc bar + ACH row are both `position:absolute` chrome — they float
+  // ON TOP of the scene, so the scene bottom can extend under them.
+  // Reserve 130 (was 260) matches the alloc bar's `bottom:16 + height:120
+  // ≈ 136 px` footprint, so sceneH ends exactly at alloc-bar top.
   const isTablet = Math.min(screenW, screenH) >= 600;
+  const scenePadTop = isTablet ? 0 : 96;
   let sceneW: number;
   if (isTablet) {
-    // Try width-first up to a generous cap, fall back to height-bound if
-    // the resulting scene would overflow the available vertical area.
-    // Chrome reserve ≈ 96 (TopHUD padding) + ~150 (bottom alloc bar +
-    // secondary row + safe area). Earlier 360 was way too generous and
-    // left a huge cream gap below the scene.
-    const widthCap = 760;
-    const sceneWByWidth = Math.min(screenW - 16, widthCap);
-    const sceneHByWidth = Math.round(sceneWByWidth * (360 / 240));
-    const heightAvail = screenH - 250;
-    if (sceneHByWidth <= heightAvail) {
-      sceneW = sceneWByWidth;
-    } else {
-      sceneW = Math.round(heightAvail * (240 / 360));
-    }
+    const heightAvail = screenH - 130;
+    sceneW = Math.min(screenW - 8, Math.round(heightAvail * (240 / 360)));
   } else {
     sceneW = Math.min(screenW, 420);
   }
@@ -194,6 +199,10 @@ export function HomeScreen({
 
   const handleHit = (id: HitId) => {
     setActiveHit(id);
+    // Companion mini-interactions (like the cat, or the pizza-slice
+    // catcher) redeem inside PixelScene's dynamic hit components — they
+    // only call onHit HERE when the tap wasn't the actionable window,
+    // so a tap that reached this handler is always the "info popup" case.
     setPopup(buildPopup(id));
   };
 
@@ -216,21 +225,54 @@ export function HomeScreen({
       onOpenResearch();
       return;
     }
+    if (popup.hit === "agi") {
+      // AGI (autonomous_agent) isn't a chain producer — it lives outside
+      // the four Liebig chains. Open the Producers screen with no chain
+      // filter so the player sees the full ladder including the agent
+      // panel at the bottom.
+      onOpenProducers();
+      return;
+    }
     const chain = HIT_TO_CHAIN[popup.hit];
     if (chain) {
       onOpenProducers(chain);
     }
   };
 
+  const currentScene = sceneForRound(fundingRoundIdx);
+  // Tablet gutters. On phones sceneW ≈ screenW so gutterW is 0 and the
+  // SceneGutter renders zero-width regions (invisible). On iPads, the
+  // 2:3 scene centers with leftover width on both sides; SceneGutter
+  // fills those side strips with an era-themed animated backdrop
+  // (pegboard for garage, oak slats + courtyard for campus, starfield +
+  // city network for planetary, etc). Ported from Claude Design v13
+  // tablet layout. Replaces the earlier hard-letterbox `colors.ink`
+  // approach that read as "empty black bars" on iPad reviewer builds.
+  // The wrap sits behind PixelScene; sceneWrap has paddingTop:96 which
+  // pushes the scene down, and SceneGutter is absolutely positioned
+  // starting from the same y so the gutter tops line up with the scene.
+  const gutterHoleX = Math.max(0, Math.floor((screenW - sceneW) / 2));
   return (
     <View style={styles.root}>
-      <View style={styles.sceneWrap}>
+      <View style={[styles.sceneWrap, { backgroundColor: colors.cream, paddingTop: scenePadTop }]}>
+        <View
+          style={{ position: "absolute", left: 0, top: scenePadTop, width: screenW, height: sceneH }}
+          pointerEvents="none"
+        >
+          <SceneGutter
+            scene={currentScene}
+            width={screenW}
+            height={sceneH}
+            holeX={gutterHoleX}
+            holeW={sceneW}
+          />
+        </View>
         <PixelScene
           width={sceneW}
           height={sceneH}
           onHit={handleHit}
           activeHit={activeHit}
-          scene={sceneForRound(fundingRoundIdx)}
+          scene={currentScene}
           tutorialHighlight={tutorialHighlightForStep(onboardingStep)}
         />
       </View>
@@ -240,7 +282,7 @@ export function HomeScreen({
         rate={formatRate(tps)}
         pct={pct}
         roundLabel={`${(t.roundNames[round.id as keyof typeof t.roundNames] ?? round.name).toUpperCase()} · ${t.topHud.round} ${round.idx + 1}`}
-        capital={formatNumber(capital)}
+        capital={formatMoney(capital)}
         equity={formatNumber(equity)}
         nextThresholdLabel={
           hypeDiscount > 0.005
@@ -251,6 +293,9 @@ export function HomeScreen({
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenHelp={() => setHelpOpen(true)}
         onSecretActivate={() => setDevOpen(true)}
+        onOpenInbox={onOpenVignettes}
+        unreadVignettes={unreadVignettes}
+        inboxTutorialTargetKey="slack-btn"
       />
 
       {/* Visible-in-dev cheat trigger. Replaces an earlier hidden long-press
@@ -271,13 +316,24 @@ export function HomeScreen({
       {/* Bottom row of secondary buttons — keep prestige + producers/research
           reachable even when the player ignores hit zones. Sits above the
           allocation strip. */}
-      {/* Floating Slack-style inbox button (right edge, dark navy). Ported
-          from design v8 — replaces the old INBOX chip in the bottom row.
-          Stands out from the cream chrome on purpose: it's the player's
-          notification surface. */}
-      <SlackButton unread={unreadVignettes} onPress={onOpenVignettes} tutorialTargetKey="slack-btn" />
+      {/* Inbox bell used to be a floating cream slab absolute-positioned in
+          the upper-left. It fought the HUD lower edge (SafeArea variability)
+          on one side and scene wall items (framed pics, kanban boards, moon
+          sprite, research array beam) on the other. Moved into TopHUD's
+          nav-row chrome (see TopHUD `inboxTutorialTargetKey`) so scene items
+          get the upper-left back and the bell always sits with the other
+          chrome icons regardless of SafeArea inset. */}
 
-      <View style={styles.secondaryRow} pointerEvents="box-none">
+      {/* Dynamic bottom inset: the alloc bar grows ~22px taller when the
+          SAFETY LOW banner is showing, so the chip row would otherwise
+          overlap the EDIT link. Bump bottom by 22 in that case. */}
+      <View
+        style={[
+          styles.secondaryRow,
+          allocation.safety < 0.10 && { bottom: 117 },
+        ]}
+        pointerEvents="box-none"
+      >
         <Pressy onPress={onOpenAchievements}>
           <View
             ref={achTargetProps.ref}
@@ -307,7 +363,7 @@ export function HomeScreen({
             </Text>
           </Pressable>
         )}
-        {debt.gt(0) && (
+        {debt.gte(1) && (
           <View style={styles.debtChip}>
             <Text style={styles.debtChipText}>{t.home.debt} {formatNumber(debt)}</Text>
           </View>
@@ -468,6 +524,83 @@ function buildPopup(id: HitId): PopupContent {
         subtitle: "CATWALK ROUNDS · HI-VIS VEST",
         body: "A single silhouette walks the catwalk above the mainframes with a scanner. Nobody is sure who employs them. They have a badge. The badge works.",
       };
+    case "agi":
+      // Autonomous Agent purchase entry point on the Moon. CTA opens the
+      // Producers screen where the agent panel lives at the bottom of
+      // the ladder — see popup-click handler above.
+      return {
+        hit: id,
+        kind: "action",
+        title: "Autonomous Agent",
+        subtitle: "LUNAR MASS-DRIVER · SELF-IMPROVING FLYWHEEL",
+        body: "Each agent multiplies your total tokens/sec by 1.10x, stacking exponentially. They run on lunar solar and beam their output home.",
+        flavor: "The moon says it's fine. It always says it's fine.",
+        cta: "OPEN PRODUCERS",
+      };
+    case "cosmonaut":
+      return {
+        hit: id,
+        kind: "cosmetic",
+        compact: true,
+        title: "The Cosmonaut",
+        subtitle: "UFOs cross the starfield · tap one mid-flight",
+      };
+    case "prompt_engineer":
+      return {
+        hit: id,
+        kind: "cosmetic",
+        compact: true,
+        title: "The Prompt Engineer",
+        subtitle: "the model asks · pick one of three · each does something different",
+      };
+    case "cat":
+      return {
+        hit: id,
+        kind: "cosmetic",
+        compact: true, // cat is tapped often; keep the popup slim
+        title: "The Cat",
+        subtitle: "WARM KEYBOARD ENTHUSIAST · PET WHEN HE PURRS",
+      };
+    case "pizza_guy":
+      return {
+        hit: id,
+        kind: "cosmetic",
+        compact: true,
+        title: "The Pizza Guy",
+        subtitle: "sometimes drops a slice · catch it mid-air",
+      };
+    case "vc":
+      return {
+        hit: id,
+        kind: "cosmetic",
+        compact: true,
+        title: "The VC",
+        subtitle: "when he snoops your code · tap for a check",
+      };
+    case "spot":
+      return {
+        hit: id,
+        kind: "cosmetic",
+        compact: true,
+        title: "Spot",
+        subtitle: "flags compliance drift · tap to silence the alert",
+      };
+    case "bartender":
+      return {
+        hit: id,
+        kind: "cosmetic",
+        compact: true,
+        title: "The Bartender",
+        subtitle: "slides a drink down the bar · tap the glass mid-slide",
+      };
+    case "inspector":
+      return {
+        hit: id,
+        kind: "cosmetic",
+        compact: true,
+        title: "The Inspector",
+        subtitle: "watches for sparking racks · tap the one flashing red",
+      };
   }
 }
 
@@ -493,7 +626,10 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "flex-start",
-    paddingTop: 96, // leave room for TopHUD to float over the wall
+    // paddingTop is applied inline (isTablet ? 0 : 96) — phones keep the
+    // 96-px push so the scene wall doesn't hide behind the floating HUD;
+    // tablets anchor the scene at y=0 so the HUD naturally covers the
+    // empty top-wall strip instead of leaving a visible empty band.
   },
   secondaryRow: {
     position: "absolute",

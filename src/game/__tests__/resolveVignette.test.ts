@@ -86,14 +86,17 @@ describe("store.resolveVignette", () => {
     expect(useGame.getState().run.activeEffects.length).toBe(0);
   });
 
-  it("returns false for a vignette with no replyEffects (flavor-only reply)", () => {
+  it("returns false for a vignette with no replies at all (non-Slack surface)", () => {
     const { resolveVignette } = useGame.getState();
-    // V09 town_hall_transcript is a Slack DM but has no replies / replyEffects.
-    expect(resolveVignette("town_hall_transcript", 0)).toBe(false);
+    // series_a_deck is a board memo without replies/replyEffects — surface
+    // types that don't expose reply UI. If a caller somehow tries to
+    // resolve one anyway (bad save, stale UI), resolveVignette no-ops
+    // rather than mutating state.
+    expect(resolveVignette("series_a_deck", 0)).toBe(false);
   });
 
   it("each Slack reply picks its own effect (proves index alignment)", () => {
-    // re_slack_reaction has 3 replies. Index 0 = :ship: → +10% Capital buff.
+    // re_slack_reaction has 3 replies. Index 0 = 🚢 → +10% Capital buff.
     const { resolveVignette } = useGame.getState();
     expect(resolveVignette("re_slack_reaction", 0)).toBe(true);
     const eff = useGame.getState().run.activeEffects[0];

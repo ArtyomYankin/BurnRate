@@ -26,12 +26,16 @@ interface Props {
 // are about to read. Aubergine for Slack, gold for board memos, ink for
 // tweets, etc. — these aren't our palette colors, they're the *medium's*
 // real-world brand colors (parody-distance per GDD §13).
+// Medium meta — labels + accent + 1-char glyph for the inbox row avatar.
+// Generic / non-trademark labels: we don't ship with "X / Twitter" or
+// "TechCrunch" written out anywhere player-visible (App Store review risk).
+// The vignette readers use the matching fictional brands (Skim ✦, TechBeat).
 const MEDIUM: Record<VignetteMedium, { label: string; color: string; glyph: string }> = {
-  slack:        { label: "SLACK",       color: "#1A1D29",        glyph: "#" },
+  slack:        { label: "TEAM DM",     color: "#1A1D29",        glyph: "#" },
   board_memo:   { label: "BOARD MEMO",  color: colors.gold_2,    glyph: "▤" },
-  fake_tweet:   { label: "X / TWITTER", color: "#000000",        glyph: "𝕏" },
+  fake_tweet:   { label: "POST · SKIM", color: "#000000",        glyph: "✦" },
   leaked_email: { label: "EMAIL",       color: colors.muted_2,   glyph: "✉" },
-  fake_news:    { label: "TECHCRUNCH",  color: "#0A8542",        glyph: "TC" },
+  fake_news:    { label: "TECHBEAT",    color: "#0A8542",        glyph: "TB" },
   podcast:      { label: "PODCAST",     color: colors.tensionRed, glyph: "▶" },
   system:       { label: "SYSTEM",      color: colors.ink,       glyph: "!" },
 };

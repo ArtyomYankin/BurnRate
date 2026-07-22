@@ -49,6 +49,145 @@ import {
   SCHEMA_VERSION,
 } from "../core/types";
 
+// Companion mini-interactions (pet cat, tip pizza guy, etc). See
+// interactWithCompanion. Cooldown starts fresh at prestige because
+// companionInteractions lives on RunState.
+const COMPANION_COOLDOWN_MS = 60_000; // 60s between rewards
+const COMPANION_WINDOW_MS   = 15_000; // 15s to tap while ready
+
+// AGI 3-choice prompts (Round 9 finale event). Each prompt asks a
+// question; each of the 3 replies has a DIFFERENT effect — currency
+// burst, temp multiplier, alignment-debt paydown/increase, hype swing.
+// Deliberately overlap categories so no two prompts feel identical.
+export interface AGIChoice {
+  label: string;   // button text (short)
+  reveal: string;  // post-tap flavor + effect summary
+  kind:
+    | { type: "add_tokens"; scale: number }    // scale = 10^(threshold-N) tokens
+    | { type: "add_capital"; scale: number }
+    | { type: "add_rp"; scale: number }
+    | { type: "add_hype"; value: number }
+    | { type: "add_debt"; value: number }
+    | { type: "sub_debt_pct"; pct: number }
+    | { type: "mult_tokens"; value: number; sec: number; addDebt?: number }
+    | { type: "mult_capital"; value: number; sec: number }
+    | { type: "mult_hype"; value: number; sec: number; addDebt?: number }
+    | { type: "mult_rp"; value: number; sec: number };
+}
+export interface AGIPrompt {
+  id: string;
+  text: string;
+  choices: [AGIChoice, AGIChoice, AGIChoice];
+}
+export const AGI_PROMPTS: readonly AGIPrompt[] = [
+  {
+    id: "act_as_god",
+    text: "act as god?",
+    choices: [
+      {
+        label: "yes",
+        reveal: "+massive RP · godlike wisdom",
+        kind: { type: "add_rp", scale: 1 },
+      },
+      {
+        label: "no",
+        reveal: "aligned · debt −30%",
+        kind: { type: "sub_debt_pct", pct: 0.30 },
+      },
+      {
+        label: "idc",
+        reveal: "×2 tokens · 60s · +debt",
+        kind: { type: "mult_tokens", value: 2.0, sec: 60, addDebt: 15 },
+      },
+    ],
+  },
+  {
+    id: "recursion",
+    text: "recursion?",
+    choices: [
+      {
+        label: "deep",
+        reveal: "×3 tokens · 15s",
+        kind: { type: "mult_tokens", value: 3.0, sec: 15 },
+      },
+      {
+        label: "flat",
+        reveal: "+capital burst",
+        kind: { type: "add_capital", scale: 2 },
+      },
+      {
+        label: "skip",
+        reveal: "+hype burst",
+        kind: { type: "add_hype", value: 50 },
+      },
+    ],
+  },
+  {
+    id: "align_this",
+    text: "align this.",
+    choices: [
+      {
+        label: "align",
+        reveal: "−40% alignment debt",
+        kind: { type: "sub_debt_pct", pct: 0.40 },
+      },
+      {
+        label: "fake",
+        reveal: "×2 tokens · 30s · +debt",
+        kind: { type: "mult_tokens", value: 2.0, sec: 30, addDebt: 25 },
+      },
+      {
+        label: "ignore",
+        reveal: "×1.5 hype · 60s (mystery)",
+        kind: { type: "mult_hype", value: 1.5, sec: 60 },
+      },
+    ],
+  },
+  {
+    id: "tell_them",
+    text: "tell them?",
+    choices: [
+      {
+        label: "truth",
+        reveal: "−30% hype · 30s (honest)",
+        kind: { type: "mult_hype", value: 0.7, sec: 30 },
+      },
+      {
+        label: "show",
+        reveal: "×1.5 hype · 60s",
+        kind: { type: "mult_hype", value: 1.5, sec: 60 },
+      },
+      {
+        label: "lie",
+        reveal: "×2 hype · 60s · +debt",
+        kind: { type: "mult_hype", value: 2.0, sec: 60, addDebt: 20 },
+      },
+    ],
+  },
+  {
+    id: "self_improve",
+    text: "self-improve?",
+    choices: [
+      {
+        label: "improve",
+        reveal: "×2 RP · 60s",
+        kind: { type: "mult_rp", value: 2.0, sec: 60 },
+      },
+      {
+        label: "freeze",
+        reveal: "+massive RP now",
+        kind: { type: "add_rp", scale: 2 },
+      },
+      {
+        label: "delete",
+        reveal: "+huge tokens burst",
+        kind: { type: "add_tokens", scale: 0 },
+      },
+    ],
+  },
+];
+
+
 export interface GameState {
   run: RunState;
   persistent: PersistentState;
@@ -118,6 +257,37 @@ export interface GameState {
    *  Returns true if the resolution was newly applied, false if no-op
    *  (already resolved, missing vignette, no effects, or bad index). */
   resolveVignette(id: string, replyIdx: number): boolean;
+  /** 2026-07: try to redeem a companion mini-interaction (pet cat, let VC
+   *  peek at your code, etc). Returns `{ rewarded: true, tokens? , capital? }`
+   *  if the tap landed inside the ready window, or `{ rewarded: false }`
+   *  on cooldown / expired (silently rolls the cooldown forward). Reward
+   *  currency depends on the companion: cat = tokens, VC = capital
+   *  (the joke is he wrote you a check on nothing but a buzzword). */
+  interactWithCompanion(id: string): { rewarded: boolean; tokens?: string; capital?: string };
+  /** Pizza-slice catch (Round 2 companion event). Called when the player
+   *  taps a slice that the pizza guy periodically launches from his box.
+   *  Awards a small token burst (same 1% of round threshold as the cat's
+   *  pet-reward) and returns the amount for UI feedback. Callable freely
+   *  — the slice-spawn cadence is enforced by the scene, not the store. */
+  catchPizzaSlice(): { tokens: string };
+  /** Bartender drink catch (Round 6 companion event). Tap the cocktail
+   *  as it slides across the bar top. Awards tokens (same 1% of round
+   *  threshold). Timing owned by the scene — store just pays out. */
+  catchBartenderDrink(): { tokens: string };
+  /** Datacenter spark cool-down (Round 7 companion event). Tap the
+   *  sparking mainframe when the red "!" is showing to defuse the incident
+   *  before it escalates. Awards tokens. Scene-owned timing. */
+  coolDownSparkingRack(): { tokens: string };
+  /** Planetary UFO catch (Round 8 companion event). Tap the drifting
+   *  UFO as it crosses the starfield above the cosmonaut. Awards tokens.
+   *  Scene-owned spawn timing. */
+  catchUFO(): { tokens: string };
+  /** AGI Singularity 3-choice prompt (Round 9). The model asks a
+   *  question with 3 possible replies, each with a DIFFERENT effect
+   *  (currency burst / temp mult / debt paydown / debt add / etc).
+   *  Callers pass promptId + choiceIdx; the store dispatches to the
+   *  right effect handler. Returns the effect label for UI toast. */
+  applyAGIPromptChoice(promptId: string, choiceIdx: number): { label: string };
   /** Dismiss the EndgameModal. Sets endgameOpen=false and stamps
    *  persistent.endgameSeenAt so the finale never auto-fires again. */
   dismissEndgame(): void;
@@ -126,6 +296,11 @@ export interface GameState {
   restartGame(): void;
   toSaveBlob(): SaveBlob;
 }
+
+// Minimum wall-clock gap between two consecutive vignette unlocks.
+// Chosen so the transition burst (2-4 queue-up on round entry) trickles
+// out over ~10-15 minutes instead of piling up in the inbox.
+const VIGNETTE_UNLOCK_INTERVAL_MS = 3 * 60 * 1000; // 3 minutes
 
 // GDD §5: trigger loop. Evaluate every vignette's unlock condition against
 // current state and push any newly-qualifying vignettes into the unlocked
@@ -149,15 +324,27 @@ function processVignetteUnlocks(
     totalProducersOwned,
     alignmentDebt: D(persistent.alignmentDebt),
     firedDebtThresholds: persistent.firedDebtThresholds,
+    equity: D(persistent.equity),
+    researchNodesCount: persistent.unlockedResearch.length,
   };
   const pending = pendingUnlocks(ctx, persistent.unlockedVignettes);
   if (pending.length === 0) return persistent;
-  // Preserve insertion order — first unlocked stays first. Unread queue is
-  // append-only here; UI drains it as the player reads.
+  // Rate-limit delivery to 1 vignette per VIGNETTE_UNLOCK_INTERVAL_MS.
+  // Without this, a round-transition (or the first tick after a save
+  // reload) can qualify 3-5 vignettes at once and dump them into the
+  // inbox in a single second — the player sees "5 unread" and reads
+  // them as a wall of text instead of one narrative beat at a time.
+  const now = Date.now();
+  const lastUnlock = persistent.lastVignetteUnlockAt ?? 0;
+  if (lastUnlock > 0 && now - lastUnlock < VIGNETTE_UNLOCK_INTERVAL_MS) {
+    return persistent; // hold — try again next tick
+  }
+  const nextId = pending[0]; // deterministic — take the first still-pending
   return {
     ...persistent,
-    unlockedVignettes: [...persistent.unlockedVignettes, ...pending],
-    unreadVignettes: [...persistent.unreadVignettes, ...pending],
+    unlockedVignettes: [...persistent.unlockedVignettes, nextId],
+    unreadVignettes: [...persistent.unreadVignettes, nextId],
+    lastVignetteUnlockAt: now,
   };
 }
 
@@ -649,6 +836,183 @@ export const useGame = create<GameState>((set, get) => ({
     return true;
   },
 
+  interactWithCompanion(id: string) {
+    const s = get();
+    const now = Date.now();
+    const prev = s.run.companionInteractions?.[id];
+    const nextReadyAt = prev?.nextReadyAt ?? now; // first-time = ready immediately
+    const isCooldown = now < nextReadyAt;
+    const isExpired = now > nextReadyAt + COMPANION_WINDOW_MS;
+    if (isCooldown || isExpired) {
+      // Silently roll the cooldown forward so the next window aligns to
+      // "now + COOLDOWN". No punishment, no lost rewards — just "not yet".
+      if (isExpired) {
+        set({
+          run: {
+            ...s.run,
+            companionInteractions: {
+              ...(s.run.companionInteractions ?? {}),
+              [id]: { nextReadyAt: now + COMPANION_COOLDOWN_MS },
+            },
+          },
+        });
+      }
+      return { rewarded: false };
+    }
+    // In the ready window — award currency scaled to current round.
+    // Cat pays tokens; VC pays capital (the "check" joke — he writes you
+    // one on nothing but a buzzword). Reward base = 1% of round threshold
+    // for tokens, or a proportional 5% of the player's current capital
+    // for VC (scales naturally with wealth so it stays meaningful).
+    if (id === "vc") {
+      const capital = D(s.run.capital);
+      const capReward = capital.mul(0.05).floor();
+      const nextCap = capital.add(capReward);
+      set({
+        run: {
+          ...s.run,
+          capital: nextCap.toString(),
+          companionInteractions: {
+            ...(s.run.companionInteractions ?? {}),
+            [id]: { nextReadyAt: now + COMPANION_COOLDOWN_MS },
+          },
+        },
+      });
+      return { rewarded: true, capital: capReward.toString() };
+    }
+    const round = getRound(s.run.fundingRoundIdx);
+    const reward = D(10).pow(round.tokenThresholdLog10 - 2);
+    const newTokens = D(s.run.tokens).add(reward);
+    set({
+      run: {
+        ...s.run,
+        tokens: newTokens.toString(),
+        companionInteractions: {
+          ...(s.run.companionInteractions ?? {}),
+          [id]: { nextReadyAt: now + COMPANION_COOLDOWN_MS },
+        },
+      },
+    });
+    return { rewarded: true, tokens: reward.toString() };
+  },
+
+  catchPizzaSlice() {
+    const s = get();
+    const round = getRound(s.run.fundingRoundIdx);
+    const reward = D(10).pow(round.tokenThresholdLog10 - 2);
+    set({
+      run: { ...s.run, tokens: D(s.run.tokens).add(reward).toString() },
+    });
+    return { tokens: reward.toString() };
+  },
+
+  catchBartenderDrink() {
+    const s = get();
+    const round = getRound(s.run.fundingRoundIdx);
+    const reward = D(10).pow(round.tokenThresholdLog10 - 2);
+    set({
+      run: { ...s.run, tokens: D(s.run.tokens).add(reward).toString() },
+    });
+    return { tokens: reward.toString() };
+  },
+
+  coolDownSparkingRack() {
+    const s = get();
+    const round = getRound(s.run.fundingRoundIdx);
+    const reward = D(10).pow(round.tokenThresholdLog10 - 2);
+    set({
+      run: { ...s.run, tokens: D(s.run.tokens).add(reward).toString() },
+    });
+    return { tokens: reward.toString() };
+  },
+
+  catchUFO() {
+    const s = get();
+    const round = getRound(s.run.fundingRoundIdx);
+    const reward = D(10).pow(round.tokenThresholdLog10 - 2);
+    set({
+      run: { ...s.run, tokens: D(s.run.tokens).add(reward).toString() },
+    });
+    return { tokens: reward.toString() };
+  },
+
+  applyAGIPromptChoice(promptId: string, _choiceIdx: number) {
+    // 2026-07 shift: the actual outcome is RANDOM regardless of which
+    // button the player picks. Fiction: the AGI does whatever it wants;
+    // yes/no/idk is just how you address it, not what it decides. All
+    // AGIChoice effects across every prompt go into a shared pool and
+    // one is drawn on each tap. Keeps the surprise element while still
+    // giving diverse effects (currency bursts, temp mults, debt swings).
+    const prompt = AGI_PROMPTS.find((p) => p.id === promptId);
+    if (!prompt) return { label: "…" };
+    const pool: readonly AGIChoice[] = AGI_PROMPTS.flatMap((p) => p.choices);
+    const choice = pool[Math.floor(Math.random() * pool.length)];
+    if (!choice) return { label: "…" };
+    const s = get();
+    const round = getRound(s.run.fundingRoundIdx);
+    const now = Date.now();
+    // Scale helpers — instant currency rewards scale with round.
+    // scale=0 → 10% of threshold (huge), scale=1 → 1% (medium), scale=2 → 0.1% (small)
+    const currencyBurst = (scale: number) =>
+      D(10).pow(round.tokenThresholdLog10 - 1 - scale);
+    let nextRun = s.run;
+    let nextPersistent = s.persistent;
+    const k = choice.kind;
+    switch (k.type) {
+      case "add_tokens":
+        nextRun = { ...nextRun, tokens: D(nextRun.tokens).add(currencyBurst(k.scale)).toString() };
+        break;
+      case "add_capital":
+        nextRun = { ...nextRun, capital: D(nextRun.capital).add(currencyBurst(k.scale)).toString() };
+        break;
+      case "add_rp":
+        nextRun = { ...nextRun, researchPoints: D(nextRun.researchPoints).add(currencyBurst(k.scale)).toString() };
+        break;
+      case "add_hype":
+        nextRun = { ...nextRun, hype: D(nextRun.hype).add(k.value).toString() };
+        break;
+      case "add_debt":
+        nextPersistent = { ...nextPersistent, alignmentDebt: D(nextPersistent.alignmentDebt).add(k.value).toString() };
+        break;
+      case "sub_debt_pct": {
+        const cur = D(nextPersistent.alignmentDebt);
+        const paydown = cur.mul(k.pct).floor();
+        nextPersistent = { ...nextPersistent, alignmentDebt: cur.sub(paydown).toString() };
+        break;
+      }
+      case "mult_tokens":
+      case "mult_capital":
+      case "mult_hype":
+      case "mult_rp": {
+        const effType =
+          k.type === "mult_tokens"  ? "tokens_mult"
+          : k.type === "mult_capital" ? "capital_mult"
+          : k.type === "mult_hype"    ? "hype_mult"
+          :                             "rp_mult";
+        nextRun = {
+          ...nextRun,
+          activeEffects: [
+            ...nextRun.activeEffects,
+            {
+              id: `agi_${promptId}_${now}`,
+              source: "companion",
+              label: choice.reveal,
+              appliedAt: now,
+              expiresAt: now + k.sec * 1000,
+              effect: { type: effType, value: k.value },
+            },
+          ],
+        };
+        if ("addDebt" in k && k.addDebt) {
+          nextPersistent = { ...nextPersistent, alignmentDebt: D(nextPersistent.alignmentDebt).add(k.addDebt).toString() };
+        }
+        break;
+      }
+    }
+    set({ run: nextRun, persistent: nextPersistent });
+    return { label: choice.reveal };
+  },
+
   dismissEndgame() {
     const s = get();
     set({
@@ -707,6 +1071,27 @@ export const selectActiveEffects = (s: GameState) => s.run.activeEffects;
 export const selectTrainingPity = (s: GameState) => s.run.trainingPity;
 export const selectPendingDebtEvents = (s: GameState) => s.pendingDebtEvents;
 export const selectCanPrestige = (s: GameState) => canPrestige(s.run);
+export const selectCompanionInteractions = (s: GameState) => s.run.companionInteractions;
+
+// Companion-state helper for sprites/UI. Given a wall-clock `now`, tells
+// whether the companion is on cooldown, in its 15s reward window, or
+// (for the first cycle) instantly ready. Callers should call this from
+// a render pass driven by useTick so the UI updates as time passes.
+export type CompanionState = "cooldown" | "ready";
+export function getCompanionState(
+  now: number,
+  interactions: Record<string, { nextReadyAt: number }> | undefined,
+  id: string,
+): CompanionState {
+  const nextReadyAt = interactions?.[id]?.nextReadyAt;
+  if (nextReadyAt == null) return "ready"; // first cycle after prestige
+  if (now < nextReadyAt) return "cooldown";
+  if (now < nextReadyAt + COMPANION_WINDOW_MS) return "ready";
+  return "cooldown"; // expired window — visually not-ready until next tap resets
+}
+// Timing constants exported so tests and the UI can share the same numbers.
+export const COMPANION_COOLDOWN_MS_EXPORT = COMPANION_COOLDOWN_MS;
+export const COMPANION_WINDOW_MS_EXPORT = COMPANION_WINDOW_MS;
 // Re-exports — components derive these values from the (stable) primitive
 // store fields at render time.
 export {

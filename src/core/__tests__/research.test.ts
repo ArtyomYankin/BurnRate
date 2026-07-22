@@ -36,14 +36,16 @@ const freshPersistent = (overrides: Partial<PersistentState> = {}): PersistentSt
 });
 
 describe("node cost formula (GDD §8)", () => {
-  it("5 × 3^tier", () => {
-    // Steepened from 5×3^tier to 8×5^tier — tier 5 now ≈ 25K equity (was 1215),
-    // so the late tree stays a real long-term goal instead of "all bought by R3".
+  it("8 × 5^tier, T5 hand-tuned", () => {
+    // Steepened from GDD's 5×3^tier to 8×5^tier — tier 4 (5K) is now a real
+    // long-term goal instead of "all bought by R3". T5 is hand-set at 15K
+    // instead of the formula's 25K so it's reachable at the moment the
+    // player enters AGI Singularity (see nodeCost comment for rationale).
     expect(nodeCost(1)).toBe(40);
     expect(nodeCost(2)).toBe(200);
     expect(nodeCost(3)).toBe(1000);
     expect(nodeCost(4)).toBe(5000);
-    expect(nodeCost(5)).toBe(25000);
+    expect(nodeCost(5)).toBe(15000);
   });
 });
 

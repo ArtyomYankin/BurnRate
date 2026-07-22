@@ -138,7 +138,7 @@ export function ResearchScreen({ onBack }: Props) {
       <View style={styles.equityCard}>
         <View style={[styles.equitySwatch, { backgroundColor: colors.gold }]} />
         <View style={{ flex: 1 }}>
-          <Text style={styles.equityLabel}>EQUITY</Text>
+          <Text style={styles.equityLabel}>{t.research.equityHeader}</Text>
           <Text style={styles.equityValue}>{formatNumber(equity)}</Text>
         </View>
         <View style={{ alignItems: "flex-end" }}>
@@ -291,6 +291,7 @@ function SprintCard({
   affordable: boolean;
   onBuy(): void;
 }) {
+  const t = useStrings();
   const accent = owned ? colors.sage_2 : affordable ? colors.sage : colors.cream_4;
   const effectLabel =
     def.effect.type === "tokens_mult"  ? `+${Math.round((def.effect.value - 1) * 100)}% tokens`
@@ -313,7 +314,7 @@ function SprintCard({
       <Text style={styles.sprintCardFlavor} numberOfLines={2}>{def.flavor}</Text>
       <View style={styles.sprintCardFooter}>
         {owned ? (
-          <Text style={[styles.sprintCardCost, { color: colors.sage_2 }]}>OWNED</Text>
+          <Text style={[styles.sprintCardCost, { color: colors.sage_2 }]}>{t.research.owned}</Text>
         ) : (
           <Text style={[styles.sprintCardCost, { color: affordable ? colors.ink : colors.muted }]}>
             {formatNumber(D(cost))} RP

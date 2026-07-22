@@ -37,17 +37,44 @@ import { FundingRoundDef } from "./types";
 //
 // Localized names come from i18n.roundNames; the `name` field here is the
 // EN fallback used when no translation exists for an id.
+// Offline catchup cap two-tier rule:
+//   rounds 0-3 (Garage…Startup Office) = 4h
+//   rounds 4-9 (Megacorp…AGI)          = 10h
+// Cutoff moved 5→4 and late tier 8→10 on player feedback (2026-06):
+// Megacorp onward is where AFK income meaningfully matters — single
+// producer purchases at that tier cost ~half a day of base flow, so a
+// 10h cap matches the grind shape.
+//
+// 2026-06 early-pacing fix: rounds 1-3 thresholds pushed +1 OOM each
+// after reports of rounds 2-3 closing in ~60s with the compounded
+// prestige + equity-flywheel + research stack.
+//
+// 2026-06 late-pacing fix (rev 3): rev-1 bumped Planetary → 1e32 and
+// AGI → 1e36 after Datacenter 20-30 min complaint. That over-corrected —
+// after prestige, freshRunState() wipes all producers to the tier-0
+// starter pack + capital 90, so the player rebuilds from scratch each
+// round. Reported real TPS in Planetary (post-prestige) sits in the 12
+// tokens/sec → maybe 1000/sec range for the first hours until the player
+// grinds back to tier-6/7. At those rates 1e30+ thresholds need weeks-
+// months to close, which is a game-over-by-boredom pacing bug.
+// Reverted Planetary/AGI to their original pre-bump values (1e29 / 1e32).
+// Campus stays at 1e24 and Datacenter at 1e28 — Campus wasn't reported
+// as too fast post-bump, and Datacenter's original 1e26 gave the "closed
+// in 30 min" complaint. Curve: 17→20→24→28→29→32. Tail is a flat +1 OOM
+// per late round because production doesn't compound another OOM once
+// tier-6 producers cap out — the intended difficulty comes from the
+// per-round starter-pack reset, not from threshold sprawl.
 export const FUNDING_ROUNDS: FundingRoundDef[] = [
-  { id: "seed",               idx: 0, name: "Garage",          tokenThresholdLog10: 3,   equityMult:  1.00, offlineCapHours:  2 },
-  { id: "series_a",           idx: 1, name: "Bootstrap",       tokenThresholdLog10: 6,   equityMult:  1.50, offlineCapHours:  4 },
-  { id: "series_b",           idx: 2, name: "Coworking",       tokenThresholdLog10: 10,  equityMult:  2.25, offlineCapHours:  6 },
-  { id: "ipo",                idx: 3, name: "Startup Office",  tokenThresholdLog10: 14,  equityMult:  4.50, offlineCapHours:  8 },
+  { id: "seed",               idx: 0, name: "Garage",          tokenThresholdLog10: 3,   equityMult:  1.00, offlineCapHours:  4 },
+  { id: "series_a",           idx: 1, name: "Bootstrap",       tokenThresholdLog10: 7,   equityMult:  1.50, offlineCapHours:  4 },
+  { id: "series_b",           idx: 2, name: "Coworking",       tokenThresholdLog10: 11,  equityMult:  2.25, offlineCapHours:  4 },
+  { id: "ipo",                idx: 3, name: "Startup Office",  tokenThresholdLog10: 15,  equityMult:  4.50, offlineCapHours:  4 },
   { id: "secondary",          idx: 4, name: "Megacorp",        tokenThresholdLog10: 17,  equityMult:  8.50, offlineCapHours: 10 },
-  { id: "acquisition",        idx: 5, name: "Big Tech",        tokenThresholdLog10: 20,  equityMult: 14.00, offlineCapHours: 12 },
-  { id: "sovereign_wealth",   idx: 6, name: "Campus",          tokenThresholdLog10: 23,  equityMult: 22.00, offlineCapHours: 12 },
-  { id: "government_bailout", idx: 7, name: "Datacenter",      tokenThresholdLog10: 26,  equityMult: 34.00, offlineCapHours: 12 },
-  { id: "civilizational",     idx: 8, name: "Planetary",       tokenThresholdLog10: 29,  equityMult: 52.00, offlineCapHours: 12 },
-  { id: "agi_singularity",    idx: 9, name: "AGI Singularity", tokenThresholdLog10: 32,  equityMult: 80.00, offlineCapHours: 12 },
+  { id: "acquisition",        idx: 5, name: "Big Tech",        tokenThresholdLog10: 20,  equityMult: 14.00, offlineCapHours: 10 },
+  { id: "sovereign_wealth",   idx: 6, name: "Campus",          tokenThresholdLog10: 24,  equityMult: 24.00, offlineCapHours: 10 },
+  { id: "government_bailout", idx: 7, name: "Datacenter",      tokenThresholdLog10: 28,  equityMult: 42.00, offlineCapHours: 10 },
+  { id: "civilizational",     idx: 8, name: "Planetary",       tokenThresholdLog10: 29,  equityMult: 52.00, offlineCapHours: 10 },
+  { id: "agi_singularity",    idx: 9, name: "AGI Singularity", tokenThresholdLog10: 32,  equityMult: 80.00, offlineCapHours: 10 },
 ];
 
 // M+2 opens the full AGI arc: all 12 rounds through the AGI Singularity are

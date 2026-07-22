@@ -76,12 +76,67 @@ function renderByMedium(v: Vignette, p: InnerProps): React.ReactNode {
   switch (v.medium) {
     case "slack":        return <SlackView v={v} {...p} />;
     case "leaked_email": return <EmailView v={v} />;
-    case "board_memo":   return <BoardMemoView v={v} />;
-    case "fake_tweet":   return <TweetView v={v} />;
+    case "board_memo":   return <BoardMemoView v={v} {...p} />;
+    case "fake_tweet":   return <TweetView v={v} {...p} />;
     case "fake_news":    return <NewsView v={v} />;
     case "podcast":      return <PodcastView v={v} />;
     case "system":       return <SystemView v={v} />;
   }
+}
+
+/**
+ * Reusable reply-chips block. Lives at the bottom of any vignette view
+ * that supports interactive replies (currently Slack DMs and Board
+ * Memos). Returns null when the vignette has no replies — safe to drop
+ * into any view unconditionally. Spoiler rule + reveal animation come
+ * straight from the SlackView original.
+ */
+function ReplyChips({ v, onClose, onResolve, resolvedReplyIdx }: { v: Vignette } & InnerProps) {
+  if (!v.replies || v.replies.length === 0) return null;
+  const isResolved = resolvedReplyIdx !== undefined;
+  const handlePick = (i: number) => {
+    if (isResolved) return;
+    if (v.replyEffects?.[i] && onResolve) onResolve(i);
+    else onClose();
+  };
+  return (
+    <>
+      <View style={slack.replies}>
+        {v.replies.map((r, i) => {
+          const effect = v.replyEffects?.[i];
+          const picked = i === resolvedReplyIdx;
+          const kind = effect?.kind ?? (effect ? "buff" : undefined);
+          return (
+            <Pressable
+              key={i}
+              onPress={() => handlePick(i)}
+              disabled={isResolved}
+              style={[
+                slack.replyBtn,
+                picked && slack.replyBtnPicked,
+                isResolved && !picked && slack.replyBtnDimmed,
+              ]}
+            >
+              <Text
+                style={[
+                  slack.replyBtnText,
+                  picked && slack.replyBtnTextPicked,
+                ]}
+              >
+                {picked ? "✓ " : ""}{r}
+              </Text>
+              {picked && effect && (
+                <RevealLabel kind={kind}>→ {effect.label}</RevealLabel>
+              )}
+            </Pressable>
+          );
+        })}
+      </View>
+      {isResolved && (
+        <Text style={slack.resolvedNote}>You already replied.</Text>
+      )}
+    </>
+  );
 }
 
 // ─── Helper: short fake "now" timestamp ───────────────────────────────────
@@ -97,15 +152,8 @@ function nowShort(): string {
 // — the design treats the vignette as a single Slack-DM fragment, the way
 // a notification preview would. 18px sage avatar + name + timestamp on one
 // line, body indented under, reply chips below.
-function SlackView({ v, onClose, onResolve, resolvedReplyIdx }: { v: Vignette } & InnerProps) {
+function SlackView({ v, ...p }: { v: Vignette } & InnerProps) {
   const avatarInitial = v.sender.charAt(0).toUpperCase();
-  const isResolved = resolvedReplyIdx !== undefined;
-  const handlePick = (i: number) => {
-    if (isResolved) return;
-    if (v.replyEffects?.[i] && onResolve) onResolve(i);
-    else onClose();
-  };
-
   return (
     <View style={slack.outer}>
       <View style={slack.card}>
@@ -117,48 +165,7 @@ function SlackView({ v, onClose, onResolve, resolvedReplyIdx }: { v: Vignette } 
           <Text style={slack.time}>{nowShort()}</Text>
         </View>
         <Text style={slack.body}>{v.body}</Text>
-        {v.replies && v.replies.length > 0 && (
-          <View style={slack.replies}>
-            {v.replies.map((r, i) => {
-              const effect = v.replyEffects?.[i];
-              const picked = i === resolvedReplyIdx;
-              // Spoiler rule: pre-pick we show ONLY the reply text — the
-              // player has to read the message to guess buff/neutral/debuff.
-              // Post-pick we reveal the resolved effect on the PICKED chip
-              // (color-coded by kind: green buff / muted neutral / red debuff)
-              // with a small fade+rise animation so the player notices the
-              // outcome instead of wondering why the modal didn't close.
-              const kind = effect?.kind ?? (effect ? "buff" : undefined);
-              return (
-                <Pressable
-                  key={i}
-                  onPress={() => handlePick(i)}
-                  disabled={isResolved}
-                  style={[
-                    slack.replyBtn,
-                    picked && slack.replyBtnPicked,
-                    isResolved && !picked && slack.replyBtnDimmed,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      slack.replyBtnText,
-                      picked && slack.replyBtnTextPicked,
-                    ]}
-                  >
-                    {picked ? "✓ " : ""}{r}
-                  </Text>
-                  {picked && effect && (
-                    <RevealLabel kind={kind}>→ {effect.label}</RevealLabel>
-                  )}
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
-        {isResolved && (
-          <Text style={slack.resolvedNote}>You already replied.</Text>
-        )}
+        <ReplyChips v={v} {...p} />
       </View>
     </View>
   );
@@ -235,7 +242,7 @@ function EmailView({ v }: { v: Vignette }) {
 
 // ─── BOARD MEMO (PDF-style) ───────────────────────────────────────────────
 // Confidential banner, centered title, body in serif, sign-off line.
-function BoardMemoView({ v }: { v: Vignette }) {
+function BoardMemoView({ v, ...p }: { v: Vignette } & InnerProps) {
   return (
     <View style={memo.shell}>
       <View style={memo.confBanner}>
@@ -252,20 +259,27 @@ function BoardMemoView({ v }: { v: Vignette }) {
         <Text style={memo.signoffLine}>— {v.sender}</Text>
         <Text style={memo.pageFooter}>Page 1 / 1</Text>
       </View>
+      {/* Optional reply chips — same component as Slack DMs. Lets a board
+          memo offer a binary "Acknowledge / Reject / Defer" choice with
+          buff/debuff weight when the narrative calls for it. */}
+      <ReplyChips v={v} {...p} />
     </View>
   );
 }
 
-// ─── TWEET (X / Twitter) ──────────────────────────────────────────────────
-// Black header bar with X logo, profile avatar, handle, body, fake stats.
-function TweetView({ v }: { v: Vignette }) {
+// ─── SOCIAL POST (generic short-form, ex-Twitter/X pastiche) ─────────────
+// Rebranded from the X/Twitter look to a fictional "Skim" feed to dodge
+// trademark/App-Store-review issues with mimicking a real social network.
+// Black header bar with a generic ✦ logo, profile avatar, handle, body,
+// fake stats. Same satirical-microblog vibe, just not legally X-shaped.
+function TweetView({ v, ...p }: { v: Vignette } & InnerProps) {
   // Sender is typically already in @handle form per our vignette data.
   const handle = v.sender.startsWith("@") ? v.sender : "@" + v.sender.replace(/\s+/g, "_");
   const displayName = v.sender.replace(/^@/, "").replace(/_/g, " ");
   return (
     <View style={tweet.shell}>
       <View style={tweet.topBar}>
-        <Text style={tweet.xLogo}>𝕏</Text>
+        <Text style={tweet.xLogo}>✦</Text>
         <Text style={tweet.topBarText}>Post</Text>
       </View>
       <View style={tweet.body}>
@@ -285,6 +299,7 @@ function TweetView({ v }: { v: Vignette }) {
           <Stat icon="💬" n="1.2K" color={tweet.muted.color} />
           <Stat icon="↗" n="918" color={tweet.muted.color} />
         </View>
+        <ReplyChips v={v} {...p} />
       </View>
     </View>
   );
@@ -299,26 +314,28 @@ function Stat({ icon, n, color }: { icon: string; n: string; color: string }) {
   );
 }
 
-// ─── NEWS (TechCrunch) ────────────────────────────────────────────────────
-// Green TC strip, headline, byline + timestamp, lead paragraph in serif.
+// ─── NEWS (generic tech-news pastiche, was TechCrunch) ───────────────────
+// Rebranded from TechCrunch to fictional "TechBeat" — same green editorial
+// strip + serif lead paragraph satirizing tech-press tone, just without
+// using a real outlet's wordmark/byline/newsletter name.
 function NewsView({ v }: { v: Vignette }) {
   return (
     <View style={news.shell}>
       <View style={news.topBar}>
-        <Text style={news.logo}>TechCrunch</Text>
+        <Text style={news.logo}>TechBeat</Text>
       </View>
       <Text style={news.section}>AI · BREAKING</Text>
       <Text style={news.headline}>{v.subject ?? v.name}</Text>
       <View style={news.byline}>
         <View style={news.bylineAvatar} />
         <View>
-          <Text style={news.bylineAuthor}>by Connie Loizos</Text>
+          <Text style={news.bylineAuthor}>by Riley Park</Text>
           <Text style={news.bylineDate}>{new Date().toDateString()}</Text>
         </View>
       </View>
       <Text style={news.lead}>{v.body}</Text>
       <View style={news.cta}>
-        <Text style={news.ctaText}>Sign up for the Daily Crunch newsletter</Text>
+        <Text style={news.ctaText}>Sign up for the Daily Beat newsletter</Text>
       </View>
     </View>
   );

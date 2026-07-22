@@ -134,7 +134,10 @@ export function TrainingRunModal({ visible, onClose }: Props) {
       if (elapsed < 2400) {
         setTimeout(tick, interval);
       } else {
-        // Snap to the locked-in result and flip to reveal
+        // Snap to the locked-in result and flip to reveal. Cut the spin
+        // SFX immediately — the underlying clip is longer than the 2400ms
+        // reel animation and was bleeding past the tier-reveal cue.
+        audio.stop("tr_spin");
         setReelIdx(targetIdx);
         setPhase("reveal");
         audio.play(TIER_CUE[result.tier]);
@@ -144,6 +147,8 @@ export function TrainingRunModal({ visible, onClose }: Props) {
     return () => {
       cancelledRef.current = true;
       clearTimeout(id);
+      // Modal close mid-spin also cuts the SFX — same reasoning.
+      audio.stop("tr_spin");
     };
   }, [phase, result]);
 

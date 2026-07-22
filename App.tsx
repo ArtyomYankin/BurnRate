@@ -13,7 +13,9 @@ import { freshSave } from "./src/core/save";
 import { initStorage, loadSave, saveSave } from "./src/game/persistence";
 import { startTickEngine } from "./src/game/tickEngine";
 import { useGame } from "./src/game/store";
+import { AchievementToast } from "./src/ui/AchievementToast";
 import { AllocateScreen } from "./src/ui/AllocateScreen";
+import { BootSplash } from "./src/ui/BootSplash";
 import { DebtEventModal } from "./src/ui/DebtEventModal";
 import { HomeScreen } from "./src/ui/HomeScreen";
 import { IntroModal } from "./src/ui/IntroModal";
@@ -192,6 +194,22 @@ export default function App() {
   // paint via the legacy native LaunchScreen.storyboard.
   void fontsLoaded;
 
+  // Boot gate: until the save hydrates, render a brand splash. Without
+  // this, HomeScreen would mount with the default round-0 (Garage) scene
+  // and flash to the real round's scene a few hundred ms later when the
+  // persisted state finished loading — jarring for veterans returning at
+  // round 7+.
+  if (!hydrated) {
+    return (
+      <SafeAreaProvider>
+        <SafeAreaView style={styles.root} edges={["top", "bottom", "left", "right"]}>
+          <StatusBar style="dark" />
+          <BootSplash />
+        </SafeAreaView>
+      </SafeAreaProvider>
+    );
+  }
+
   return (
     <SafeAreaProvider>
     <SafeAreaView style={styles.root} edges={["top", "bottom", "left", "right"]}>
@@ -260,6 +278,12 @@ export default function App() {
           forwarder (Modal absorbs taps even in the "uncovered" hole, so
           we route them explicitly). */}
       <TutorialSpotlight
+        // Only active on the home screen — every spotlight target lives in
+        // HomeScreen's chrome, and leaving the overlay live on child
+        // screens (VignettesInbox, AchievementsScreen, etc.) risks the
+        // hole-tap-forwarder firing when the player is trying to tap
+        // through to a vignette row, back button, etc.
+        visible={screen === "home"}
         actions={{
           "alloc-bar": () => setScreen("allocate"),
           "slack-btn": () => setScreen("vignettes"),
@@ -269,6 +293,10 @@ export default function App() {
           },
         }}
       />
+      {/* Toast banner that fires when an achievement unlocks. Self-contained
+          — subscribes to persistent.unlockedAchievements, queues, animates,
+          auto-dismisses. Mounted at root so it overlays any screen. */}
+      <AchievementToast />
     </SafeAreaView>
     </SafeAreaProvider>
   );

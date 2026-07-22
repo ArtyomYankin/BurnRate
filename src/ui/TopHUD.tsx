@@ -1,7 +1,10 @@
 import React from "react";
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
+import { Bell } from "lucide-react-native";
 import { colors, fonts, PIXEL } from "./theme";
+import { TutorialTargetKey } from "./tutorialTargets";
+import { useTutorialTargetMeasure } from "./TutorialSpotlight";
 
 interface Props {
   tokens: string;
@@ -25,6 +28,16 @@ interface Props {
    *  seconds. The secret gesture to open the developer cheat panel — works
    *  in release builds so we can debug live, but invisible to normal play. */
   onSecretActivate?(): void;
+  /** Opens the Vignettes inbox. Bell icon in HUD's top-right chrome, with
+   *  an unread badge that pulses. Formerly a floating absolute-positioned
+   *  button; embedded into HUD so we don't fight scene items for the
+   *  upper-left corner across 8 scenes with different landmarks. */
+  onOpenInbox?(): void;
+  /** Unread vignette count — badge shown on the bell when > 0. */
+  unreadVignettes?: number;
+  /** Tutorial spotlight target for the bell (forced walkthrough anchors
+   *  its highlight ring on this key's measured rect). */
+  inboxTutorialTargetKey?: TutorialTargetKey;
 }
 
 /**
@@ -47,7 +60,29 @@ export function TopHUD({
   onOpenSettings,
   onOpenHelp,
   onSecretActivate,
+  onOpenInbox,
+  unreadVignettes = 0,
+  inboxTutorialTargetKey,
 }: Props) {
+  // Tutorial spotlight registration for the bell. Only wire the hook if a
+  // key was provided — passing an empty string would still register.
+  const bellTargetHook = useTutorialTargetMeasure(
+    inboxTutorialTargetKey ?? ("slack-btn" as TutorialTargetKey),
+  );
+  // Unread-badge pulse. Runs only while there's actually an unread count so
+  // no idle animation frames burn when the inbox is empty.
+  const pulse = React.useRef(new Animated.Value(1)).current;
+  React.useEffect(() => {
+    if (unreadVignettes <= 0) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1.18, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1,    duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [unreadVignettes, pulse]);
   // Secret-tap detector for the dev cheat panel. Counts taps on the BURN·RATE
   // wordmark; if 7 land within 3 seconds, fire onSecretActivate. The window
   // resets on the next tap after a 3-second gap so we don't accumulate stale
@@ -105,6 +140,24 @@ export function TopHUD({
             >
               {roundLabel}
             </Text>
+            {onOpenInbox && (
+              <Pressable
+                ref={bellTargetHook.ref}
+                onLayout={bellTargetHook.onLayout}
+                onPress={onOpenInbox}
+                hitSlop={6}
+                style={styles.navIconBtn}
+              >
+                <Bell size={14} color={colors.ink} strokeWidth={2.25} />
+                {unreadVignettes > 0 && (
+                  <Animated.View style={[styles.bellBadge, { transform: [{ scale: pulse }] }]}>
+                    <Text style={styles.bellBadgeText}>
+                      {unreadVignettes > 9 ? "9+" : unreadVignettes}
+                    </Text>
+                  </Animated.View>
+                )}
+              </Pressable>
+            )}
             {onOpenSettings && (
               <Pressable onPress={onOpenSettings} hitSlop={6} style={styles.navIconBtn}>
                 <Svg width={16} height={16} viewBox="0 0 16 16">
@@ -132,7 +185,11 @@ export function TopHUD({
         >
           <View style={styles.tokenRow}>
             <View style={styles.tokenIcon} />
-            <Text style={styles.tokenBig}>{tokens}</Text>
+            {/* Explicit line clamp so a briefly-long token string (e.g.
+                during a units-boundary tick "999.5K" → "1.00M") can't
+                wrap to a second line and shift the HUD height for a
+                frame. */}
+            <Text style={styles.tokenBig} numberOfLines={1} ellipsizeMode="tail">{tokens}</Text>
             <Text style={styles.tokenRate}>+{rate}</Text>
             {floaters.map((f) => (
               <PlusOneFloater key={f.id} />
@@ -192,7 +249,12 @@ export function TopHUD({
           ))}
         </View>
 
-        <Text style={styles.nextLabel}>{nextThresholdLabel}</Text>
+        {/* Same line-clamp reason as tokenBig — a briefly-long threshold
+            label (long round name + long "1e32 TOKENS" tail) can wrap on
+            narrow screens and bump the HUD height. Ellipsizing prevents
+            the visible "jump" when transitioning between screens (e.g.
+            closing Producers) where the same value re-renders. */}
+        <Text style={styles.nextLabel} numberOfLines={1} ellipsizeMode="tail">{nextThresholdLabel}</Text>
       </View>
     </View>
   );
@@ -250,7 +312,18 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "baseline",
+    // 2026-07: center-aligned by default (was "baseline"). Row 1 contains
+    // mixed content — text (brand + roundLabel) alongside SVG icons (bell,
+    // gear, ?) — and baseline layout with SVG children is unreliable on
+    // first mount: react-native-svg reports its measured size on a second
+    // pass, which briefly makes Row 1 taller before it settles, pushing
+    // Row 2 (the big token counter) down by a few pixels and back up.
+    // That's the visible "jump" between the top row and the token count
+    // when returning from Producers/other screens. Row 2 sets its own
+    // inline `alignItems: "baseline"` override so token/rate baseline
+    // pairing is preserved.
+    alignItems: "center",
+    minHeight: 22,
   },
   brand: {
     fontFamily: fonts.display,
@@ -286,6 +359,25 @@ const styles = StyleSheet.create({
     backgroundColor: colors.cream_2,
     borderWidth: 1,
     borderColor: colors.ink,
+  },
+  bellBadge: {
+    position: "absolute",
+    top: -6,
+    right: -6,
+    minWidth: 14,
+    height: 14,
+    paddingHorizontal: 2,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.tensionRed,
+    borderWidth: 1,
+    borderColor: colors.ink,
+  },
+  bellBadgeText: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 8,
+    color: "#FFFFFF",
+    lineHeight: 10,
   },
   navIconText: {
     fontFamily: fonts.bodyBold,

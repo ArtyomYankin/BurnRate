@@ -16,6 +16,7 @@
 import { Platform } from "react-native";
 import type { GameState } from "./store";
 import { D } from "../core/decimal";
+import { computeRespectfulSchedule } from "./notificationSchedule";
 
 // expo-notifications is a native module; on web it throws on import in some
 // SDK versions. We require() it lazily inside each function so the web
@@ -35,19 +36,47 @@ function getNotif(): NotifModule | null {
 }
 
 const SESSION_THRESHOLD = 3; // GDD §12 — defer opt-in to session 3+
-const QUIET_START_HOUR = 22; // 10pm local
-const QUIET_END_HOUR = 8;    //  8am local
-// Re-engagement nudges fire ~22h after the player closes the app — late
-// enough that they're not annoyed, early enough that they don't lose a day.
-const RE_ENGAGEMENT_DELAY_SEC = 22 * 3600;
+// Re-engagement queue: 4 nudges every ~5 hours after backgrounding. Was a
+// single 22h delay which only landed if the player didn't reopen the app
+// for a full day — which is almost never. Now the queue seeds four slots
+// at 5h / 10h / 15h / 20h so a player who checks in every few hours
+// still gets an actual ping. Each has a distinct id so the foreground
+// cancel + re-schedule flow can target them individually (and iOS won't
+// dedupe them as "same notification"). Quiet hours still respected per
+// slot — if a slot's fire time would fall inside 22:00-08:00 it shifts
+// to 09:00.
+const RE_ENGAGEMENT_SLOTS_SEC = [
+  5 * 3600,   // 5h — first check-in, "the cluster's still humming"
+  10 * 3600,  // 10h — half-day, "capital's pooling"
+  15 * 3600,  // 15h — evening / next morning, personality beat
+  20 * 3600,  // 20h — day boundary fallback
+];
 
 // Stable identifiers so we can cancel ONE specific notification instead of
 // nuking the whole queue. Earlier code used cancelAllScheduledNotificationsAsync
 // which murdered the "Test push (5s)" notification any time the player
 // backgrounded the app — and the player obviously DOES background the app
 // while waiting for the test to fire, so it never landed.
-const NOTIF_ID_REENGAGEMENT = "burnrate.reengagement";
+const NOTIF_ID_REENGAGEMENT_PREFIX = "burnrate.reengagement";
+const reengagementId = (slot: number) => `${NOTIF_ID_REENGAGEMENT_PREFIX}.${slot}`;
 const NOTIF_ID_TEST = "burnrate.test";
+
+// Distinct copy per slot so the 4-nudge queue reads as a story unfolding,
+// not "the same nag four times." Slot 0 also gets a state-personalized
+// body from buildReengagementBody as first-touch (freshest signal about
+// what's actually pooled). Slots 1-3 rotate through prewritten flavor.
+const SLOT_TITLES = [
+  "the cluster is still humming.",
+  "capital's pooling. buy something.",
+  "the model wrote itself a raise.",
+  "a day without you. the AI is fine.",
+];
+const SLOT_BODIES = [
+  "come back and buy something. one thing.",
+  "tokens accrued. the pipeline is patient.",
+  "come read what it did while you were gone.",
+  "the loss curve keeps improving. join it.",
+];
 
 /** Returns true if the player is eligible to be ASKED for permission. */
 export function isEligibleForPushPrompt(account: { sessionsStarted?: number; pushOptedIn?: boolean; pushPromptedAt?: number }): boolean {
@@ -150,18 +179,20 @@ export async function sendTestNotification(): Promise<TestNotifResult> {
 }
 
 /**
- * Cancel any scheduled re-engagement nudge. Called on app foreground so the
- * player never gets pinged about an app they're already in. Only cancels
- * OUR re-engagement notification by id — leaves any test notifications
- * the player triggered from Settings alone.
+ * Cancel any scheduled re-engagement nudges. Called on app foreground so the
+ * player never gets pinged about an app they're already in. Iterates over
+ * every slot id so all 4 queued nudges get killed. Test notifications the
+ * player triggered from Settings are NOT cancelled — they have their own id.
  */
 export async function cancelScheduledReturn(): Promise<void> {
   const N = getNotif();
   if (!N) return;
-  try {
-    await N.cancelScheduledNotificationAsync(NOTIF_ID_REENGAGEMENT);
-  } catch {
-    /* noop — id may not be scheduled, that's fine */
+  for (let i = 0; i < RE_ENGAGEMENT_SLOTS_SEC.length; i++) {
+    try {
+      await N.cancelScheduledNotificationAsync(reengagementId(i));
+    } catch {
+      /* noop — id may not be scheduled, that's fine */
+    }
   }
 }
 
@@ -214,9 +245,13 @@ function formatShort(n: number): string {
 }
 
 /**
- * Schedule a personalized re-engagement notification ~22h from now. Skips
- * if Quiet Hours would fall on the trigger time — bumps to 9am local
- * instead so the player doesn't get pinged at 4am.
+ * Schedule the 4-nudge re-engagement queue. Each slot fires at
+ * RE_ENGAGEMENT_SLOTS_SEC[i] seconds after backgrounding (5h/10h/15h/20h),
+ * quiet-hours-shifted to 09:00 local if the natural fire time would land
+ * in 22:00-08:00. Cancels any prior queue first so we never double up.
+ *
+ * Slot 0 gets a state-personalized body (freshest signal). Slots 1-3
+ * rotate through prewritten flavor so the queue reads as a story.
  */
 export async function scheduleReengagement(state: GameState): Promise<void> {
   const N = getNotif();
@@ -224,18 +259,23 @@ export async function scheduleReengagement(state: GameState): Promise<void> {
   if (!state.account?.pushOptedIn) return;
   try {
     await ensureForegroundHandler(N);
-    // Cancel only the previous re-engagement, not the whole queue. This is
-    // the critical fix: cancelAllScheduledNotificationsAsync() was also
-    // killing the "Test push (5s)" notification any time the player
-    // backgrounded the app, which is exactly when they expected it to fire.
-    await N.cancelScheduledNotificationAsync(NOTIF_ID_REENGAGEMENT).catch(() => {});
-    const { title, body } = buildReengagementBody(state);
-    const delaySec = computeRespectfulDelay(RE_ENGAGEMENT_DELAY_SEC);
-    await N.scheduleNotificationAsync({
-      identifier: NOTIF_ID_REENGAGEMENT,
-      content: { title, body, sound: false },
-      trigger: { type: "timeInterval", seconds: delaySec, repeats: false } as never,
-    });
+    // Wipe any prior queue slots so we don't double up. Only touches OUR
+    // reengagement ids — test notifications and system pushes are safe.
+    for (let i = 0; i < RE_ENGAGEMENT_SLOTS_SEC.length; i++) {
+      await N.cancelScheduledNotificationAsync(reengagementId(i)).catch(() => {});
+    }
+    // Slot 0 body = personalized (freshest EQ/RP/capital signal).
+    const personalized = buildReengagementBody(state);
+    const delays = computeRespectfulSchedule(RE_ENGAGEMENT_SLOTS_SEC);
+    for (let i = 0; i < RE_ENGAGEMENT_SLOTS_SEC.length; i++) {
+      const title = SLOT_TITLES[i];
+      const body = i === 0 ? personalized.body : SLOT_BODIES[i];
+      await N.scheduleNotificationAsync({
+        identifier: reengagementId(i),
+        content: { title, body, sound: false },
+        trigger: { type: "timeInterval", seconds: delays[i], repeats: false } as never,
+      });
+    }
   } catch {
     /* noop */
   }
@@ -267,16 +307,3 @@ async function ensureForegroundHandler(N: NotifModule): Promise<void> {
   }
 }
 
-/** Shift the trigger out of the 22:00-08:00 quiet hours window. */
-function computeRespectfulDelay(baseDelaySec: number): number {
-  const fireTime = new Date(Date.now() + baseDelaySec * 1000);
-  const h = fireTime.getHours();
-  if (h >= QUIET_START_HOUR || h < QUIET_END_HOUR) {
-    // Push to 09:00 the same morning (or next morning if late evening).
-    const target = new Date(fireTime);
-    if (h >= QUIET_START_HOUR) target.setDate(target.getDate() + 1);
-    target.setHours(9, 0, 0, 0);
-    return Math.max(60, Math.floor((target.getTime() - Date.now()) / 1000));
-  }
-  return baseDelaySec;
-}

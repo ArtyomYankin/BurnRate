@@ -107,9 +107,17 @@ export interface SpotlightTargetActions {
 
 interface SpotlightProps {
   actions: SpotlightTargetActions;
+  /** Whether the spotlight should be active. Should be true only while the
+   *  home screen is mounted — every spotlight target lives on HomeScreen,
+   *  so leaving the spotlight active on other screens risks the tap-
+   *  forwarder firing when the player is trying to interact with, e.g., a
+   *  vignette in the inbox (the target rect may not have been cleared
+   *  yet by React's cleanup pass, or may be re-registered instantly on a
+   *  bounce navigation). Defaults to true for backwards compat. */
+  visible?: boolean;
 }
 
-export function TutorialSpotlight({ actions }: SpotlightProps) {
+export function TutorialSpotlight({ actions, visible = true }: SpotlightProps) {
   const step = useGame((s) => s.account.onboardingStep);
   const hydrated = useGame((s) => s.hydrated);
   const unreadCount = useGame((s) => s.persistent.unreadVignettes.length);
@@ -133,7 +141,7 @@ export function TutorialSpotlight({ actions }: SpotlightProps) {
     return () => loop.stop();
   }, [rect, pulse]);
 
-  if (!hydrated) return null;
+  if (!hydrated || !visible) return null;
   const targetKey = forceTargetForStep(step);
   if (!targetKey || !rect) return null;
   // Step 10 (Open INBOX) only makes sense when the inbox has unread items —

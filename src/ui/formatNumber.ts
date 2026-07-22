@@ -76,3 +76,14 @@ export function formatRate(d: Decimal): string {
 export function formatSupply(d: Decimal): string {
   return formatNumber(d, { digits: 2, allowFraction: true });
 }
+
+/** Player-facing $ formatter. 2026-07: reverted the log-compression
+ *  rework — it caused nonlinear-subtraction math bugs on the buy button
+ *  (compress(A)-compress(B) ≠ compress(A-B) → cost display drifted
+ *  from actual capital delta, and small purchases sometimes rounded to
+ *  $0). Now a straight passthrough to formatNumber. Kept as a distinct
+ *  entry point so the future can swap in a different presentation
+ *  layer without touching every call site again. */
+export function formatMoney(d: Decimal, opts?: { digits?: number }): string {
+  return formatNumber(d, opts);
+}

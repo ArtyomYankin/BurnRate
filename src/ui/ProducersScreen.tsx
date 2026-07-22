@@ -23,7 +23,7 @@ import {
 } from "../core/producers";
 import { getRound } from "../core/rounds";
 import * as audio from "../audio";
-import { PanelHelpModal, PanelHelpSection, PanelHint, PanelInfoButton } from "./PanelHelp";
+import { PanelHelpModal, PanelHint, PanelInfoButton } from "./PanelHelp";
 import { useStrings } from "../core/i18n";
 import { ChainId, ProducerDef } from "../core/types";
 import {
@@ -33,7 +33,7 @@ import {
   tokensPerSec,
   useGame,
 } from "../game/store";
-import { formatNumber, formatRate } from "./formatNumber";
+import { formatNumber, formatRate, formatMoney } from "./formatNumber";
 import { colors, fonts, PIXEL, spacing } from "./theme";
 
 interface Props {
@@ -226,7 +226,7 @@ export function ProducersScreen({ onBack, defaultChain, lockedChain }: Props) {
 
           {/* Global multiplier footer */}
           <View style={styles.footer}>
-            <Text style={styles.footerLabel}>GLOBAL MULTIPLIER</Text>
+            <Text style={styles.footerLabel}>{t.producers.globalMultiplier}</Text>
             <Text style={[styles.footerValue, { color: colors.tension_2 }]}>
               ×{formatNumber(agentMult)}
             </Text>
@@ -274,7 +274,7 @@ export function ProducersScreen({ onBack, defaultChain, lockedChain }: Props) {
 
           {/* Total chain supply footer */}
           <View style={styles.footer}>
-            <Text style={styles.footerLabel}>CHAIN OUTPUT</Text>
+            <Text style={styles.footerLabel}>{t.producers.chainOutput}</Text>
             <Text style={[styles.footerValue, { color: meta.color }]}>
               +{formatRate(totalTps)}
             </Text>
@@ -315,7 +315,7 @@ function AgentCard({
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={styles.cardTitleRow}>
           <Text style={[styles.cardTitle, { color: colors.ink }]} numberOfLines={1}>
-            {AUTONOMOUS_AGENT.name}
+            {(t.producers.names as Record<string, string>)[AUTONOMOUS_AGENT.id] ?? AUTONOMOUS_AGENT.name}
           </Text>
           <View style={[styles.upgradeBadge, { backgroundColor: colors.tension_hi }]}>
             <Text style={[styles.upgradeBadgeText, { color: colors.cream_hi }]}>
@@ -341,7 +341,7 @@ function AgentCard({
           { backgroundColor: affordable ? colors.tension_2 : colors.disabled },
         ]}
       >
-        <Text style={styles.buyText}>${formatNumber(cost)}</Text>
+        <Text style={styles.buyText}>${formatMoney(cost)}</Text>
       </Pressable>
     </View>
   );
@@ -418,7 +418,7 @@ function ProducerCard({
         <View style={{ flex: 1, minWidth: 0 }}>
           <View style={styles.cardTitleRow}>
             <Text style={[styles.cardTitle, { color: locked ? colors.muted : colors.ink }]} numberOfLines={1}>
-              {def.name}
+              {(t.producers.names as Record<string, string>)[def.id] ?? def.name}
             </Text>
             {upMult > 1 && (
               <View style={styles.upgradeBadge}>
@@ -468,7 +468,7 @@ function ProducerCard({
               { backgroundColor: affordable ? color : colors.disabled },
             ]}
           >
-            <Text style={styles.buyText}>${formatNumber(cost)}</Text>
+            <Text style={styles.buyText}>${formatMoney(cost)}</Text>
           </Pressable>
         )}
       </View>
@@ -515,12 +515,13 @@ function ScreenHeader({
 // of "Product" / Capital in the allocation strip) + big mono number. Reads
 // at a glance so the player can decide whether to scroll the tier list.
 function CapitalChip({ capital }: { capital: Decimal }) {
+  const t = useStrings();
   return (
     <View style={styles.capitalChip}>
       <View style={[styles.capitalSwatch, { backgroundColor: colors.terracotta }]} />
       <View style={{ alignItems: "flex-end" }}>
-        <Text style={styles.capitalLabel}>CAPITAL</Text>
-        <Text style={styles.capitalValue}>${formatNumber(capital)}</Text>
+        <Text style={styles.capitalLabel}>{t.producers.capitalHeader}</Text>
+        <Text style={styles.capitalValue}>${formatMoney(capital)}</Text>
       </View>
     </View>
   );
@@ -602,10 +603,13 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   capitalValue: {
-    fontFamily: fonts.bodyBold,
-    fontSize: 14,
+    // VT323 mono — capital chip in the header. PixelifySans Bold made
+    // values like "$268" / "$926" look mushy at this size. Bumped 14 →
+    // 16 to compensate for mono's narrower em.
+    fontFamily: fonts.mono,
+    fontSize: 16,
     color: colors.ink,
-    lineHeight: 14,
+    lineHeight: 16,
     marginTop: 1,
   },
   tabsRow: {

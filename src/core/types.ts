@@ -48,7 +48,7 @@ export interface Allocation {
 // single source of truth without circular imports.
 export interface ActiveEffectSerialized {
   id: string;
-  source: "training_run" | "slack_dm" | "board_memo" | "alignment_debt";
+  source: "training_run" | "slack_dm" | "board_memo" | "alignment_debt" | "companion";
   label: string;
   appliedAt: number;
   expiresAt: number;
@@ -81,6 +81,17 @@ export interface RunState {
    * disappear on prestige (because freshRunState() omits them).
    */
   sprintUpgradesUnlocked: string[];
+  /**
+   * 2026-07: per-level companion mini-interactions. Each companion has a
+   * cooldown → ready → reward cycle. `nextReadyAt` is a wall-clock ms
+   * timestamp: cooldown while now < nextReadyAt, ready window while
+   * now ∈ [nextReadyAt, nextReadyAt + WINDOW]. Tapping in the window
+   * awards a small token burst (~1% of round threshold) and resets the
+   * cooldown. Missed windows silently roll to the next cycle on the
+   * next player interaction — no lost rewards, no punishment. Optional
+   * so old saves stay compatible without a migration.
+   */
+  companionInteractions?: Record<string, { nextReadyAt: number }>;
 }
 
 export interface PersistentState {
@@ -128,6 +139,14 @@ export interface PersistentState {
   // compact one-shot hint on first visit; dismissing it pushes the key
   // here so it never re-appears. Persists across prestige.
   panelHintsSeen: string[];
+  /** Wall-clock ms of the last vignette that landed in the inbox. Used
+   *  to rate-limit unlock delivery: even if 4 predicates qualify at the
+   *  same tick (e.g. round-transition burst), we drip them out one at
+   *  a time so the player reads each on its own moment instead of
+   *  seeing an unread-count of 4 stack up in one second. Optional so
+   *  old saves default to "no throttle" (i.e., unlocks fire immediately
+   *  the first time each condition is met after upgrade). */
+  lastVignetteUnlockAt?: number;
 }
 
 export interface AccountState {

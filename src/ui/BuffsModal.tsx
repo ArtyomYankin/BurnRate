@@ -94,6 +94,7 @@ const SOURCE_LABEL: Record<ActiveEffectSerialized["source"], string> = {
   slack_dm:       "SLACK DM",
   board_memo:     "BOARD MEMO",
   alignment_debt: "DEBT EVENT",
+  companion:      "COMPANION",
 };
 
 function formatEffect(eff: ActiveEffectSerialized["effect"]): {

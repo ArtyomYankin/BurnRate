@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>BurnRate</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="BurnRate — idle satire of the AI race. iOS, Android, soon." />
+  <style>
+    :root {
+      --cream:      #F5EFE2;
+      --cream-hi:   #FBF7EC;
+      --cream-2:    #E8DCC0;
+      --cream-4:    #A89878;
+      --sage:       #7E9A85;
+      --sage-2:     #5C7560;
+      --terracotta: #C97B5B;
+      --ink:        #2A2A2A;
+      --muted:      #7C7C7C;
+      --gold:       #D4A24C;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--cream);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      line-height: 1.55;
+      min-height: 100vh;
+    }
+    .wrap {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 60px 24px 80px;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .brand-swatch {
+      width: 16px; height: 16px;
+      background: var(--gold);
+    }
+    h1 {
+      font-size: 32px;
+      margin: 0;
+      letter-spacing: 2px;
+      font-weight: 700;
+    }
+    .dot { color: var(--terracotta); }
+    .tagline {
+      font-size: 16px;
+      color: var(--muted);
+      margin: 8px 0 32px;
+    }
+    .lead {
+      font-size: 17px;
+      margin-bottom: 36px;
+    }
+    h2 {
+      font-size: 11px;
+      color: var(--sage-2);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin: 36px 0 12px;
+      border-bottom: 1px solid var(--cream-2);
+      padding-bottom: 6px;
+    }
+    .links {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .links a {
+      display: block;
+      padding: 14px 16px;
+      background: var(--cream-hi);
+      border: 1px solid var(--ink);
+      box-shadow: 0 2px 0 var(--ink);
+      text-decoration: none;
+      color: var(--ink);
+      font-weight: 600;
+      transition: transform 0.05s;
+    }
+    .links a:hover { transform: translateY(-1px); box-shadow: 0 3px 0 var(--ink); }
+    .links a:active { transform: translateY(1px); box-shadow: 0 1px 0 var(--ink); }
+    .links a small {
+      display: block;
+      font-weight: 400;
+      color: var(--muted);
+      margin-top: 2px;
+      font-size: 13px;
+    }
+    .footer {
+      margin-top: 56px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .footer a { color: var(--terracotta); }
+    .quote {
+      font-style: italic;
+      color: var(--sage-2);
+      border-left: 3px solid var(--sage);
+      padding-left: 12px;
+      margin: 24px 0;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">
+      <div class="brand-swatch"></div>
+      <h1>BURN<span class="dot">·</span>RATE</h1>
+    </div>
+    <div class="tagline">Idle satire of the AI race</div>
+
+    <p class="lead">
+      You have a garage, a hoodie, and an idea worth a billion dollars.
+      Scale a fictional AI startup from one engineer to a galactic-scale
+      model that quietly runs every dishwasher on the planet.
+    </p>
+
+    <div class="quote">
+      "The dishwasher on floor 4 has been autonomous for years.<br>
+      It is also the CEO."
+    </div>
+
+    <h2>For users</h2>
+    <div class="links">
+      <a href="./privacy-policy.html">
+        Privacy Policy
+        <small>We don't collect personal data. Saves are local.</small>
+      </a>
+      <a href="./support.html">
+        Support
+        <small>Email, FAQ, common issues.</small>
+      </a>
+    </div>
+
+    <h2>Coming soon</h2>
+    <p>BurnRate launches on iOS and Android. The page above will link to
+    the App Store and Play Store listings as soon as they're live.</p>
+
+    <div class="footer">
+      © Katarsis · Contact: <a href="mailto:projecthub47@outlook.com">projecthub47@outlook.com</a>
+    </div>
+  </div>
+</body>
+</html>

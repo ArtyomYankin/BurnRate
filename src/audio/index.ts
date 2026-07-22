@@ -167,6 +167,20 @@ export function play(cue: CueId) {
   }
 }
 
+/** Stop a one-shot SFX cue mid-playback. Use for sounds that are longer
+ *  than the in-game animation they accompany (e.g. tr_spin reel hum) — the
+ *  caller fires `play(cue)` at animation start, then `stop(cue)` when the
+ *  animation reaches its end so the audio doesn't bleed past the visual. */
+export function stop(cue: CueId) {
+  const p = sfxPlayers[cue];
+  if (!p) return;
+  try {
+    p.pause();
+  } catch {
+    /* swallow — same rationale as play() */
+  }
+}
+
 // ─── Music ───────────────────────────────────────────────────────────────
 
 /**

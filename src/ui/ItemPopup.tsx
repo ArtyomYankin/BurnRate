@@ -15,6 +15,22 @@ export interface PopupContent {
   owned?: number | string;
   rate?: string;
   kind: "producer" | "action" | "vignette" | "cosmetic";
+  /** Opt-in slim chip variant. Skips body/flavor and renders as a small
+   *  bottom bar with just the title + subtitle. Currently used by the
+   *  cat popup (cosmetic-only) + the pizza guy tip menu (with actions). */
+  compact?: boolean;
+  /** Optional action buttons shown at the bottom of a compact popup.
+   *  Ignored when compact is falsy. Used by the pizza guy tip menu to
+   *  offer TIP / SLICE / SKIP choices without leaving the scene. */
+  actions?: PopupAction[];
+}
+
+export interface PopupAction {
+  label: string;
+  onPress(): void;
+  disabled?: boolean;
+  /** Background color of the button. Defaults to sage. */
+  color?: string;
 }
 
 interface Props {
@@ -37,6 +53,7 @@ interface Props {
  */
 export function ItemPopup({ item, onClose, onAction }: Props) {
   if (!item) return null;
+  if (item.compact) return <CompactPopup item={item} onClose={onClose} />;
   const isProducer = item.kind === "producer";
   const isAction = item.kind === "action";
 
@@ -106,6 +123,133 @@ export function ItemPopup({ item, onClose, onAction }: Props) {
     </View>
   );
 }
+
+/**
+ * Slim single-row chip for `compact: true` popups (cat, and anything else
+ * we opt in later). Just title + subtitle + close ×. Sits in the same slot
+ * as the full card so screen real estate is preserved between tap types.
+ */
+function CompactPopup({ item, onClose }: { item: PopupContent; onClose(): void }) {
+  const hasActions = item.actions && item.actions.length > 0;
+  return (
+    <View style={compactStyles.wrap} pointerEvents="box-none">
+      <View style={compactStyles.chip}>
+        <View style={compactStyles.text}>
+          <Text style={compactStyles.title}>{item.title}</Text>
+          {item.subtitle ? (
+            <Text style={compactStyles.sub}>{item.subtitle}</Text>
+          ) : null}
+        </View>
+        <Pressable onPress={onClose} hitSlop={10} style={compactStyles.closeBtn}>
+          <Text style={compactStyles.closeX}>×</Text>
+        </Pressable>
+      </View>
+      {hasActions && (
+        <View style={compactStyles.actionsRow}>
+          {item.actions!.map((a, i) => (
+            <Pressy
+              key={`${a.label}-${i}`}
+              style={[
+                compactStyles.actionBtn,
+                { backgroundColor: a.disabled ? colors.disabled : (a.color ?? colors.sage) },
+              ]}
+              onPress={() => {
+                if (a.disabled) return;
+                a.onPress();
+                onClose();
+              }}
+            >
+              <Text style={compactStyles.actionText}>{a.label}</Text>
+            </Pressy>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+const compactStyles = StyleSheet.create({
+  wrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 110,
+    zIndex: 40,
+    // Center the chip horizontally so it doesn't stretch the whole width —
+    // shorter line-length, natural 2-line wrap.
+    alignItems: "center",
+  },
+  chip: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.cream_hi,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.ink,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: PIXEL },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 0,
+    minHeight: 40,
+    maxWidth: 220,
+  },
+  text: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  title: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 14,
+    color: colors.ink,
+    lineHeight: 17,
+  },
+  sub: {
+    fontFamily: fonts.displayRegular,
+    fontSize: 9,
+    color: colors.muted,
+    letterSpacing: 1,
+    marginTop: 2,
+    lineHeight: 12,
+  },
+  closeBtn: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  closeX: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 16,
+    color: colors.muted,
+    lineHeight: 16,
+  },
+  actionsRow: {
+    flexDirection: "row",
+    gap: 6,
+    marginTop: 4,
+    maxWidth: 260,
+    alignSelf: "center",
+  },
+  actionBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.ink,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: PIXEL },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  actionText: {
+    fontFamily: fonts.display,
+    fontSize: 10,
+    color: colors.cream,
+    letterSpacing: 1,
+  },
+});
 
 const styles = StyleSheet.create({
   wrap: {

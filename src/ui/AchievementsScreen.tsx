@@ -279,8 +279,13 @@ const styles = StyleSheet.create({
     lineHeight: 15,
   },
   cardDesc: {
-    fontFamily: fonts.body,
-    fontSize: 11,
+    // VT323 mono — descriptions are condition strings packed with numbers
+    // ("Own 500 producers", "Reach 1e17 tokens", "Close 10 rounds"). The
+    // earlier PixelifySans Regular made 2/6/8/9 mush together, which made
+    // the actual milestone unreadable. Bumped 11 → 13 to compensate for
+    // mono's narrower em.
+    fontFamily: fonts.mono,
+    fontSize: 13,
     lineHeight: 14,
     marginTop: 3,
   },
